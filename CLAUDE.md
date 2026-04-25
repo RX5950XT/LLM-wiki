@@ -1,0 +1,110 @@
+# LLM Wiki — CLAUDE.md
+
+## 專案概覽
+
+Karpathy-principle 知識庫工具。LLM 持續維護結構化 markdown wiki，內容本體存於使用者的 Google Drive，Supabase 存 metadata + Realtime 推送，BYO API key。
+
+**Monorepo 結構**：`apps/web`（Next.js 16）、`apps/android`（Kotlin + Jetpack Compose）、`packages/`（共用型別/prompts/drive-schema）
+
+## 技術棧
+
+| 層級 | 技術 |
+|------|------|
+| Web 前端 | Next.js 16 App Router, Tailwind CSS v4, shadcn/ui |
+| AI SDK | `ai@6` (`@ai-sdk/openai-compatible`) |
+| 資料庫 | Supabase Postgres + Realtime |
+| 儲存 | Google Drive API (`drive.file` scope) |
+| 認證 | Supabase Auth + Google OAuth |
+| 部署 | Vercel (Fluid Compute) |
+| 套件管理 | bun + Turborepo |
+
+## 重要 AI SDK v6 差異（避免踩坑）
+
+- `CoreMessage` → `ModelMessage`（從 `ai` 匯入）
+- `maxSteps: N` → `stopWhen: stepCountIs(N)`（需匯入 `stepCountIs` from `ai`）
+- `tool()` 的 `parameters:` → `inputSchema:`
+- `result.toDataStreamResponse()` → `result.toTextStreamResponse()`
+- `toolResult.result` → `toolResult.output`
+- **`ai/react` 路徑不存在**，不可 import `useChat`；改用自訂 fetch + ReadableStream hook
+
+## 重要 Supabase SSR v2 差異
+
+`setAll` callback 的型別：
+```typescript
+import type { CookieOptions } from '@supabase/ssr';
+type CookieEntry = { name: string; value: string; options: CookieOptions };
+// 不是 CookieOptionsWithName（缺少 value 欄位）
+```
+
+## 目錄速查
+
+```
+apps/web/
+├── app/
+│   ├── (auth)/         登入頁
+│   ├── w/[wid]/        Workspace 主介面（workspace-shell.tsx）
+│   ├── api/
+│   │   ├── ingest/     LLM ingest pipeline
+│   │   ├── query/      LLM query（streaming）
+│   │   ├── lint/       週期健康檢查
+│   │   └── workspaces/ pages CRUD
+│   └── settings/       LLM profile 管理
+├── components/
+│   ├── wiki/           PageTree, PageViewer, ConversationPanel
+│   └── workspace/      WorkspaceCard
+└── lib/
+    ├── ai/             LLM client factory + tools + ingest pipeline
+    ├── crypto/         AES-256-GCM API key 加解密
+    ├── drive/          Google Drive API wrapper
+    ├── supabase/       server/browser client factories
+    └── sync/           Realtime hook (useRealtimePages)
+
+packages/
+├── shared-types/       TS 型別（LLMProfile, WorkspacePage...）
+├── prompts/            ingest/query/lint.md prompt templates
+└── drive-schema/       Drive 資料夾路徑常量
+```
+
+## 核心 Karpathy 原則（設計決策基準）
+
+1. **Ingest = 編譯**：一次 ingest 應觸及 10-15 個既有頁面（cascading updates）
+2. **Query file back**：問答結果可一鍵存成 synthesis page
+3. **LLM 主宰 wiki**：使用者只導演，`updated_by='human'` 標記的頁面 LLM 不覆寫
+4. **Sources immutable**：ingest 完成後原始來源不可編輯
+5. **分離原則**：`wiki/`（LLM 寫）、`notes/`（使用者寫，LLM 唯讀）物理分離
+6. **Schema 共同演化**：`_schema/ingest.md` 等可由使用者修改
+7. **Conversation + Live Wiki**：右欄對話，左中欄 wiki 即時更新
+
+## 開發指令
+
+```bash
+bun run dev          # 啟動 Next.js 開發伺服器
+bun run typecheck    # 跑 Turborepo 全套型別檢查
+bun run build        # 建置
+```
+
+## 環境變數（.env.local）
+
+```
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
+ENCRYPTION_KEY=          # 32-byte hex，用於 AES-256-GCM 加密 API key
+GOOGLE_OAUTH_CLIENT_ID=
+GOOGLE_OAUTH_CLIENT_SECRET=
+```
+
+## 進度狀態
+
+- **Phase 0** ✅：Monorepo + Next.js 16 + Android 骨架 + Supabase schema
+- **Phase 1** 🚧（進行中）：Web MVP — Google OAuth + Drive 初始化 + Source ingest + Wiki 瀏覽 + Realtime 同步
+- **Phase 2** ⏳：Query + file back + 衝突解決
+- **Phase 3** ⏳：Android（Kotlin + Compose）
+- **Phase 4** ⏳：Lint + Graph view + 開源準備
+
+## 注意事項
+
+- Lucide v3 已移除 icon 的 `title` prop，改用 `aria-label`
+- `packages/prompts` 的 `.md` import 需要 `markdown.d.ts` 宣告 + next.config webpack `asset/source` loader
+- TypeScript target 需 ES2023（`Array.prototype.findLast`）
+- Google Drive scope 用 `drive.file`（只看到 App 建立的檔案）

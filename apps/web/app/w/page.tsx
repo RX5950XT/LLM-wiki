@@ -16,7 +16,7 @@ export default async function WorkspacesPage() {
     .order('created_at', { ascending: true });
 
   if (workspaces && workspaces.length > 0) {
-    redirect(`/w/${workspaces[0].id}`);
+    redirect(`/w/${workspaces[0]?.id ?? ''}`);
   }
 
   const t = await getTranslations('workspace');

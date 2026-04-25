@@ -1,6 +1,6 @@
-import ingestTemplate from '../templates/ingest.md' with { type: 'text' };
-import queryTemplate from '../templates/query.md' with { type: 'text' };
-import lintTemplate from '../templates/lint.md' with { type: 'text' };
+import ingestTemplate from '../templates/ingest.md';
+import queryTemplate from '../templates/query.md';
+import lintTemplate from '../templates/lint.md';
 
 export const DEFAULT_INGEST_PROMPT = ingestTemplate as unknown as string;
 export const DEFAULT_QUERY_PROMPT = queryTemplate as unknown as string;

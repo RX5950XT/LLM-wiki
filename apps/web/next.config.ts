@@ -10,6 +10,10 @@ const nextConfig: NextConfig = {
     '@llm-wiki/prompts',
     '@llm-wiki/drive-schema',
   ],
+  webpack(config) {
+    config.module.rules.push({ test: /\.md$/, type: 'asset/source' });
+    return config;
+  },
 };
 
 export default withNextIntl(nextConfig);

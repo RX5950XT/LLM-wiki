@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
+import { WorkspaceShell } from './workspace-shell';
 
 interface WorkspacePageProps {
   params: Promise<{ wid: string }>;
@@ -16,24 +17,24 @@ export default async function WorkspacePage({ params }: WorkspacePageProps) {
 
   const { data: workspace } = await supabase
     .from('workspaces')
-    .select('id, name, description')
+    .select('id, name')
     .eq('id', wid)
     .single();
 
   if (!workspace) redirect('/w');
 
+  const { data: pages } = await supabase
+    .from('pages')
+    .select('slug, title, kind, zone')
+    .eq('workspace_id', wid)
+    .order('updated_at', { ascending: false })
+    .limit(200);
+
   return (
-    <div
-      className="min-h-screen p-8"
-      style={{ background: 'var(--bg)', color: 'var(--fg)' }}
-    >
-      <h1 className="text-xl font-semibold">{workspace.name}</h1>
-      {workspace.description && (
-        <p className="mt-1 text-sm" style={{ color: 'var(--fg-muted)' }}>
-          {workspace.description}
-        </p>
-      )}
-      {/* TODO: split-pane workspace layout (Phase 1 Week 3) */}
-    </div>
+    <WorkspaceShell
+      workspaceId={workspace.id}
+      workspaceName={workspace.name}
+      initialPages={pages ?? []}
+    />
   );
 }
