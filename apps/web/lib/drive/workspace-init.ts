@@ -35,6 +35,23 @@ async function findOrCreateFolder(
   return folder.data.id!;
 }
 
+// drive.file scope cannot access 'root' — create at Drive root by omitting parents.
+async function findOrCreateRootFolder(
+  drive: drive_v3.Drive,
+  name: string,
+): Promise<string> {
+  const escapedName = name.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+  const q = `name='${escapedName}' and mimeType='application/vnd.google-apps.folder' and trashed=false`;
+  const res = await drive.files.list({ q, fields: 'files(id)', pageSize: 1 });
+  if (res.data.files?.length) return res.data.files[0]?.id ?? '';
+
+  const folder = await drive.files.create({
+    requestBody: { name, mimeType: 'application/vnd.google-apps.folder' },
+    fields: 'id',
+  });
+  return folder.data.id!;
+}
+
 /**
  * Creates the canonical Drive folder tree for a new workspace and seeds initial files.
  *
@@ -48,11 +65,9 @@ export async function initWorkspaceDrive(
   drive: drive_v3.Drive,
   workspaceId: string,
 ): Promise<InitResult> {
-  // Traverse to My Drive root
-  const rootRes = await drive.files.get({ fileId: 'root', fields: 'id' });
-  const myDriveId = rootRes.data.id!;
-
-  const appsId = await findOrCreateFolder(drive, 'Apps', myDriveId);
+  // drive.file scope forbids accessing 'root'; create top-level folder without a parent
+  // so Drive places it in My Drive automatically.
+  const appsId = await findOrCreateRootFolder(drive, 'Apps');
   const appRootId = await findOrCreateFolder(drive, APP_ROOT_NAME, appsId);
   const wsRootId = await findOrCreateFolder(drive, workspaceId, appRootId);
 
