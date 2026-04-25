@@ -96,6 +96,19 @@ export function buildWikiTools(ctx: ToolContext) {
           });
         }
 
+        // Sync page_links: delete old outgoing links, insert new ones
+        const toSlugs = extractWikiLinks(content_md);
+        await ctx.supabase
+          .from('page_links')
+          .delete()
+          .eq('workspace_id', ctx.workspaceId)
+          .eq('from_slug', slug);
+        if (toSlugs.length > 0) {
+          await ctx.supabase.from('page_links').insert(
+            toSlugs.map((to_slug) => ({ workspace_id: ctx.workspaceId, from_slug: slug, to_slug })),
+          );
+        }
+
         return { ok: true, slug, fileId };
       },
     }),
@@ -156,4 +169,18 @@ async function resolveParentFolder(ctx: ToolContext, slug: string): Promise<stri
 async function hashContent(content: string): Promise<string> {
   const { createHash } = await import('crypto');
   return createHash('sha256').update(content, 'utf8').digest('hex').slice(0, 16);
+}
+
+/**
+ * Parse [[wikilink]] and [[wikilink|display]] patterns from markdown content.
+ * Normalises targets to include .md extension.
+ */
+function extractWikiLinks(content: string): string[] {
+  const links = new Set<string>();
+  for (const match of content.matchAll(/\[\[([^\]]+)\]\]/g)) {
+    let slug = (match[1] ?? '').split('|')[0]!.trim();
+    if (slug && !slug.endsWith('.md')) slug += '.md';
+    if (slug) links.add(slug);
+  }
+  return Array.from(links);
 }

@@ -123,6 +123,7 @@ Query API 在文字串流結尾附加：
 - **Phase 2** ✅：Query file-back + Citation chips + Version staleness banner + Lock/unlock toggle
 - **Phase 3** ✅：Android（Kotlin + Compose）— Google Sign-In + Room 離線快取 + Markwon viewer + 分享意圖 + WorkManager 背景同步
 - **Phase 4** ✅：Lint + Graph view + 開源準備 — GraphView (react-force-graph-2d), Lint trigger button, README quick-start
+- **Phase 5** ✅：Graph edge fix + 開源收尾 — page_links 寫入、.env.example、vercel.json cron、CONTRIBUTING.md
 
 ## 目錄速查（Android）
 
@@ -164,8 +165,14 @@ apps/android/app/src/main/java/com/llmwiki/
 
 - `GraphView` (`components/wiki/graph-view.tsx`) 動態 import `react-force-graph-2d`（ESM + window）避免 SSR 問題
 - 從 Supabase `page_links` 表讀邊，`pages` 表讀節點（需 `createClient` from `@/lib/supabase/client`）
+- `page_links` 由 `writePage` 工具在每次寫頁面時自動同步（解析 `[[wikilink]]` → upsert）
 - workspace-shell 頂列 `GitFork` 按鈕切換，點節點後自動跳回 PageViewer
 - `FlaskConical` 按鈕觸發 POST `/api/lint`，完成後導航至當日 lint 報告頁（slug `_lint/YYYYMMDD.md`）
+
+## Vercel Cron
+
+`apps/web/vercel.json` 設定每週一 03:00 UTC 跑 GET `/api/lint/cron`。
+需在 Vercel 環境變數設定 `CRON_SECRET`，與 `.env.local` 一致。
 
 ## 其他注意事項
 

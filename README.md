@@ -66,6 +66,10 @@ bun run dev
    ```
 3. Run on device / emulator (API 26+)
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, project structure, and PR guidelines.
+
 ## License
 
 MIT
