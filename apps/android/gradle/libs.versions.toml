@@ -18,6 +18,8 @@ kotlinSerialization = "1.7.3"
 driveApiClient = "1.34.1.0"
 googleApiServicesDrive = "v3-rev20240730-2.0.0"
 
+markwon = "4.6.2"
+
 [libraries]
 # AndroidX Core
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -68,6 +70,11 @@ kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-
 # Google Drive API
 google-api-client-android = { group = "com.google.api-client", name = "google-api-client-android", version.ref = "driveApiClient" }
 google-api-services-drive = { group = "com.google.apis", name = "google-api-services-drive", version.ref = "googleApiServicesDrive" }
+
+# Markwon (markdown rendering)
+markwon-core = { group = "io.noties.markwon", name = "core", version.ref = "markwon" }
+markwon-strikethrough = { group = "io.noties.markwon", name = "ext-strikethrough", version.ref = "markwon" }
+markwon-tables = { group = "io.noties.markwon", name = "ext-tables", version.ref = "markwon" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

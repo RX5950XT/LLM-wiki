@@ -121,10 +121,44 @@ Query API 在文字串流結尾附加：
 - **Phase 0** ✅：Monorepo + Next.js 16 + Android 骨架 + Supabase schema
 - **Phase 1** ✅：Web MVP — Google OAuth + Drive 初始化 + Source ingest + Wiki 瀏覽 + Realtime 同步
 - **Phase 2** ✅：Query file-back + Citation chips + Version staleness banner + Lock/unlock toggle
-- **Phase 3** ⏳：Android（Kotlin + Compose）
+- **Phase 3** ✅：Android（Kotlin + Compose）— Google Sign-In + Room 離線快取 + Markwon viewer + 分享意圖 + WorkManager 背景同步
 - **Phase 4** ⏳：Lint + Graph view + 開源準備
 
-## 注意事項
+## 目錄速查（Android）
+
+```
+apps/android/app/src/main/java/com/llmwiki/
+├── MainActivity.kt           ← ACTION_SEND 分享意圖 → extractSharedUrl
+├── ui/
+│   ├── LlmWikiNavGraph.kt    ← auth → wiki 路由，傳遞 accountName + shareUrl
+│   ├── auth/
+│   │   ├── AuthViewModel.kt  ← CredentialManager + Supabase IDToken sign-in
+│   │   │                        AuthState.Success 含 workspaceId + accountName
+│   │   └── AuthScreen.kt
+│   └── wiki/
+│       ├── WikiScreen.kt     ← ModalNavigationDrawer + Scaffold + IngestUrlDialog
+│       ├── WikiViewModel.kt  ← pages Flow（Room）+ syncPages + ingestUrl (Ktor)
+│       │                        init() 後自動呼叫 SyncWorker.schedule()
+│       └── MarkdownViewer.kt ← Markwon + AndroidView(TextView)
+├── data/
+│   ├── DriveClient.kt        ← GoogleAccountCredential + Drive SDK
+│   ├── PageRepository.kt     ← syncPages（Supabase→Room）+ loadPageContent（Drive）
+│   ├── Models.kt             ← WorkspaceRow, PageRow（@Serializable）
+│   └── room/
+│       ├── AppDatabase.kt
+│       ├── PageDao.kt        ← observePages Flow + upsertAll
+│       └── PageEntity.kt     ← (workspace_id, slug) PK
+└── sync/
+    └── SyncWorker.kt         ← CoroutineWorker，schedule() 每小時 KEEP 策略
+
+```
+
+## Android 注意事項
+
+- `AuthState.Success` 含 `accountName`（Google 帳號 email），NavGraph 透過 `rememberSaveable` 保留後傳給 WikiViewModel
+- `Icons.AutoMirrored.Filled.List` 取代舊版 `Icons.Default.Menu`（Compose Material 3 方向性圖示）
+- `SyncWorker.schedule()` 使用 `ExistingPeriodicWorkPolicy.KEEP`（不重複排程同一個 workspace）
+- `ingestUrl()` 呼叫 Web app 的 `/api/ingest`，使用 Supabase session accessToken
 
 - Lucide v3 已移除 icon 的 `title` prop，改用 `aria-label`
 - `packages/prompts` 的 `.md` import 需要 `markdown.d.ts` 宣告 + next.config webpack `asset/source` loader
