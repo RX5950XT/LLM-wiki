@@ -1,0 +1,59 @@
+{
+  "common": {
+    "loading": "載入中...",
+    "error": "發生錯誤",
+    "save": "儲存",
+    "cancel": "取消",
+    "delete": "刪除",
+    "edit": "編輯",
+    "back": "返回"
+  },
+  "auth": {
+    "signIn": "使用 Google 登入",
+    "signOut": "登出",
+    "welcome": "歡迎使用 LLM Wiki",
+    "description": "你的個人 AI 知識庫。Wiki 內容儲存在你自己的 Google Drive 中。"
+  },
+  "workspace": {
+    "create": "建立工作區",
+    "name": "工作區名稱",
+    "description": "描述",
+    "noWorkspaces": "目前沒有工作區，建立一個開始使用吧。",
+    "switchWorkspace": "切換工作區"
+  },
+  "wiki": {
+    "index": "索引",
+    "log": "日誌",
+    "entities": "實體",
+    "concepts": "概念",
+    "summaries": "摘要",
+    "synthesis": "綜合",
+    "notes": "筆記",
+    "schema": "結構"
+  },
+  "ingest": {
+    "addSource": "新增來源",
+    "url": "網址",
+    "file": "檔案",
+    "ingestNow": "開始整合",
+    "running": "整合中...",
+    "done": "完成",
+    "failed": "失敗",
+    "touchedPages": "已更新 {count} 個頁面"
+  },
+  "query": {
+    "placeholder": "問問你的 Wiki 任何問題...",
+    "fileBack": "存成綜合頁面",
+    "sources": "來源"
+  },
+  "settings": {
+    "title": "設定",
+    "llmProfiles": "LLM 設定檔",
+    "addProfile": "新增 LLM 設定檔",
+    "profileName": "設定檔名稱",
+    "baseUrl": "基礎網址",
+    "apiKey": "API 金鑰",
+    "model": "模型",
+    "setDefault": "設為預設"
+  }
+}

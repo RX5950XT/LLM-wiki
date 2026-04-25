@@ -1,0 +1,89 @@
+/**
+ * LLM Wiki — base design tokens.
+ * Linear / Raycast-inspired: dark-first, single accent (soft violet), OKLCH color space.
+ *
+ * Consumed by apps/web via @import. Tailwind v4 reads @theme blocks here too.
+ */
+
+@theme {
+  /* Backgrounds */
+  --color-bg-dark: oklch(15% 0.015 250);
+  --color-bg-dark-2: oklch(18% 0.015 250);
+  --color-bg-light: oklch(98% 0.005 90);
+  --color-bg-light-2: oklch(96% 0.005 90);
+
+  /* Text */
+  --color-fg-dark: oklch(92% 0.01 250);
+  --color-fg-dark-muted: oklch(65% 0.01 250);
+  --color-fg-light: oklch(20% 0.015 250);
+  --color-fg-light-muted: oklch(45% 0.015 250);
+
+  /* Accent (soft violet, applies to both themes) */
+  --color-accent: oklch(70% 0.15 295);
+  --color-accent-muted: oklch(70% 0.15 295 / 0.4);
+  --color-accent-glow: oklch(70% 0.15 295 / 0.18);
+
+  /* Borders */
+  --color-border-dark: oklch(25% 0.01 250);
+  --color-border-light: oklch(90% 0.005 90);
+
+  /* Typography */
+  --font-sans: 'Geist', 'Noto Sans TC', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --font-serif: 'Source Serif 4', 'Source Han Serif TC', ui-serif, Georgia, serif;
+
+  /* Motion */
+  --transition-default: 200ms ease-out;
+}
+
+:root {
+  color-scheme: dark light;
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Default (dark) */
+:root,
+[data-theme='dark'] {
+  --bg: var(--color-bg-dark);
+  --bg-2: var(--color-bg-dark-2);
+  --fg: var(--color-fg-dark);
+  --fg-muted: var(--color-fg-dark-muted);
+  --border: var(--color-border-dark);
+}
+
+[data-theme='light'] {
+  --bg: var(--color-bg-light);
+  --bg-2: var(--color-bg-light-2);
+  --fg: var(--color-fg-light);
+  --fg-muted: var(--color-fg-light-muted);
+  --border: var(--color-border-light);
+}
+
+html,
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans);
+}
+
+/* LLM-generated content marker */
+.llm-content {
+  border-left: 2px solid var(--color-accent-muted);
+  padding-left: 1rem;
+  background: linear-gradient(
+    to right,
+    var(--color-accent-glow),
+    transparent 20%
+  );
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
