@@ -76,3 +76,31 @@ export async function findFile(
   const res = await drive.files.list({ q, fields: 'files(id)', pageSize: 1 });
   return res.data.files?.[0]?.id ?? null;
 }
+
+/**
+ * Ensure a sub-folder exists inside a parent; creates it if missing.
+ * Returns the folder ID.
+ */
+export async function ensureFolder(
+  drive: drive_v3.Drive,
+  name: string,
+  parentId: string,
+): Promise<string> {
+  const existing = await findFile(
+    drive,
+    name,
+    parentId,
+    'application/vnd.google-apps.folder',
+  );
+  if (existing) return existing;
+
+  const res = await drive.files.create({
+    requestBody: {
+      name,
+      mimeType: 'application/vnd.google-apps.folder',
+      parents: [parentId],
+    },
+    fields: 'id',
+  });
+  return res.data.id!;
+}

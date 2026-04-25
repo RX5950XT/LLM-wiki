@@ -10,6 +10,8 @@ interface ToolContext {
   workspaceId: string;
   /** Root wiki folder ID in Drive */
   wikiFolderId: string;
+  /** Optional callback invoked each time LLM reads a page slug */
+  onPageRead?: (slug: string) => void;
 }
 
 export function buildWikiTools(ctx: ToolContext) {
@@ -18,6 +20,7 @@ export function buildWikiTools(ctx: ToolContext) {
       description: 'Read a wiki page by its slug (e.g. "index.md", "entities/karpathy.md")',
       inputSchema: z.object({ slug: z.string().describe('Page slug') }),
       execute: async ({ slug }: { slug: string }) => {
+        ctx.onPageRead?.(slug);
         const { data: page } = await ctx.supabase
           .from('pages')
           .select('drive_file_id, title')

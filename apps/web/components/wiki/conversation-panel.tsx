@@ -1,21 +1,31 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Send, Bookmark, Loader2 } from 'lucide-react';
+import { Send, Bookmark, Loader2, CheckCircle, ChevronRight } from 'lucide-react';
+import { parseCitations } from '@/lib/ai/citation-parser';
 
 interface Message {
   id: string;
   role: 'user' | 'assistant';
   content: string;
+  /** Slugs of wiki pages the LLM referenced to produce this answer */
+  citedSlugs?: string[];
 }
 
 interface ConversationPanelProps {
   workspaceId: string;
   onSourceAdded?: () => void;
   onPageWritten?: (slug: string) => void;
+  /** Called when user wants to view a wiki page */
+  onPageClick?: (slug: string) => void;
 }
 
-export function ConversationPanel({ workspaceId, onSourceAdded, onPageWritten }: ConversationPanelProps) {
+export function ConversationPanel({
+  workspaceId,
+  onSourceAdded,
+  onPageWritten,
+  onPageClick,
+}: ConversationPanelProps) {
   const [ingestUrl, setIngestUrl] = useState('');
   const [ingesting, setIngesting] = useState(false);
   const [ingestError, setIngestError] = useState<string | null>(null);
@@ -25,6 +35,7 @@ export function ConversationPanel({ workspaceId, onSourceAdded, onPageWritten }:
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
+  const [savedSlug, setSavedSlug] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -44,6 +55,7 @@ export function ConversationPanel({ workspaceId, onSourceAdded, onPageWritten }:
       setInput('');
       setIsLoading(true);
       setError(null);
+      setSavedSlug(null);
 
       try {
         const res = await fetch('/api/query', {
@@ -60,17 +72,31 @@ export function ConversationPanel({ workspaceId, onSourceAdded, onPageWritten }:
 
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
+        let raw = '';
 
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
           const chunk = decoder.decode(value, { stream: true });
+          raw += chunk;
+
+          // Show only the text portion while streaming (strip citation block if already present)
+          const displayText = raw.includes('\x00CITATIONS\x00')
+            ? raw.slice(0, raw.lastIndexOf('\x00CITATIONS\x00'))
+            : raw;
+
           setMessages((prev) =>
-            prev.map((m) =>
-              m.id === assistantId ? { ...m, content: m.content + chunk } : m,
-            ),
+            prev.map((m) => (m.id === assistantId ? { ...m, content: displayText } : m)),
           );
         }
+
+        // After stream ends, parse citations from full raw response
+        const { text, citedSlugs } = parseCitations(raw);
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId ? { ...m, content: text, citedSlugs } : m,
+          ),
+        );
       } catch (err) {
         setError(err instanceof Error ? err : new Error('Unknown error'));
         setMessages((prev) => prev.filter((m) => m.id !== assistantId));
@@ -105,19 +131,32 @@ export function ConversationPanel({ workspaceId, onSourceAdded, onPageWritten }:
     }
   };
 
-  const handleFileBack = async (message: string) => {
-    const res = await fetch('/api/ingest', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        kind: 'text',
-        title: 'Query synthesis',
-        content: message,
-        workspace_id: workspaceId,
-      }),
-    });
-    if (res.ok) onPageWritten?.('synthesis');
-  };
+  const handleFileBack = useCallback(
+    async (message: Message) => {
+      if (!message.citedSlugs) return;
+      const lastUser = [...messages]
+        .reverse()
+        .find((m) => m.role === 'user' && messages.indexOf(m) < messages.indexOf(message));
+      const question = lastUser?.content ?? 'Query';
+
+      const res = await fetch(`/api/workspaces/${workspaceId}/synthesis`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          question,
+          answer: message.content,
+          cited_slugs: message.citedSlugs,
+        }),
+      });
+
+      if (res.ok) {
+        const { slug } = await res.json();
+        setSavedSlug(slug);
+        onPageWritten?.(slug);
+      }
+    },
+    [messages, workspaceId, onPageWritten],
+  );
 
   return (
     <div
@@ -137,7 +176,11 @@ export function ConversationPanel({ workspaceId, onSourceAdded, onPageWritten }:
             onChange={(e) => setIngestUrl(e.target.value)}
             placeholder="Paste URL to ingest…"
             className="flex-1 rounded-md border px-3 py-1.5 text-xs outline-none"
-            style={{ background: 'var(--bg-2)', borderColor: 'var(--border)', color: 'var(--fg)' }}
+            style={{
+              background: 'var(--bg-2)',
+              borderColor: 'var(--border)',
+              color: 'var(--fg)',
+            }}
             disabled={ingesting}
           />
           <button
@@ -161,6 +204,28 @@ export function ConversationPanel({ workspaceId, onSourceAdded, onPageWritten }:
         )}
       </form>
 
+      {/* Saved synthesis notification */}
+      {savedSlug && (
+        <div
+          className="flex items-center justify-between border-b px-4 py-2"
+          style={{ borderColor: 'var(--border)', background: 'var(--color-accent-glow)' }}
+        >
+          <span className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--color-accent)' }}>
+            <CheckCircle size={12} /> Saved as synthesis page
+          </span>
+          <button
+            onClick={() => {
+              onPageClick?.(savedSlug);
+              setSavedSlug(null);
+            }}
+            className="flex items-center gap-0.5 text-xs transition-opacity hover:opacity-70"
+            style={{ color: 'var(--color-accent)' }}
+          >
+            View <ChevronRight size={12} />
+          </button>
+        </div>
+      )}
+
       {/* Chat messages */}
       <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
         {messages.length === 0 && (
@@ -180,13 +245,38 @@ export function ConversationPanel({ workspaceId, onSourceAdded, onPageWritten }:
               style={{
                 background: m.role === 'user' ? 'var(--color-accent-muted)' : 'var(--bg-2)',
                 color: 'var(--fg)',
+                whiteSpace: 'pre-wrap',
               }}
             >
               {m.content}
             </div>
-            {m.role === 'assistant' && (
+
+            {/* Citations */}
+            {m.role === 'assistant' && m.citedSlugs && m.citedSlugs.length > 0 && (
+              <div className="flex flex-wrap gap-1 pt-0.5">
+                {m.citedSlugs.map((slug) => (
+                  <button
+                    key={slug}
+                    onClick={() => onPageClick?.(slug)}
+                    className="rounded px-1.5 py-0.5 text-xs transition-opacity hover:opacity-70"
+                    style={{
+                      background: 'var(--color-accent-glow)',
+                      color: 'var(--color-accent)',
+                      border: '1px solid var(--color-accent)',
+                      opacity: 0.9,
+                    }}
+                    title={slug}
+                  >
+                    {slug.split('/').at(-1)?.replace('.md', '') ?? slug}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* File-back button (only for completed assistant messages with citations) */}
+            {m.role === 'assistant' && m.citedSlugs !== undefined && m.content.length > 0 && (
               <button
-                onClick={() => handleFileBack(m.content)}
+                onClick={() => handleFileBack(m)}
                 className="flex items-center gap-1 text-xs transition-opacity hover:opacity-70"
                 style={{ color: 'var(--fg-muted)' }}
               >
@@ -220,7 +310,11 @@ export function ConversationPanel({ workspaceId, onSourceAdded, onPageWritten }:
             onChange={(e) => setInput(e.target.value)}
             placeholder="Ask your wiki anything…"
             className="flex-1 rounded-md border px-3 py-2 text-sm outline-none"
-            style={{ background: 'var(--bg-2)', borderColor: 'var(--border)', color: 'var(--fg)' }}
+            style={{
+              background: 'var(--bg-2)',
+              borderColor: 'var(--border)',
+              color: 'var(--fg)',
+            }}
             disabled={isLoading}
           />
           <button

@@ -25,22 +25,40 @@ export function WorkspaceShell({ workspaceId, workspaceName, initialPages }: Wor
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
   const [pages, setPages] = useState(initialPages);
+  /**
+   * Incremented each time Realtime notifies us that the *currently viewed* page
+   * has been updated. PageViewer watches this to show the staleness banner.
+   */
+  const [viewerRefreshKey, setViewerRefreshKey] = useState(0);
 
-  const handlePageWritten = useCallback((slug: string) => {
-    setActivePage(slug);
-    // Refresh page list
+  const refreshPageList = useCallback(() => {
     fetch(`/api/workspaces/${workspaceId}/pages`)
       .then((r) => r.json())
       .then((d) => d.pages && setPages(d.pages));
   }, [workspaceId]);
 
-  // Realtime: refresh page list + re-render viewer when LLM (or another device) writes a page
-  const handleRealtimeChange = useCallback(({ slug }: PageChangedEvent) => {
-    fetch(`/api/workspaces/${workspaceId}/pages`)
-      .then((r) => r.json())
-      .then((d) => d.pages && setPages(d.pages));
-    setActivePage((current) => (current === slug ? slug : current));
-  }, [workspaceId]);
+  const handlePageWritten = useCallback(
+    (slug: string) => {
+      setActivePage(slug);
+      refreshPageList();
+    },
+    [refreshPageList],
+  );
+
+  // Realtime: refresh page list; signal PageViewer when the active page changes
+  const handleRealtimeChange = useCallback(
+    ({ slug }: PageChangedEvent) => {
+      refreshPageList();
+      setActivePage((current) => {
+        if (current === slug) {
+          // Increment refresh key to trigger staleness banner in PageViewer
+          setViewerRefreshKey((k) => k + 1);
+        }
+        return current;
+      });
+    },
+    [refreshPageList],
+  );
 
   useRealtimePages(workspaceId, handleRealtimeChange);
 
@@ -80,7 +98,7 @@ export function WorkspaceShell({ workspaceId, workspaceName, initialPages }: Wor
         {/* Left: page tree */}
         {leftOpen && (
           <div
-            className="w-60 shrink-0 border-r overflow-hidden"
+            className="w-60 shrink-0 overflow-hidden border-r"
             style={{ borderColor: 'var(--border)', background: 'var(--bg-2)' }}
           >
             <PageTree
@@ -98,6 +116,7 @@ export function WorkspaceShell({ workspaceId, workspaceName, initialPages }: Wor
             workspaceId={workspaceId}
             slug={activePage}
             onWikiLinkClick={setActivePage}
+            refreshKey={viewerRefreshKey}
           />
         </div>
 
@@ -106,8 +125,9 @@ export function WorkspaceShell({ workspaceId, workspaceName, initialPages }: Wor
           <div className="w-96 shrink-0 overflow-hidden">
             <ConversationPanel
               workspaceId={workspaceId}
-              onSourceAdded={() => {}}
+              onSourceAdded={refreshPageList}
               onPageWritten={handlePageWritten}
+              onPageClick={setActivePage}
             />
           </div>
         )}

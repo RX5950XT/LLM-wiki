@@ -94,11 +94,33 @@ GOOGLE_OAUTH_CLIENT_ID=
 GOOGLE_OAUTH_CLIENT_SECRET=
 ```
 
+## 目錄速查（補充）
+
+```
+apps/web/
+├── app/api/
+│   ├── workspaces/[id]/synthesis/  ← POST: 儲存 Q&A 為 synthesis page
+│   └── pages/[wid]/[...slug]/lock/ ← PATCH: 切換 locked_by_human
+├── components/wiki/
+│   ├── conversation-panel.tsx  ← 含 citation chips + file-back 通知
+│   └── page-viewer.tsx         ← 含 staleness banner + lock toggle
+└── lib/ai/
+    └── citation-parser.ts      ← 解析串流尾端的 \x00CITATIONS\x00 block
+```
+
+## Citation 串流協定
+
+Query API 在文字串流結尾附加：
+```
+\x00CITATIONS\x00["entities/karpathy.md","concepts/rag.md"]
+```
+前端用 `citation-parser.ts` 的 `parseCitations(raw)` 解析，分離 text 和 citedSlugs。
+
 ## 進度狀態
 
 - **Phase 0** ✅：Monorepo + Next.js 16 + Android 骨架 + Supabase schema
-- **Phase 1** 🚧（進行中）：Web MVP — Google OAuth + Drive 初始化 + Source ingest + Wiki 瀏覽 + Realtime 同步
-- **Phase 2** ⏳：Query + file back + 衝突解決
+- **Phase 1** ✅：Web MVP — Google OAuth + Drive 初始化 + Source ingest + Wiki 瀏覽 + Realtime 同步
+- **Phase 2** ✅：Query file-back + Citation chips + Version staleness banner + Lock/unlock toggle
 - **Phase 3** ⏳：Android（Kotlin + Compose）
 - **Phase 4** ⏳：Lint + Graph view + 開源準備
 

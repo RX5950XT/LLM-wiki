@@ -8,12 +8,15 @@ import { createLLMClient } from '@/lib/ai/client';
 import { buildWikiTools } from '@/lib/ai/tools';
 import { DEFAULT_PROMPTS } from '@llm-wiki/prompts';
 
+export const maxDuration = 120;
+
 export async function POST(request: NextRequest) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
   if (!user) return new Response('Unauthorized', { status: 401 });
 
-  // AI SDK useChat sends: { messages: ModelMessage[], workspace_id: string }
   const body = await request.json().catch(() => null);
   const workspaceIdResult = z.string().uuid().safeParse(body?.workspace_id);
   const messages: ModelMessage[] = Array.isArray(body?.messages) ? body.messages : [];
@@ -22,7 +25,8 @@ export async function POST(request: NextRequest) {
   }
   const workspace_id = workspaceIdResult.data;
   const lastUserMessage = [...messages].reverse().find((m) => m.role === 'user');
-  const question = typeof lastUserMessage?.content === 'string' ? lastUserMessage.content : '';
+  const question =
+    typeof lastUserMessage?.content === 'string' ? lastUserMessage.content : '';
 
   const { data: workspace } = await supabase
     .from('workspaces')
@@ -50,12 +54,18 @@ export async function POST(request: NextRequest) {
   const drive = createDriveClient(accessToken);
 
   const wikiFolderId = await findFile(
-    drive, 'wiki', workspace.drive_folder_id, 'application/vnd.google-apps.folder',
+    drive,
+    'wiki',
+    workspace.drive_folder_id,
+    'application/vnd.google-apps.folder',
   );
   if (!wikiFolderId) return new Response('Wiki folder not found', { status: 500 });
 
   const schemaFolderId = await findFile(
-    drive, '_schema', workspace.drive_folder_id, 'application/vnd.google-apps.folder',
+    drive,
+    '_schema',
+    workspace.drive_folder_id,
+    'application/vnd.google-apps.folder',
   );
   let systemPrompt = DEFAULT_PROMPTS.query;
   if (schemaFolderId) {
@@ -63,7 +73,16 @@ export async function POST(request: NextRequest) {
     if (queryFileId) systemPrompt = await readDriveFile(drive, queryFileId);
   }
 
-  const tools = buildWikiTools({ supabase, drive, workspaceId: workspace_id, wikiFolderId });
+  // Track pages read during this query (for citations)
+  const readSlugs = new Set<string>();
+  const tools = buildWikiTools({
+    supabase,
+    drive,
+    workspaceId: workspace_id,
+    wikiFolderId,
+    onPageRead: (slug: string) => readSlugs.add(slug),
+  });
+
   const model = createLLMClient(profile as Parameters<typeof createLLMClient>[0]);
 
   const { data: indexPage } = await supabase
@@ -92,14 +111,40 @@ export async function POST(request: NextRequest) {
     tools,
     stopWhen: stepCountIs(15),
     onFinish: async ({ text }) => {
+      const citations = Array.from(readSlugs).filter((s) => s !== 'index.md');
       await supabase.from('logs').insert({
         workspace_id,
         kind: 'query',
         summary: String(question).slice(0, 120),
-        payload: { question: String(question), answer_preview: text.slice(0, 200) },
+        payload: {
+          question: String(question),
+          answer_preview: text.slice(0, 200),
+          cited_slugs: citations,
+        },
       });
     },
   });
 
-  return result.toTextStreamResponse();
+  // Custom streaming response: plain text + trailing citation JSON block
+  const textStream = result.textStream;
+  const encoder = new TextEncoder();
+
+  const stream = new ReadableStream({
+    async start(controller) {
+      for await (const chunk of textStream) {
+        controller.enqueue(encoder.encode(chunk));
+      }
+      // Append citation metadata after text ends
+      const citations = Array.from(readSlugs).filter((s) => s !== 'index.md');
+      if (citations.length > 0) {
+        const citationBlock = `\n\x00CITATIONS\x00${JSON.stringify(citations)}`;
+        controller.enqueue(encoder.encode(citationBlock));
+      }
+      controller.close();
+    },
+  });
+
+  return new Response(stream, {
+    headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+  });
 }
