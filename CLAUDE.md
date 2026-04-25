@@ -122,7 +122,7 @@ Query API 在文字串流結尾附加：
 - **Phase 1** ✅：Web MVP — Google OAuth + Drive 初始化 + Source ingest + Wiki 瀏覽 + Realtime 同步
 - **Phase 2** ✅：Query file-back + Citation chips + Version staleness banner + Lock/unlock toggle
 - **Phase 3** ✅：Android（Kotlin + Compose）— Google Sign-In + Room 離線快取 + Markwon viewer + 分享意圖 + WorkManager 背景同步
-- **Phase 4** ⏳：Lint + Graph view + 開源準備
+- **Phase 4** ✅：Lint + Graph view + 開源準備 — GraphView (react-force-graph-2d), Lint trigger button, README quick-start
 
 ## 目錄速查（Android）
 
@@ -159,6 +159,15 @@ apps/android/app/src/main/java/com/llmwiki/
 - `Icons.AutoMirrored.Filled.List` 取代舊版 `Icons.Default.Menu`（Compose Material 3 方向性圖示）
 - `SyncWorker.schedule()` 使用 `ExistingPeriodicWorkPolicy.KEEP`（不重複排程同一個 workspace）
 - `ingestUrl()` 呼叫 Web app 的 `/api/ingest`，使用 Supabase session accessToken
+
+## Graph View 注意事項
+
+- `GraphView` (`components/wiki/graph-view.tsx`) 動態 import `react-force-graph-2d`（ESM + window）避免 SSR 問題
+- 從 Supabase `page_links` 表讀邊，`pages` 表讀節點（需 `createClient` from `@/lib/supabase/client`）
+- workspace-shell 頂列 `GitFork` 按鈕切換，點節點後自動跳回 PageViewer
+- `FlaskConical` 按鈕觸發 POST `/api/lint`，完成後導航至當日 lint 報告頁（slug `_lint/YYYYMMDD.md`）
+
+## 其他注意事項
 
 - Lucide v3 已移除 icon 的 `title` prop，改用 `aria-label`
 - `packages/prompts` 的 `.md` import 需要 `markdown.d.ts` 宣告 + next.config webpack `asset/source` loader

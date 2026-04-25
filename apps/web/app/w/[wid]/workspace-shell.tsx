@@ -1,10 +1,11 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-import { PanelLeft, PanelRight } from 'lucide-react';
+import { PanelLeft, PanelRight, GitFork, FlaskConical } from 'lucide-react';
 import { PageTree } from '@/components/wiki/page-tree';
 import { PageViewer } from '@/components/wiki/page-viewer';
 import { ConversationPanel } from '@/components/wiki/conversation-panel';
+import { GraphView } from '@/components/wiki/graph-view';
 import { useRealtimePages, type PageChangedEvent } from '@/lib/sync/realtime';
 
 interface PageEntry {
@@ -24,6 +25,8 @@ export function WorkspaceShell({ workspaceId, workspaceName, initialPages }: Wor
   const [activePage, setActivePage] = useState<string>('index.md');
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
+  const [showGraph, setShowGraph] = useState(false);
+  const [lintRunning, setLintRunning] = useState(false);
   const [pages, setPages] = useState(initialPages);
   /**
    * Incremented each time Realtime notifies us that the *currently viewed* page
@@ -62,6 +65,24 @@ export function WorkspaceShell({ workspaceId, workspaceName, initialPages }: Wor
 
   useRealtimePages(workspaceId, handleRealtimeChange);
 
+  const runLint = useCallback(async () => {
+    setLintRunning(true);
+    try {
+      await fetch('/api/lint', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workspace_id: workspaceId }),
+      });
+      // Lint writes a report page; refresh list then navigate to it
+      refreshPageList();
+      // Navigate to today's lint report (slug pattern from lint API)
+      const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      setActivePage(`_lint/${today}.md`);
+    } finally {
+      setLintRunning(false);
+    }
+  }, [workspaceId, refreshPageList]);
+
   return (
     <div
       className="flex h-screen flex-col"
@@ -83,14 +104,40 @@ export function WorkspaceShell({ workspaceId, workspaceName, initialPages }: Wor
           </button>
           <span className="text-sm font-medium">{workspaceName}</span>
         </div>
-        <button
-          onClick={() => setRightOpen((o) => !o)}
-          className="rounded p-1 transition-opacity hover:opacity-70"
-          style={{ color: 'var(--fg-muted)' }}
-          aria-label="Toggle conversation"
-        >
-          <PanelRight size={16} />
-        </button>
+
+        <div className="flex items-center gap-2">
+          {/* Graph view toggle */}
+          <button
+            onClick={() => setShowGraph((g) => !g)}
+            className="rounded p-1 transition-opacity hover:opacity-70"
+            style={{ color: showGraph ? 'var(--accent)' : 'var(--fg-muted)' }}
+            aria-label="Toggle graph view"
+            title="Graph view"
+          >
+            <GitFork size={16} />
+          </button>
+
+          {/* Lint trigger */}
+          <button
+            onClick={runLint}
+            disabled={lintRunning}
+            className="rounded p-1 transition-opacity hover:opacity-70 disabled:opacity-40"
+            style={{ color: 'var(--fg-muted)' }}
+            aria-label="Run lint"
+            title={lintRunning ? 'Lint running…' : 'Run wiki lint'}
+          >
+            <FlaskConical size={16} />
+          </button>
+
+          <button
+            onClick={() => setRightOpen((o) => !o)}
+            className="rounded p-1 transition-opacity hover:opacity-70"
+            style={{ color: 'var(--fg-muted)' }}
+            aria-label="Toggle conversation"
+          >
+            <PanelRight size={16} />
+          </button>
+        </div>
       </header>
 
       {/* Main three-panel layout */}
@@ -110,14 +157,25 @@ export function WorkspaceShell({ workspaceId, workspaceName, initialPages }: Wor
           </div>
         )}
 
-        {/* Center: wiki page viewer */}
+        {/* Center: wiki page viewer OR graph view */}
         <div className="flex-1 overflow-hidden">
-          <PageViewer
-            workspaceId={workspaceId}
-            slug={activePage}
-            onWikiLinkClick={setActivePage}
-            refreshKey={viewerRefreshKey}
-          />
+          {showGraph ? (
+            <GraphView
+              workspaceId={workspaceId}
+              activePage={activePage}
+              onNodeClick={(slug) => {
+                setActivePage(slug);
+                setShowGraph(false);
+              }}
+            />
+          ) : (
+            <PageViewer
+              workspaceId={workspaceId}
+              slug={activePage}
+              onWikiLinkClick={setActivePage}
+              refreshKey={viewerRefreshKey}
+            />
+          )}
         </div>
 
         {/* Right: conversation + ingest */}

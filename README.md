@@ -28,7 +28,43 @@ Most "chat with your documents" tools retrieve fragments on every query and forg
 
 ## Status
 
-🚧 Under active development. See `plans/` for the architecture plan.
+| Phase | Status | Description |
+|-------|--------|-------------|
+| 0 — Scaffold | ✅ | Monorepo, Next.js 16, Android skeleton, Supabase schema |
+| 1 — Web MVP | ✅ | Google OAuth + Drive init, source ingest, wiki browse, Realtime |
+| 2 — Query + File-back | ✅ | Chat interface, citation chips, synthesis pages, lock toggle |
+| 3 — Android | ✅ | Kotlin + Compose, Room offline cache, share intent, WorkManager sync |
+| 4 — Lint + Graph | ✅ | Force-directed graph view, wiki lint via LLM, weekly cron |
+
+## Quick start
+
+### Prerequisites
+- Node.js 22 / Bun
+- Supabase project (free tier is enough)
+- Google Cloud project with OAuth client + Drive API enabled
+
+### Web
+
+```bash
+git clone https://github.com/your-org/llm-wiki
+cd llm-wiki
+bun install
+cp apps/web/.env.example apps/web/.env.local
+# fill in SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY,
+#          ENCRYPTION_KEY, GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET
+bun run dev
+```
+
+### Android
+
+1. Open `apps/android` in Android Studio
+2. Create `local.properties` with:
+   ```
+   SUPABASE_URL=...
+   SUPABASE_ANON_KEY=...
+   GOOGLE_CLIENT_ID=...
+   ```
+3. Run on device / emulator (API 26+)
 
 ## License
 
