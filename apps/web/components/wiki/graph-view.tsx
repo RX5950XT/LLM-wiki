@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { createClient } from '@/lib/supabase/client';
 
 interface GraphNode {
@@ -82,8 +82,10 @@ export function GraphView({ workspaceId, activePage, onNodeClick }: GraphViewPro
     if (loading || !containerRef.current || graphData.nodes.length === 0) return;
 
     let mounted = true;
-    let ForceGraph: ReturnType<typeof import('react-force-graph-2d')>['default'] | null = null;
-    let root: { unmount: () => void } | null = null;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let ForceGraph: React.ComponentType<any> | null = null;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let root: { render: (el: any) => void; unmount: () => void } | null = null;
 
     (async () => {
       try {
