@@ -111,18 +111,20 @@ export async function POST(request: NextRequest) {
     })
     .select('id')
     .single();
+  if (!source) return NextResponse.json({ error: 'Failed to create source record' }, { status: 500 });
 
   // Create ingest job
   const { data: job } = await supabase
     .from('ingest_jobs')
     .insert({
       workspace_id,
-      source_id: source!.id,
+      source_id: source.id,
       status: 'pending',
       profile_id: profileId,
     })
     .select('id')
     .single();
+  if (!job) return NextResponse.json({ error: 'Failed to create ingest job' }, { status: 500 });
 
   // Find wiki folder for tool context
   const wikiFolderId = await findFile(
@@ -155,7 +157,7 @@ export async function POST(request: NextRequest) {
   await supabase
     .from('ingest_jobs')
     .update({ status: 'running', started_at: new Date().toISOString() })
-    .eq('id', job!.id);
+    .eq('id', job.id);
 
   // Run pipeline (Vercel Fluid Compute — up to 300s)
   try {
@@ -168,15 +170,15 @@ export async function POST(request: NextRequest) {
       sourceTitle,
       systemPrompt,
       profile: profile as Parameters<typeof runIngestPipeline>[0]['profile'],
-      jobId: job!.id,
+      jobId: job.id,
     });
 
     await supabase
       .from('sources')
       .update({ ingested_at: new Date().toISOString() })
-      .eq('id', source!.id);
+      .eq('id', source.id);
 
-    return NextResponse.json({ jobId: job!.id, status: 'done' });
+    return NextResponse.json({ jobId: job.id, status: 'done' });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error';
     await supabase
@@ -186,7 +188,7 @@ export async function POST(request: NextRequest) {
         error: message,
         finished_at: new Date().toISOString(),
       })
-      .eq('id', job!.id);
+      .eq('id', job.id);
 
     return NextResponse.json({ error: message }, { status: 500 });
   }

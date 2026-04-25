@@ -72,7 +72,9 @@ export async function findFile(
   mimeType?: string,
 ): Promise<string | null> {
   const mime = mimeType ?? 'text/markdown';
-  const q = `name='${name}' and '${parentId}' in parents and mimeType='${mime}' and trashed=false`;
+  // Escape single quotes to prevent Drive query injection
+  const safeName = name.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+  const q = `name='${safeName}' and '${parentId}' in parents and mimeType='${mime}' and trashed=false`;
   const res = await drive.files.list({ q, fields: 'files(id)', pageSize: 1 });
   return res.data.files?.[0]?.id ?? null;
 }

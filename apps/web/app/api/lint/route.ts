@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { generateText, stepCountIs } from 'ai';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
@@ -7,21 +8,29 @@ import { createLLMClient } from '@/lib/ai/client';
 import { buildWikiTools } from '@/lib/ai/tools';
 import { DEFAULT_PROMPTS } from '@llm-wiki/prompts';
 
+const PostSchema = z.object({ workspace_id: z.string().uuid() });
+
 export async function POST(request: NextRequest) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const { workspace_id } = await request.json().catch(() => ({}));
-  if (!workspace_id) return NextResponse.json({ error: 'Missing workspace_id' }, { status: 400 });
+  const parsed = PostSchema.safeParse(await request.json().catch(() => ({})));
+  if (!parsed.success) {
+    return NextResponse.json({ error: 'Missing or invalid workspace_id' }, { status: 400 });
+  }
 
-  return runLint(workspace_id, user.id);
+  return runLint(parsed.data.workspace_id, user.id);
 }
 
 /** Called by the weekly cron. Iterates all workspaces. */
 export async function GET(request: NextRequest) {
+  const cronSecret = process.env.CRON_SECRET;
+  if (!cronSecret) {
+    return NextResponse.json({ error: 'Cron not configured' }, { status: 500 });
+  }
   const authHeader = request.headers.get('authorization');
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  if (authHeader !== `Bearer ${cronSecret}`) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
@@ -41,19 +50,20 @@ export async function GET(request: NextRequest) {
 
 async function runLint(workspaceId: string, userId: string) {
   const admin = createAdminClient();
-  const supabase = admin;
 
-  const { data: workspace } = await supabase
+  // Verify the workspace belongs to the requesting user before using admin client
+  const { data: workspace } = await admin
     .from('workspaces')
     .select('id, drive_folder_id, lint_profile_id, default_profile_id')
     .eq('id', workspaceId)
+    .eq('owner_id', userId)
     .single();
   if (!workspace) return NextResponse.json({ error: 'Workspace not found' }, { status: 404 });
 
   const profileId = workspace.lint_profile_id ?? workspace.default_profile_id;
   if (!profileId) return NextResponse.json({ error: 'No LLM profile' }, { status: 422 });
 
-  const { data: profile } = await supabase
+  const { data: profile } = await admin
     .from('llm_profiles')
     .select('*')
     .eq('id', profileId)
@@ -72,7 +82,7 @@ async function runLint(workspaceId: string, userId: string) {
   );
   if (!wikiFolderId) return NextResponse.json({ error: 'Wiki folder missing' }, { status: 500 });
 
-  // Load lint prompt
+  // Load lint prompt (user may have customized it)
   const schemaFolderId = await findFile(
     drive, '_schema', workspace.drive_folder_id, 'application/vnd.google-apps.folder',
   );
@@ -82,7 +92,7 @@ async function runLint(workspaceId: string, userId: string) {
     if (lintFileId) systemPrompt = await readDriveFile(drive, lintFileId);
   }
 
-  const { data: indexPage } = await supabase
+  const { data: indexPage } = await admin
     .from('pages')
     .select('drive_file_id')
     .eq('workspace_id', workspaceId)
@@ -107,7 +117,7 @@ async function runLint(workspaceId: string, userId: string) {
     stopWhen: stepCountIs(20),
   });
 
-  await supabase.from('logs').insert({
+  await admin.from('logs').insert({
     workspace_id: workspaceId,
     kind: 'lint',
     summary: 'Weekly lint pass completed',

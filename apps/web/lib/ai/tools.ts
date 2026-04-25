@@ -98,15 +98,17 @@ export function buildWikiTools(ctx: ToolContext) {
 
         // Sync page_links: delete old outgoing links, insert new ones
         const toSlugs = extractWikiLinks(content_md);
-        await ctx.supabase
+        const { error: delError } = await ctx.supabase
           .from('page_links')
           .delete()
           .eq('workspace_id', ctx.workspaceId)
           .eq('from_slug', slug);
+        if (delError) throw new Error(`page_links delete failed: ${delError.message}`);
         if (toSlugs.length > 0) {
-          await ctx.supabase.from('page_links').insert(
+          const { error: insError } = await ctx.supabase.from('page_links').insert(
             toSlugs.map((to_slug) => ({ workspace_id: ctx.workspaceId, from_slug: slug, to_slug })),
           );
+          if (insError) throw new Error(`page_links insert failed: ${insError.message}`);
         }
 
         return { ok: true, slug, fileId };
