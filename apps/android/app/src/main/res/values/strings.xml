@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">LLM Wiki</string>
+    <string name="auth_welcome">Welcome to LLM Wiki</string>
+    <string name="auth_description">Your personal AI-maintained knowledge base. Wiki content lives in your own Google Drive.</string>
+    <string name="auth_sign_in">Sign in with Google</string>
+    <string name="auth_sign_out">Sign out</string>
+    <string name="workspace_no_workspaces">No workspaces yet. Create one to get started.</string>
+    <string name="wiki_index">Index</string>
+    <string name="wiki_log">Log</string>
+    <string name="ingest_add_source">Add source</string>
+    <string name="ingest_running">Ingesting…</string>
+    <string name="query_placeholder">Ask your wiki anything…</string>
+    <string name="query_file_back">Save as synthesis page</string>
+    <string name="settings_title">Settings</string>
+    <string name="settings_llm_profiles">LLM Profiles</string>
+</resources>

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">LLM Wiki</string>
+    <string name="auth_welcome">歡迎使用 LLM Wiki</string>
+    <string name="auth_description">你的個人 AI 知識庫。Wiki 內容儲存在你自己的 Google Drive 中。</string>
+    <string name="auth_sign_in">使用 Google 登入</string>
+    <string name="auth_sign_out">登出</string>
+    <string name="workspace_no_workspaces">目前沒有工作區，建立一個開始使用吧。</string>
+    <string name="wiki_index">索引</string>
+    <string name="wiki_log">日誌</string>
+    <string name="ingest_add_source">新增來源</string>
+    <string name="ingest_running">整合中…</string>
+    <string name="query_placeholder">問問你的 Wiki 任何問題…</string>
+    <string name="query_file_back">存成綜合頁面</string>
+    <string name="settings_title">設定</string>
+    <string name="settings_llm_profiles">LLM 設定檔</string>
+</resources>
