@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+
+export const maxDuration = 300;
 import { createDriveClient, getAccessToken, writeDriveFile, findFile, readDriveFile } from '@/lib/drive/client';
 import { urlToMarkdown } from '@/lib/fetch/url-to-markdown';
 import { runIngestPipeline } from '@/lib/ai/ingest-pipeline';

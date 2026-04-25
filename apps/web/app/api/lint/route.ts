@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { generateText, stepCountIs } from 'ai';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+
+export const maxDuration = 300;
 import { createDriveClient, getAccessToken, findFile, readDriveFile } from '@/lib/drive/client';
 import { createLLMClient } from '@/lib/ai/client';
 import { buildWikiTools } from '@/lib/ai/tools';

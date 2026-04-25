@@ -65,7 +65,7 @@ export function PageViewer({ workspaceId, slug, onWikiLinkClick, refreshKey }: P
     setLockPending(true);
     try {
       await fetch(
-        `/api/pages/${workspaceId}/${encodeURIComponent(page.slug)}/lock`,
+        `/api/pages/${workspaceId}/${encodeURIComponent(page.slug)}`,
         {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },

@@ -15,7 +15,9 @@
         "SUPABASE_SERVICE_ROLE_KEY",
         "ENCRYPTION_KEY",
         "GOOGLE_OAUTH_CLIENT_ID",
-        "GOOGLE_OAUTH_CLIENT_SECRET"
+        "GOOGLE_OAUTH_CLIENT_SECRET",
+        "CRON_SECRET",
+        "NEXT_PUBLIC_SITE_URL"
       ]
     },
     "dev": {

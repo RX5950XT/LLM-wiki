@@ -57,3 +57,5 @@ supabase/.temp/
 # Misc
 *.pem
 .DS_Store
+
+.vercel

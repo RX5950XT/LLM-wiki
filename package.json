@@ -18,6 +18,8 @@
     "clean": "turbo run clean && rm -rf node_modules"
   },
   "devDependencies": {
+    "@vercel/config": "^0.2.1",
+    "next": "^16.0.0",
     "turbo": "^2.3.0",
     "typescript": "^5.7.0"
   },

@@ -4,7 +4,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 type CookieEntry = { name: string; value: string; options: CookieOptions };
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
 
   const supabase = createServerClient(

@@ -14,6 +14,17 @@ const nextConfig: NextConfig = {
     config.module.rules.push({ test: /\.md$/, type: 'asset/source' });
     return config;
   },
+  turbopack: {
+    resolveAlias: {
+      'next-intl/config': './i18n/request.ts',
+    },
+    rules: {
+      '*.md': {
+        loaders: ['raw-loader'],
+        as: '*.js',
+      },
+    },
+  },
 };
 
 export default withNextIntl(nextConfig);
