@@ -1,8 +1,13 @@
 import { getTranslations } from 'next-intl/server';
 import { LoginButton } from '@/components/auth/login-button';
 
-export default async function LoginPage() {
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ error?: string }>;
+}) {
   const t = await getTranslations('auth');
+  const { error } = await searchParams;
 
   return (
     <div
@@ -21,6 +26,11 @@ export default async function LoginPage() {
             {t('description')}
           </p>
         </div>
+        {error === 'drive_access_required' && (
+          <p className="text-sm" style={{ color: 'oklch(65% 0.18 30)' }}>
+            {t('driveAccessRequired')}
+          </p>
+        )}
         <LoginButton label={t('signIn')} />
       </div>
     </div>

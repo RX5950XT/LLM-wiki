@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { createDriveClient } from '@/lib/drive/client';
 import { initWorkspaceDrive } from '@/lib/drive/workspace-init';
+import { getGoogleRefreshToken, saveGoogleRefreshToken } from '@/lib/google/oauth-token';
 
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = new URL(request.url);
@@ -23,11 +24,17 @@ export async function GET(request: NextRequest) {
   const userId = session.user.id;
   const admin = createAdminClient();
 
-  // Persist Google refresh token in app_metadata for server-side Drive access
+  const existingRefreshToken = await getGoogleRefreshToken(userId);
+  const refreshToken = session.provider_refresh_token ?? existingRefreshToken;
+
   if (session.provider_refresh_token) {
-    await admin.auth.admin.updateUserById(userId, {
-      app_metadata: { google_refresh_token: session.provider_refresh_token },
+    await saveGoogleRefreshToken(userId, session.provider_refresh_token).catch((err) => {
+      console.error('[auth/callback] failed to store refresh token:', err);
     });
+  }
+
+  if (!refreshToken) {
+    return NextResponse.redirect(`${origin}/login?error=drive_access_required`);
   }
 
   // Check if user already has a workspace
@@ -43,7 +50,6 @@ export async function GET(request: NextRequest) {
 
   // First login — auto-create default workspace + Drive folder structure
   if (!session.provider_token) {
-    // No access token available — redirect to create page to try again
     return NextResponse.redirect(`${origin}/w/create`);
   }
 

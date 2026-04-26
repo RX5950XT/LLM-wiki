@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
-import { createAdminClient } from '@/lib/supabase/admin';
+import { getGoogleRefreshToken } from '@/lib/google/oauth-token';
 import { createDriveClient, getAccessToken, readDriveFile } from '@/lib/drive/client';
 
 const LockSchema = z.object({ locked_by_human: z.boolean() });

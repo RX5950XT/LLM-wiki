@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { createDriveClient, getAccessToken } from '@/lib/drive/client';
 import { initWorkspaceDrive } from '@/lib/drive/workspace-init';
+import { getGoogleRefreshToken } from '@/lib/google/oauth-token';
 
 const CreateWorkspaceSchema = z.object({
   name: z.string().min(1).max(100),
@@ -23,9 +24,7 @@ export async function POST(request: NextRequest) {
 
   const admin = createAdminClient();
 
-  // Get stored Google refresh token
-  const { data: userData } = await admin.auth.admin.getUserById(user.id);
-  const refreshToken = userData?.user?.app_metadata?.google_refresh_token as string | undefined;
+  const refreshToken = await getGoogleRefreshToken(user.id);
   if (!refreshToken) {
     return NextResponse.json(
       { error: 'Google Drive access not available. Please sign in again.' },

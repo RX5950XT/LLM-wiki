@@ -14,7 +14,8 @@
     "signIn": "使用 Google 登入",
     "signOut": "登出",
     "welcome": "歡迎使用 LLM Wiki",
-    "description": "你的個人 AI 知識庫。Wiki 內容儲存在你自己的 Google Drive 中。"
+    "description": "你的個人 AI 知識庫。Wiki 內容儲存在你自己的 Google Drive 中。",
+    "driveAccessRequired": "需要 Google Drive 存取權限。請重新登入並同意 Drive 授權。"
   },
   "workspace": {
     "create": "建立工作區",

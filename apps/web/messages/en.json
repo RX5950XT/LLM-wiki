@@ -14,7 +14,8 @@
     "signIn": "Sign in with Google",
     "signOut": "Sign out",
     "welcome": "Welcome to LLM Wiki",
-    "description": "Your personal AI-maintained knowledge base. Wiki content lives in your own Google Drive."
+    "description": "Your personal AI-maintained knowledge base. Wiki content lives in your own Google Drive.",
+    "driveAccessRequired": "Google Drive access is required. Please sign in again and approve Drive access."
   },
   "workspace": {
     "create": "Create workspace",

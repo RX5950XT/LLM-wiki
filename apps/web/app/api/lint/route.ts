@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { generateText, stepCountIs } from 'ai';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { getGoogleRefreshToken } from '@/lib/google/oauth-token';
 
 export const maxDuration = 300;
 import { createDriveClient, getAccessToken, findFile, readDriveFile } from '@/lib/drive/client';
@@ -72,8 +73,7 @@ async function runLint(workspaceId: string, userId: string) {
     .single();
   if (!profile) return NextResponse.json({ error: 'Profile not found' }, { status: 404 });
 
-  const { data: userData } = await admin.auth.admin.getUserById(userId);
-  const refreshToken = userData?.user?.app_metadata?.google_refresh_token as string | undefined;
+  const refreshToken = await getGoogleRefreshToken(userId);
   if (!refreshToken) return NextResponse.json({ error: 'No Drive token' }, { status: 403 });
 
   const accessToken = await getAccessToken(refreshToken);

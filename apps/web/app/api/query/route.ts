@@ -2,9 +2,8 @@ import { NextRequest } from 'next/server';
 import { streamText, stepCountIs, type ModelMessage } from 'ai';
 import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
-import { createAdminClient } from '@/lib/supabase/admin';
-
 import { createDriveClient, getAccessToken, findFile, readDriveFile } from '@/lib/drive/client';
+import { getGoogleRefreshToken } from '@/lib/google/oauth-token';
 import { createLLMClient } from '@/lib/ai/client';
 import { buildWikiTools } from '@/lib/ai/tools';
 import { DEFAULT_PROMPTS } from '@llm-wiki/prompts';
@@ -46,9 +45,7 @@ export async function POST(request: NextRequest) {
     .single();
   if (!profile) return new Response('LLM profile not found', { status: 404 });
 
-  const admin = createAdminClient();
-  const { data: userData } = await admin.auth.admin.getUserById(user.id);
-  const refreshToken = userData?.user?.app_metadata?.google_refresh_token as string | undefined;
+  const refreshToken = await getGoogleRefreshToken(user.id);
   if (!refreshToken) return new Response('Google Drive not connected', { status: 403 });
 
   const accessToken = await getAccessToken(refreshToken);
