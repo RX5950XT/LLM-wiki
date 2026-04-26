@@ -14,6 +14,7 @@ export function LoginButton({ label }: LoginButtonProps) {
       options: {
         redirectTo: `${window.location.origin}/auth/callback`,
         scopes: 'https://www.googleapis.com/auth/drive.file',
+        queryParams: { access_type: 'offline', prompt: 'consent' },
       },
     });
   };

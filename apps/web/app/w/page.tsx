@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { createClient } from '@/lib/supabase/server';
@@ -26,9 +27,18 @@ export default async function WorkspacesPage() {
       className="flex min-h-screen items-center justify-center"
       style={{ background: 'var(--bg)' }}
     >
-      <div className="space-y-4 text-center">
-        <p style={{ color: 'var(--fg-muted)' }}>{t('noWorkspaces')}</p>
-        {/* TODO: create-workspace form (Phase 1 Week 1) */}
+      <div className="space-y-6 text-center">
+        <p className="text-sm" style={{ color: 'var(--fg-muted)' }}>{t('noWorkspaces')}</p>
+        <Link
+          href="/w/create"
+          className="inline-block rounded-lg px-5 py-2.5 text-sm font-medium"
+          style={{
+            background: 'var(--color-accent)',
+            color: 'oklch(10% 0.015 250)',
+          }}
+        >
+          {t('create')}
+        </Link>
       </div>
     </div>
   );

@@ -116,6 +116,11 @@ Query API 在文字串流結尾附加：
 ```
 前端用 `citation-parser.ts` 的 `parseCitations(raw)` 解析，分離 text 和 citedSlugs。
 
+## 功能開發原則
+
+**Web 與 Android 功能必須同步**：實作任何使用者功能時，Web 和 Android 都要一起更新，不可只改一端。  
+Android 呼叫與 Web 相同的後端 API（`/api/ingest`、`/api/query`、`/api/pages/…`、`/api/workspaces/…`），無需另建端點。
+
 ## 進度狀態
 
 - **Phase 0** ✅：Monorepo + Next.js 16 + Android 骨架 + Supabase schema
@@ -126,6 +131,7 @@ Query API 在文字串流結尾附加：
 - **Phase 5** ✅：Graph edge fix + 開源收尾 — page_links 寫入、.env.example、vercel.json cron、CONTRIBUTING.md
 - **Phase 6** ✅：介面優化 — 完整繁體中文 i18n、多工作區切換 + 新增工作區、登出按鈕、設定返回按鈕
 - **Phase 7** ✅：Ingest 任意格式（URL/文字/Markdown）、側邊欄拖移調整寬度、設定頁個人資料、Drive token 失效重授權
+- **Phase 8** ✅：Android 功能對齊 — Chat/Query 串流、citations、synthesis file-back、文字/Markdown ingest、lock toggle、登出
 
 ## 目錄速查（Android）
 
@@ -161,7 +167,10 @@ apps/android/app/src/main/java/com/llmwiki/
 - `AuthState.Success` 含 `accountName`（Google 帳號 email），NavGraph 透過 `rememberSaveable` 保留後傳給 WikiViewModel
 - `Icons.AutoMirrored.Filled.List` 取代舊版 `Icons.Default.Menu`（Compose Material 3 方向性圖示）
 - `SyncWorker.schedule()` 使用 `ExistingPeriodicWorkPolicy.KEEP`（不重複排程同一個 workspace）
-- `ingestUrl()` 呼叫 Web app 的 `/api/ingest`，使用 Supabase session accessToken
+- `ingestUrl()` / `ingestText()` 呼叫 Web app 的 `/api/ingest`，使用 Supabase session accessToken
+- Chat 串流協定：POST `/api/query` → `text/plain` stream，結尾附 `\x00CITATIONS\x00[...]`；Android 用 Ktor `bodyAsChannel()` + `readUTF8Line()` 消費
+- Lock toggle：PATCH `/api/pages/{wid}/{slug}` `{locked_by_human:bool}`，同步更新 Room cache（`PageDao.updateLock`）
+- 登出後 NavController navigate("auth") popUpTo(0) inclusive=true
 
 ## Graph View 注意事項
 
