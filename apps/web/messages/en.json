@@ -6,7 +6,9 @@
     "cancel": "Cancel",
     "delete": "Delete",
     "edit": "Edit",
-    "back": "Back"
+    "back": "Back",
+    "settings": "Settings",
+    "view": "View"
   },
   "auth": {
     "signIn": "Sign in with Google",
@@ -19,7 +21,8 @@
     "name": "Workspace name",
     "description": "Description",
     "noWorkspaces": "No workspaces yet. Create one to get started.",
-    "switchWorkspace": "Switch workspace"
+    "switchWorkspace": "Switch workspace",
+    "addWorkspace": "New workspace"
   },
   "wiki": {
     "index": "Index",
@@ -29,7 +32,17 @@
     "summaries": "Summaries",
     "synthesis": "Synthesis",
     "notes": "Notes",
-    "schema": "Schema"
+    "schema": "Schema",
+    "zoneWiki": "Wiki",
+    "zoneNotes": "Notes",
+    "zoneSchema": "Schema",
+    "selectPage": "Select a page from the sidebar",
+    "pageNotFound": "Page not found",
+    "pageUpdated": "This page was updated",
+    "refresh": "Refresh",
+    "human": "Human",
+    "lockedTitle": "Locked — LLM will not overwrite. Click to unlock.",
+    "unlockedTitle": "Unlocked — LLM may update. Click to lock."
   },
   "ingest": {
     "addSource": "Add source",
@@ -39,12 +52,18 @@
     "running": "Ingesting...",
     "done": "Done",
     "failed": "Failed",
-    "touchedPages": "{count} pages updated"
+    "touchedPages": "{count} pages updated",
+    "placeholder": "Paste URL to ingest…",
+    "button": "Ingest",
+    "doneStatus": "Done — {status}",
+    "savedSynthesis": "Saved as synthesis page"
   },
   "query": {
     "placeholder": "Ask your wiki anything...",
     "fileBack": "Save as synthesis page",
-    "sources": "Sources"
+    "sources": "Sources",
+    "empty": "Ask your wiki anything…",
+    "thinking": "Thinking…"
   },
   "settings": {
     "title": "Settings",
@@ -54,6 +73,8 @@
     "baseUrl": "Base URL",
     "apiKey": "API Key",
     "model": "Model",
-    "setDefault": "Set as default"
+    "setDefault": "Set as default",
+    "language": "Language",
+    "backToWorkspace": "Back to workspace"
   }
 }

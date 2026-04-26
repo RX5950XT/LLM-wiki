@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { Send, Bookmark, Loader2, CheckCircle, ChevronRight } from 'lucide-react';
+import { useTranslations } from 'next-intl';
 import { parseCitations } from '@/lib/ai/citation-parser';
 
 interface Message {
@@ -26,6 +27,7 @@ export function ConversationPanel({
   onPageWritten,
   onPageClick,
 }: ConversationPanelProps) {
+  const t = useTranslations();
   const [ingestUrl, setIngestUrl] = useState('');
   const [ingesting, setIngesting] = useState(false);
   const [ingestError, setIngestError] = useState<string | null>(null);
@@ -125,7 +127,7 @@ export function ConversationPanel({
     if (!res.ok) {
       setIngestError(data.error ?? 'Ingest failed');
     } else {
-      setIngestResult(`Done — ${data.status}`);
+      setIngestResult(t('ingest.doneStatus', { status: data.status }));
       setIngestUrl('');
       onSourceAdded?.();
     }
@@ -174,7 +176,7 @@ export function ConversationPanel({
             type="url"
             value={ingestUrl}
             onChange={(e) => setIngestUrl(e.target.value)}
-            placeholder="Paste URL to ingest…"
+            placeholder={t('ingest.placeholder')}
             className="flex-1 rounded-md border px-3 py-1.5 text-xs outline-none"
             style={{
               background: 'var(--bg-2)',
@@ -189,7 +191,7 @@ export function ConversationPanel({
             className="rounded-md px-3 py-1.5 text-xs font-medium disabled:opacity-50"
             style={{ background: 'var(--color-accent)', color: 'oklch(10% 0.015 250)' }}
           >
-            {ingesting ? <Loader2 size={12} className="animate-spin" /> : 'Ingest'}
+            {ingesting ? <Loader2 size={12} className="animate-spin" /> : t('ingest.button')}
           </button>
         </div>
         {ingestError && (
@@ -211,7 +213,7 @@ export function ConversationPanel({
           style={{ borderColor: 'var(--border)', background: 'var(--color-accent-glow)' }}
         >
           <span className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--color-accent)' }}>
-            <CheckCircle size={12} /> Saved as synthesis page
+            <CheckCircle size={12} /> {t('ingest.savedSynthesis')}
           </span>
           <button
             onClick={() => {
@@ -221,7 +223,7 @@ export function ConversationPanel({
             className="flex items-center gap-0.5 text-xs transition-opacity hover:opacity-70"
             style={{ color: 'var(--color-accent)' }}
           >
-            View <ChevronRight size={12} />
+            {t('common.view')} <ChevronRight size={12} />
           </button>
         </div>
       )}
@@ -230,7 +232,7 @@ export function ConversationPanel({
       <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
         {messages.length === 0 && (
           <p className="text-center text-xs" style={{ color: 'var(--fg-muted)' }}>
-            Ask your wiki anything…
+            {t('query.empty')}
           </p>
         )}
         {messages.map((m) => (
@@ -280,14 +282,14 @@ export function ConversationPanel({
                 className="flex items-center gap-1 text-xs transition-opacity hover:opacity-70"
                 style={{ color: 'var(--fg-muted)' }}
               >
-                <Bookmark size={11} /> Save as synthesis page
+                <Bookmark size={11} /> {t('query.fileBack')}
               </button>
             )}
           </div>
         ))}
         {isLoading && (
           <div className="flex items-center gap-2 text-xs" style={{ color: 'var(--fg-muted)' }}>
-            <Loader2 size={12} className="animate-spin" /> Thinking…
+            <Loader2 size={12} className="animate-spin" /> {t('query.thinking')}
           </div>
         )}
         {error && (
@@ -308,7 +310,7 @@ export function ConversationPanel({
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Ask your wiki anything…"
+            placeholder={t('query.placeholder')}
             className="flex-1 rounded-md border px-3 py-2 text-sm outline-none"
             style={{
               background: 'var(--bg-2)',

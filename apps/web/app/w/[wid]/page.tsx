@@ -15,25 +15,28 @@ export default async function WorkspacePage({ params }: WorkspacePageProps) {
 
   if (!user) redirect('/login');
 
-  const { data: workspace } = await supabase
-    .from('workspaces')
-    .select('id, name')
-    .eq('id', wid)
-    .single();
+  const [{ data: workspace }, { data: workspaces }, { data: pages }] = await Promise.all([
+    supabase.from('workspaces').select('id, name').eq('id', wid).single(),
+    supabase
+      .from('workspaces')
+      .select('id, name')
+      .eq('owner_id', user.id)
+      .order('created_at', { ascending: true }),
+    supabase
+      .from('pages')
+      .select('slug, title, kind, zone')
+      .eq('workspace_id', wid)
+      .order('updated_at', { ascending: false })
+      .limit(200),
+  ]);
 
   if (!workspace) redirect('/w');
-
-  const { data: pages } = await supabase
-    .from('pages')
-    .select('slug, title, kind, zone')
-    .eq('workspace_id', wid)
-    .order('updated_at', { ascending: false })
-    .limit(200);
 
   return (
     <WorkspaceShell
       workspaceId={workspace.id}
       workspaceName={workspace.name}
+      workspaces={workspaces ?? []}
       initialPages={pages ?? []}
     />
   );

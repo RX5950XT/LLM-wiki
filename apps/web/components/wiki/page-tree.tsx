@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useTranslations } from 'next-intl';
 import { FileText, Settings, ChevronDown, ChevronRight } from 'lucide-react';
 
 interface PageEntry {
@@ -19,28 +19,27 @@ interface PageTreeProps {
   onSelectPage: (slug: string) => void;
 }
 
-const ZONE_LABELS: Record<string, string> = {
-  wiki: 'Wiki',
-  notes: 'Notes',
-  schema: 'Schema',
-};
-
-function groupByZoneAndKind(pages: PageEntry[]) {
+function groupByZone(pages: PageEntry[]) {
   const groups: Record<string, PageEntry[]> = {};
   for (const page of pages) {
-    const key = page.zone;
-    if (!groups[key]) groups[key] = [];
-    groups[key].push(page);
+    if (!groups[page.zone]) groups[page.zone] = [];
+    groups[page.zone]!.push(page);
   }
   return groups;
 }
 
 export function PageTree({ workspaceId, initialPages, activePage, onSelectPage }: PageTreeProps) {
-  const [pages, setPages] = useState(initialPages);
+  const t = useTranslations();
+  const [pages] = useState(initialPages);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({ wiki: true });
 
-  const grouped = groupByZoneAndKind(pages);
+  const ZONE_LABELS: Record<string, string> = {
+    wiki: t('wiki.zoneWiki'),
+    notes: t('wiki.zoneNotes'),
+    schema: t('wiki.zoneSchema'),
+  };
 
+  const grouped = groupByZone(pages);
   const toggleZone = (zone: string) =>
     setExpanded((s) => ({ ...s, [zone]: !s[zone] }));
 
@@ -90,7 +89,7 @@ export function PageTree({ workspaceId, initialPages, activePage, onSelectPage }
           style={{ color: 'var(--fg-muted)' }}
         >
           <Settings size={13} />
-          Settings
+          {t('common.settings')}
         </Link>
       </div>
     </nav>

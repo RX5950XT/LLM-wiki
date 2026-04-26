@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Pencil, Lock, Unlock, RefreshCw, AlertTriangle } from 'lucide-react';
+import { useTranslations } from 'next-intl';
 
 interface PageViewerProps {
   workspaceId: string;
@@ -23,6 +24,7 @@ interface PageData {
 }
 
 export function PageViewer({ workspaceId, slug, onWikiLinkClick, refreshKey }: PageViewerProps) {
+  const t = useTranslations();
   const [page, setPage] = useState<PageData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -86,7 +88,7 @@ export function PageViewer({ workspaceId, slug, onWikiLinkClick, refreshKey }: P
         className="flex h-full items-center justify-center"
         style={{ color: 'var(--fg-muted)' }}
       >
-        <p className="text-sm">Select a page from the sidebar</p>
+        <p className="text-sm">{t('wiki.selectPage')}</p>
       </div>
     );
   }
@@ -111,7 +113,7 @@ export function PageViewer({ workspaceId, slug, onWikiLinkClick, refreshKey }: P
         className="flex h-full items-center justify-center"
         style={{ color: 'var(--fg-muted)' }}
       >
-        <p className="text-sm">{error ?? 'Page not found'}</p>
+        <p className="text-sm">{error ?? t('wiki.pageNotFound')}</p>
       </div>
     );
   }
@@ -129,13 +131,13 @@ export function PageViewer({ workspaceId, slug, onWikiLinkClick, refreshKey }: P
           }}
         >
           <span className="flex items-center gap-1.5">
-            <AlertTriangle size={12} /> This page was updated
+            <AlertTriangle size={12} /> {t('wiki.pageUpdated')}
           </span>
           <button
             onClick={() => fetchPage()}
             className="flex items-center gap-1 transition-opacity hover:opacity-70"
           >
-            <RefreshCw size={12} /> Refresh
+            <RefreshCw size={12} /> {t('wiki.refresh')}
           </button>
         </div>
       )}
@@ -161,7 +163,7 @@ export function PageViewer({ workspaceId, slug, onWikiLinkClick, refreshKey }: P
               className="flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium"
               style={{ background: 'var(--bg-2)', color: 'var(--fg-muted)' }}
             >
-              <Pencil size={10} /> Human
+              <Pencil size={10} /> {t('wiki.human')}
             </span>
           )}
 
@@ -173,8 +175,8 @@ export function PageViewer({ workspaceId, slug, onWikiLinkClick, refreshKey }: P
             style={{ color: page.locked_by_human ? 'var(--color-accent)' : 'var(--fg-muted)' }}
             title={
               page.locked_by_human
-                ? 'Locked — LLM will not overwrite. Click to unlock.'
-                : 'Unlocked — LLM may update. Click to lock.'
+                ? t('wiki.lockedTitle')
+                : t('wiki.unlockedTitle')
             }
           >
             {page.locked_by_human ? <Lock size={12} /> : <Unlock size={12} />}

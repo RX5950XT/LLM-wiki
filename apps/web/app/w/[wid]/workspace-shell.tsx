@@ -1,12 +1,14 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-import { PanelLeft, PanelRight, GitFork, FlaskConical } from 'lucide-react';
+import { PanelLeft, PanelRight, GitFork, FlaskConical, ChevronDown, LogOut, Plus } from 'lucide-react';
+import { useTranslations } from 'next-intl';
 import { PageTree } from '@/components/wiki/page-tree';
 import { PageViewer } from '@/components/wiki/page-viewer';
 import { ConversationPanel } from '@/components/wiki/conversation-panel';
 import { GraphView } from '@/components/wiki/graph-view';
 import { useRealtimePages, type PageChangedEvent } from '@/lib/sync/realtime';
+import { createClient } from '@/lib/supabase/client';
 
 interface PageEntry {
   slug: string;
@@ -15,18 +17,26 @@ interface PageEntry {
   zone: string;
 }
 
+interface WorkspaceEntry {
+  id: string;
+  name: string;
+}
+
 interface WorkspaceShellProps {
   workspaceId: string;
   workspaceName: string;
+  workspaces: WorkspaceEntry[];
   initialPages: PageEntry[];
 }
 
-export function WorkspaceShell({ workspaceId, workspaceName, initialPages }: WorkspaceShellProps) {
+export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initialPages }: WorkspaceShellProps) {
+  const t = useTranslations();
   const [activePage, setActivePage] = useState<string>('index.md');
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
   const [showGraph, setShowGraph] = useState(false);
   const [lintRunning, setLintRunning] = useState(false);
+  const [showWsMenu, setShowWsMenu] = useState(false);
   const [pages, setPages] = useState(initialPages);
   /**
    * Incremented each time Realtime notifies us that the *currently viewed* page
@@ -48,13 +58,11 @@ export function WorkspaceShell({ workspaceId, workspaceName, initialPages }: Wor
     [refreshPageList],
   );
 
-  // Realtime: refresh page list; signal PageViewer when the active page changes
   const handleRealtimeChange = useCallback(
     ({ slug }: PageChangedEvent) => {
       refreshPageList();
       setActivePage((current) => {
         if (current === slug) {
-          // Increment refresh key to trigger staleness banner in PageViewer
           setViewerRefreshKey((k) => k + 1);
         }
         return current;
@@ -73,15 +81,19 @@ export function WorkspaceShell({ workspaceId, workspaceName, initialPages }: Wor
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ workspace_id: workspaceId }),
       });
-      // Lint writes a report page; refresh list then navigate to it
       refreshPageList();
-      // Navigate to today's lint report (slug pattern from lint API)
       const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
       setActivePage(`_lint/${today}.md`);
     } finally {
       setLintRunning(false);
     }
   }, [workspaceId, refreshPageList]);
+
+  const handleSignOut = useCallback(async () => {
+    const supabase = createClient();
+    await supabase.auth.signOut();
+    window.location.href = '/login';
+  }, []);
 
   return (
     <div
@@ -102,7 +114,53 @@ export function WorkspaceShell({ workspaceId, workspaceName, initialPages }: Wor
           >
             <PanelLeft size={16} />
           </button>
-          <span className="text-sm font-medium">{workspaceName}</span>
+
+          {/* Workspace switcher */}
+          <div className="relative">
+            <button
+              onClick={() => setShowWsMenu((o) => !o)}
+              className="flex items-center gap-1 rounded px-1 py-0.5 text-sm font-medium transition-opacity hover:opacity-70"
+              style={{ color: 'var(--fg)' }}
+            >
+              {workspaceName}
+              <ChevronDown size={12} style={{ color: 'var(--fg-muted)' }} />
+            </button>
+
+            {showWsMenu && (
+              <>
+                <div
+                  className="fixed inset-0 z-40"
+                  onClick={() => setShowWsMenu(false)}
+                />
+                <div
+                  className="absolute left-0 top-full z-50 mt-1 w-52 overflow-hidden rounded-lg border shadow-lg"
+                  style={{ background: 'var(--bg-2)', borderColor: 'var(--border)' }}
+                >
+                  {workspaces.map((ws) => (
+                    <a
+                      key={ws.id}
+                      href={`/w/${ws.id}`}
+                      className="flex items-center px-3 py-2 text-sm transition-opacity hover:opacity-70"
+                      style={{
+                        color: ws.id === workspaceId ? 'var(--color-accent)' : 'var(--fg)',
+                        background: ws.id === workspaceId ? 'var(--color-accent-glow)' : undefined,
+                      }}
+                    >
+                      {ws.name}
+                    </a>
+                  ))}
+                  <div className="border-t" style={{ borderColor: 'var(--border)' }} />
+                  <a
+                    href="/w/create"
+                    className="flex items-center gap-1.5 px-3 py-2 text-sm transition-opacity hover:opacity-70"
+                    style={{ color: 'var(--fg-muted)' }}
+                  >
+                    <Plus size={13} /> {t('workspace.addWorkspace')}
+                  </a>
+                </div>
+              </>
+            )}
+          </div>
         </div>
 
         <div className="flex items-center gap-2">
@@ -136,6 +194,17 @@ export function WorkspaceShell({ workspaceId, workspaceName, initialPages }: Wor
             aria-label="Toggle conversation"
           >
             <PanelRight size={16} />
+          </button>
+
+          {/* Logout */}
+          <button
+            onClick={handleSignOut}
+            className="rounded p-1 transition-opacity hover:opacity-70"
+            style={{ color: 'var(--fg-muted)' }}
+            aria-label={t('auth.signOut')}
+            title={t('auth.signOut')}
+          >
+            <LogOut size={16} />
           </button>
         </div>
       </header>
