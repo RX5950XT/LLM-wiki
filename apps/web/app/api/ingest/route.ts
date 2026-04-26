@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
-import { createAdminClient } from '@/lib/supabase/admin';
+import { getGoogleRefreshToken } from '@/lib/google/oauth-token';
+import { createDriveClient, getAccessToken, writeDriveFile, findFile, readDriveFile } from '@/lib/drive/client';
 
 export const maxDuration = 300;
-import { createDriveClient, getAccessToken, writeDriveFile, findFile, readDriveFile } from '@/lib/drive/client';
 import { urlToMarkdown } from '@/lib/fetch/url-to-markdown';
 import { runIngestPipeline } from '@/lib/ai/ingest-pipeline';
 import { DEFAULT_PROMPTS } from '@llm-wiki/prompts';
@@ -73,11 +73,8 @@ export async function POST(request: NextRequest) {
     sourceTitle = parsed.data.title;
   }
 
-  const admin = createAdminClient();
-
   // Store raw source in Drive
-  const { data: userData } = await admin.auth.admin.getUserById(user.id);
-  const refreshToken = userData?.user?.app_metadata?.google_refresh_token as string | undefined;
+  const refreshToken = await getGoogleRefreshToken(user.id);
   if (!refreshToken) {
     return NextResponse.json({ error: 'Google Drive not connected' }, { status: 403 });
   }

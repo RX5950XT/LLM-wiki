@@ -26,9 +26,7 @@ export async function GET(
 
   if (!page) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
-  const admin = createAdminClient();
-  const { data: userData } = await admin.auth.admin.getUserById(user.id);
-  const refreshToken = userData?.user?.app_metadata?.google_refresh_token as string | undefined;
+  const refreshToken = await getGoogleRefreshToken(user.id);
   if (!refreshToken) return NextResponse.json({ error: 'No Drive token' }, { status: 403 });
 
   const accessToken = await getAccessToken(refreshToken);

@@ -52,9 +52,7 @@ export async function POST(
     .single();
   if (!workspace) return NextResponse.json({ error: 'Workspace not found' }, { status: 404 });
 
-  const admin = createAdminClient();
-  const { data: userData } = await admin.auth.admin.getUserById(user.id);
-  const refreshToken = userData?.user?.app_metadata?.google_refresh_token as string | undefined;
+  const refreshToken = await getGoogleRefreshToken(user.id);
   if (!refreshToken) {
     return NextResponse.json({ error: 'Google Drive not connected' }, { status: 403 });
   }
