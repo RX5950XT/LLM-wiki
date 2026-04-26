@@ -48,6 +48,11 @@ fun LlmWikiNavGraph(shareUrl: String? = null) {
                 workspaceId = backStackEntry.arguments?.getString("workspaceId"),
                 accountName = accountName,
                 shareUrl = shareUrl,
+                onSignedOut = {
+                    navController.navigate("auth") {
+                        popUpTo(0) { inclusive = true }
+                    }
+                },
             )
         }
     }
