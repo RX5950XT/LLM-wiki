@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
+import { createClient } from '@/lib/supabase/client';
 
 export function CreateWorkspaceForm() {
   const t = useTranslations('workspace');
@@ -12,6 +13,18 @@ export function CreateWorkspaceForm() {
   const [description, setDescription] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [needsReauth, setNeedsReauth] = useState(false);
+
+  const handleReauth = async () => {
+    const supabase = createClient();
+    await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: `${window.location.origin}/auth/callback`,
+        queryParams: { access_type: 'offline', prompt: 'consent' },
+      },
+    });
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -27,7 +40,9 @@ export function CreateWorkspaceForm() {
     const data = await res.json();
 
     if (!res.ok) {
-      setError(data.error ?? 'Failed to create workspace');
+      const msg: string = data.error ?? 'Failed to create workspace';
+      setError(msg);
+      if (res.status === 403 && msg.includes('Google Drive')) setNeedsReauth(true);
       setSubmitting(false);
       return;
     }
@@ -75,9 +90,19 @@ export function CreateWorkspaceForm() {
       </div>
 
       {error && (
-        <p className="text-sm" style={{ color: 'oklch(65% 0.18 30)' }}>
-          {error}
-        </p>
+        <div className="space-y-2">
+          <p className="text-sm" style={{ color: 'oklch(65% 0.18 30)' }}>{error}</p>
+          {needsReauth && (
+            <button
+              type="button"
+              onClick={handleReauth}
+              className="w-full rounded-lg px-4 py-2 text-sm font-medium"
+              style={{ background: 'var(--bg-2)', border: '1px solid var(--border)', color: 'var(--fg)' }}
+            >
+              Re-connect Google Drive
+            </button>
+          )}
+        </div>
       )}
 
       <button

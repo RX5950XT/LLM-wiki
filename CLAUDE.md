@@ -124,6 +124,8 @@ Query API 在文字串流結尾附加：
 - **Phase 3** ✅：Android（Kotlin + Compose）— Google Sign-In + Room 離線快取 + Markwon viewer + 分享意圖 + WorkManager 背景同步
 - **Phase 4** ✅：Lint + Graph view + 開源準備 — GraphView (react-force-graph-2d), Lint trigger button, README quick-start
 - **Phase 5** ✅：Graph edge fix + 開源收尾 — page_links 寫入、.env.example、vercel.json cron、CONTRIBUTING.md
+- **Phase 6** ✅：介面優化 — 完整繁體中文 i18n、多工作區切換 + 新增工作區、登出按鈕、設定返回按鈕
+- **Phase 7** ✅：Ingest 任意格式（URL/文字/Markdown）、側邊欄拖移調整寬度、設定頁個人資料、Drive token 失效重授權
 
 ## 目錄速查（Android）
 
@@ -174,9 +176,32 @@ apps/android/app/src/main/java/com/llmwiki/
 `apps/web/vercel.json` 設定每週一 03:00 UTC 跑 GET `/api/lint/cron`。
 需在 Vercel 環境變數設定 `CRON_SECRET`，與 `.env.local` 一致。
 
+## Ingest 任意格式
+
+`conversation-panel.tsx` 的 ingest 欄位為 textarea，自動偵測輸入：
+- URL（`http://` / `https://`）→ `{ kind: 'url', url: ... }`
+- 其他文字或 Markdown → `{ kind: 'text', title: 第一非空行, content: ... }`
+
+API (`/api/ingest`) 已支援兩種 kind。Ctrl+Enter 快速提交。
+
+## 側邊欄拖移
+
+`workspace-shell.tsx` 用 `dragging` ref + `document.addEventListener` 實作：
+- 左側面板：160~480px（預設 240）
+- 右側面板：240~600px（預設 384）
+- 拖移把手：4px 透明 div，hover 顯示 accent 色
+
+## Drive Token 失效處理
+
+`create-form.tsx` 偵測 `/api/workspaces` 回傳 403 + "Google Drive"：
+- 顯示「Re-connect Google Drive」按鈕
+- 觸發 `supabase.auth.signInWithOAuth` with `prompt: consent, access_type: offline`
+- 重授權後 auth/callback 重新儲存 refresh token
+
 ## 其他注意事項
 
 - Lucide v3 已移除 icon 的 `title` prop，改用 `aria-label`
 - `packages/prompts` 的 `.md` import 需要 `markdown.d.ts` 宣告 + next.config webpack `asset/source` loader
 - TypeScript target 需 ES2023（`Array.prototype.findLast`）
 - Google Drive scope 用 `drive.file`（只看到 App 建立的檔案）
+- i18n 採 cookie-based（`NEXT_LOCALE`），支援 `zh-TW`（預設）和 `en`

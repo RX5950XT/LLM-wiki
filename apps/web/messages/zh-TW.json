@@ -53,7 +53,7 @@
     "done": "完成",
     "failed": "失敗",
     "touchedPages": "已更新 {count} 個頁面",
-    "placeholder": "貼上網址以整合…",
+    "placeholder": "貼上 URL、文字或 Markdown…",
     "button": "整合",
     "doneStatus": "完成 — {status}",
     "savedSynthesis": "已儲存為綜合頁面"
@@ -75,6 +75,7 @@
     "model": "模型",
     "setDefault": "設為預設",
     "language": "語言",
-    "backToWorkspace": "返回工作區"
+    "backToWorkspace": "返回工作區",
+    "profile": "個人資料"
   }
 }

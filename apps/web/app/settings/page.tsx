@@ -47,6 +47,38 @@ export default async function SettingsPage() {
 
         <h1 className="text-xl font-semibold">{t('settings.title')}</h1>
 
+        {/* Profile */}
+        <section className="space-y-4">
+          <h2 className="text-sm font-medium uppercase tracking-wider" style={{ color: 'var(--fg-muted)' }}>
+            {t('settings.profile')}
+          </h2>
+          <div className="flex items-center gap-4">
+            {user.user_metadata?.avatar_url ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={user.user_metadata.avatar_url as string}
+                alt=""
+                referrerPolicy="no-referrer"
+                className="h-12 w-12 rounded-full"
+              />
+            ) : (
+              <div
+                className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-lg font-semibold"
+                style={{ background: 'var(--color-accent-glow)', color: 'var(--color-accent)' }}
+              >
+                {((user.user_metadata?.full_name as string | undefined) ?? user.email ?? 'U').charAt(0).toUpperCase()}
+              </div>
+            )}
+            <div className="min-w-0 space-y-0.5">
+              {user.user_metadata?.full_name && (
+                <p className="truncate text-sm font-medium">{user.user_metadata.full_name as string}</p>
+              )}
+              <p className="truncate text-sm" style={{ color: 'var(--fg-muted)' }}>{user.email}</p>
+              <p className="truncate font-mono text-xs" style={{ color: 'var(--fg-muted)', opacity: 0.5 }}>{user.id}</p>
+            </div>
+          </div>
+        </section>
+
         <section className="space-y-4">
           <h2 className="text-sm font-medium uppercase tracking-wider" style={{ color: 'var(--fg-muted)' }}>
             {t('settings.llmProfiles')}

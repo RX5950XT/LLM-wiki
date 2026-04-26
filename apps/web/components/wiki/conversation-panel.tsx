@@ -21,6 +21,20 @@ interface ConversationPanelProps {
   onPageClick?: (slug: string) => void;
 }
 
+function isUrl(text: string): boolean {
+  try {
+    const u = new URL(text.trim());
+    return u.protocol === 'http:' || u.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+function extractTitle(text: string): string {
+  const line = text.split('\n').find((l) => l.trim().length > 0) ?? 'Untitled';
+  return line.replace(/^#+\s*/, '').trim().slice(0, 80);
+}
+
 export function ConversationPanel({
   workspaceId,
   onSourceAdded,
@@ -28,7 +42,7 @@ export function ConversationPanel({
   onPageClick,
 }: ConversationPanelProps) {
   const t = useTranslations();
-  const [ingestUrl, setIngestUrl] = useState('');
+  const [ingestInput, setIngestInput] = useState('');
   const [ingesting, setIngesting] = useState(false);
   const [ingestError, setIngestError] = useState<string | null>(null);
   const [ingestResult, setIngestResult] = useState<string | null>(null);
@@ -111,15 +125,20 @@ export function ConversationPanel({
 
   const handleIngest = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!ingestUrl.trim()) return;
+    if (!ingestInput.trim()) return;
     setIngesting(true);
     setIngestError(null);
     setIngestResult(null);
 
+    const trimmed = ingestInput.trim();
+    const payload = isUrl(trimmed)
+      ? { kind: 'url' as const, url: trimmed, workspace_id: workspaceId }
+      : { kind: 'text' as const, title: extractTitle(trimmed), content: trimmed, workspace_id: workspaceId };
+
     const res = await fetch('/api/ingest', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ kind: 'url', url: ingestUrl, workspace_id: workspaceId }),
+      body: JSON.stringify(payload),
     });
     const data = await res.json();
 
@@ -128,7 +147,7 @@ export function ConversationPanel({
       setIngestError(data.error ?? 'Ingest failed');
     } else {
       setIngestResult(t('ingest.doneStatus', { status: data.status }));
-      setIngestUrl('');
+      setIngestInput('');
       onSourceAdded?.();
     }
   };
@@ -172,23 +191,33 @@ export function ConversationPanel({
         style={{ borderColor: 'var(--border)' }}
       >
         <div className="flex gap-2">
-          <input
-            type="url"
-            value={ingestUrl}
-            onChange={(e) => setIngestUrl(e.target.value)}
+          <textarea
+            value={ingestInput}
+            onChange={(e) => {
+              setIngestInput(e.target.value);
+              e.target.style.height = 'auto';
+              e.target.style.height = `${Math.min(e.target.scrollHeight, 80)}px`;
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                handleIngest(e as unknown as React.FormEvent);
+              }
+            }}
             placeholder={t('ingest.placeholder')}
-            className="flex-1 rounded-md border px-3 py-1.5 text-xs outline-none"
+            rows={1}
+            className="flex-1 resize-none rounded-md border px-3 py-1.5 text-xs outline-none"
             style={{
               background: 'var(--bg-2)',
               borderColor: 'var(--border)',
               color: 'var(--fg)',
+              overflow: 'hidden',
             }}
             disabled={ingesting}
           />
           <button
             type="submit"
-            disabled={ingesting || !ingestUrl.trim()}
-            className="rounded-md px-3 py-1.5 text-xs font-medium disabled:opacity-50"
+            disabled={ingesting || !ingestInput.trim()}
+            className="self-end rounded-md px-3 py-1.5 text-xs font-medium disabled:opacity-50"
             style={{ background: 'var(--color-accent)', color: 'oklch(10% 0.015 250)' }}
           >
             {ingesting ? <Loader2 size={12} className="animate-spin" /> : t('ingest.button')}

@@ -53,7 +53,7 @@
     "done": "Done",
     "failed": "Failed",
     "touchedPages": "{count} pages updated",
-    "placeholder": "Paste URL to ingest…",
+    "placeholder": "Paste URL, text, or Markdown…",
     "button": "Ingest",
     "doneStatus": "Done — {status}",
     "savedSynthesis": "Saved as synthesis page"
@@ -75,6 +75,7 @@
     "model": "Model",
     "setDefault": "Set as default",
     "language": "Language",
-    "backToWorkspace": "Back to workspace"
+    "backToWorkspace": "Back to workspace",
+    "profile": "Profile"
   }
 }

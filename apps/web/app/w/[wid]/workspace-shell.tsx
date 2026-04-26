@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { PanelLeft, PanelRight, GitFork, FlaskConical, ChevronDown, LogOut, Plus } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { PageTree } from '@/components/wiki/page-tree';
@@ -38,6 +38,9 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
   const [lintRunning, setLintRunning] = useState(false);
   const [showWsMenu, setShowWsMenu] = useState(false);
   const [pages, setPages] = useState(initialPages);
+  const [leftWidth, setLeftWidth] = useState(240);
+  const [rightWidth, setRightWidth] = useState(384);
+  const dragging = useRef<{ side: 'left' | 'right'; startX: number; startWidth: number } | null>(null);
   /**
    * Incremented each time Realtime notifies us that the *currently viewed* page
    * has been updated. PageViewer watches this to show the staleness banner.
@@ -72,6 +75,41 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
   );
 
   useRealtimePages(workspaceId, handleRealtimeChange);
+
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      if (!dragging.current) return;
+      const { side, startX, startWidth } = dragging.current;
+      const delta = e.clientX - startX;
+      if (side === 'left') {
+        setLeftWidth(Math.max(160, Math.min(480, startWidth + delta)));
+      } else {
+        setRightWidth(Math.max(240, Math.min(600, startWidth - delta)));
+      }
+    };
+    const onUp = () => {
+      if (!dragging.current) return;
+      dragging.current = null;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    return () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+  }, []);
+
+  const startDrag = useCallback(
+    (e: React.MouseEvent, side: 'left' | 'right') => {
+      dragging.current = { side, startX: e.clientX, startWidth: side === 'left' ? leftWidth : rightWidth };
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+      e.preventDefault();
+    },
+    [leftWidth, rightWidth],
+  );
 
   const runLint = useCallback(async () => {
     setLintRunning(true);
@@ -213,17 +251,26 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
       <div className="flex flex-1 overflow-hidden">
         {/* Left: page tree */}
         {leftOpen && (
-          <div
-            className="w-60 shrink-0 overflow-hidden border-r"
-            style={{ borderColor: 'var(--border)', background: 'var(--bg-2)' }}
-          >
-            <PageTree
-              workspaceId={workspaceId}
-              initialPages={pages}
-              activePage={activePage}
-              onSelectPage={setActivePage}
+          <>
+            <div
+              className="shrink-0 overflow-hidden"
+              style={{ width: leftWidth, borderRight: '1px solid var(--border)', background: 'var(--bg-2)' }}
+            >
+              <PageTree
+                workspaceId={workspaceId}
+                initialPages={pages}
+                activePage={activePage}
+                onSelectPage={setActivePage}
+              />
+            </div>
+            <div
+              className="shrink-0 cursor-col-resize"
+              style={{ width: 4 }}
+              onMouseDown={(e) => startDrag(e, 'left')}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'var(--color-accent)'; (e.currentTarget as HTMLDivElement).style.opacity = '0.4'; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = ''; (e.currentTarget as HTMLDivElement).style.opacity = ''; }}
             />
-          </div>
+          </>
         )}
 
         {/* Center: wiki page viewer OR graph view */}
@@ -249,14 +296,23 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
 
         {/* Right: conversation + ingest */}
         {rightOpen && (
-          <div className="w-96 shrink-0 overflow-hidden">
-            <ConversationPanel
-              workspaceId={workspaceId}
-              onSourceAdded={refreshPageList}
-              onPageWritten={handlePageWritten}
-              onPageClick={setActivePage}
+          <>
+            <div
+              className="shrink-0 cursor-col-resize"
+              style={{ width: 4 }}
+              onMouseDown={(e) => startDrag(e, 'right')}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'var(--color-accent)'; (e.currentTarget as HTMLDivElement).style.opacity = '0.4'; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = ''; (e.currentTarget as HTMLDivElement).style.opacity = ''; }}
             />
-          </div>
+            <div style={{ width: rightWidth }} className="shrink-0 overflow-hidden">
+              <ConversationPanel
+                workspaceId={workspaceId}
+                onSourceAdded={refreshPageList}
+                onPageWritten={handlePageWritten}
+                onPageClick={setActivePage}
+              />
+            </div>
+          </>
         )}
       </div>
     </div>
