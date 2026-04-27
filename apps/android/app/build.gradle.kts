@@ -104,6 +104,10 @@ dependencies {
     // Kotlinx Serialization
     implementation(libs.kotlinx.serialization.json)
 
+    // Google Drive API
+    implementation(libs.google.api.client.android)
+    implementation(libs.google.api.services.drive)
+
     // Markwon (markdown rendering in Compose via AndroidView)
     implementation(libs.markwon.core)
     implementation(libs.markwon.strikethrough)

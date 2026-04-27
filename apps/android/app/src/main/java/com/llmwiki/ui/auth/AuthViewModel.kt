@@ -13,6 +13,7 @@ import com.llmwiki.data.SupabaseClientProvider
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.auth.providers.Google
 import io.github.jan.supabase.auth.providers.builtin.IDToken
+import io.github.jan.supabase.postgrest.from
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -59,7 +60,7 @@ class AuthViewModel : ViewModel() {
 
                     // Fetch first workspace
                     val workspaces = supabase
-                        .postgrest["workspaces"]
+                        .from("workspaces")
                         .select()
                         .decodeList<com.llmwiki.data.WorkspaceRow>()
 
