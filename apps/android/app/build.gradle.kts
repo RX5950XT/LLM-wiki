@@ -8,10 +8,33 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
-val localProperties = Properties().apply {
-    val f = rootProject.file("local.properties")
-    if (f.exists()) load(f.inputStream())
+fun loadPropertiesFile(path: String): Properties = Properties().apply {
+    val file = rootProject.file(path)
+    if (file.exists()) {
+        file.inputStream().use(::load)
+    }
 }
+
+val localProperties = Properties().apply {
+    putAll(loadPropertiesFile("../../.env.local"))
+    putAll(loadPropertiesFile("../../apps/web/.env.local"))
+    putAll(loadPropertiesFile("local.properties"))
+}
+
+fun configValue(vararg keys: String): String = keys
+    .firstNotNullOfOrNull { key ->
+        (localProperties[key] as? String)?.takeIf { it.isNotBlank() }
+            ?: System.getenv(key)?.takeIf { it.isNotBlank() }
+    }
+    ?: ""
+
+fun requiredConfigValue(name: String, vararg keys: String): String = configValue(*keys).ifBlank {
+    throw GradleException(
+        "Missing Android config $name. Add ${keys.joinToString(" or ")} to apps/android/local.properties, repo .env.local, or environment variables."
+    )
+}
+
+fun buildConfigString(value: String): String = "\"${value.replace("\\", "\\\\").replace("\"", "\\\"")}\""
 
 android {
     namespace = "com.llmwiki"
@@ -27,9 +50,21 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // Supabase config injected at build time
-        buildConfigField("String", "SUPABASE_URL", "\"${localProperties["SUPABASE_URL"] ?: ""}\"")
-        buildConfigField("String", "SUPABASE_ANON_KEY", "\"${localProperties["SUPABASE_ANON_KEY"] ?: ""}\"")
-        buildConfigField("String", "GOOGLE_CLIENT_ID", "\"${localProperties["GOOGLE_CLIENT_ID"] ?: ""}\"")
+        buildConfigField(
+            "String",
+            "SUPABASE_URL",
+            buildConfigString(requiredConfigValue("SUPABASE_URL", "SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_URL")),
+        )
+        buildConfigField(
+            "String",
+            "SUPABASE_ANON_KEY",
+            buildConfigString(requiredConfigValue("SUPABASE_ANON_KEY", "SUPABASE_ANON_KEY", "NEXT_PUBLIC_SUPABASE_ANON_KEY")),
+        )
+        buildConfigField(
+            "String",
+            "GOOGLE_CLIENT_ID",
+            buildConfigString(requiredConfigValue("GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_ID", "GOOGLE_OAUTH_CLIENT_ID")),
+        )
     }
 
     buildFeatures {
@@ -103,10 +138,8 @@ dependencies {
     // WorkManager
     implementation(libs.androidx.work.runtime.ktx)
 
-    // Credential Manager (Google Sign-In)
-    implementation(libs.androidx.credentials)
-    implementation(libs.androidx.credentials.play.services.auth)
-    implementation(libs.googleid)
+    // Google Sign-In
+    implementation(libs.play.services.auth)
 
     // DataStore
     implementation(libs.androidx.datastore.preferences)

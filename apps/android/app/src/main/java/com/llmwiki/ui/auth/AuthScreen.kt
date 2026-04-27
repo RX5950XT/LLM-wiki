@@ -1,5 +1,7 @@
 package com.llmwiki.ui.auth
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -32,6 +34,11 @@ fun AuthScreen(
 ) {
     val state by authViewModel.state.collectAsState()
     val context = LocalContext.current
+    val googleSignInLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        authViewModel.handleGoogleSignInResult(result.data)
+    }
 
     LaunchedEffect(state) {
         if (state is AuthState.Success) {
@@ -72,9 +79,13 @@ fun AuthScreen(
                         color = MaterialTheme.colorScheme.error,
                         modifier = Modifier.padding(bottom = 12.dp),
                     )
-                    SignInButton { authViewModel.signInWithGoogle(context) }
+                    SignInButton {
+                        authViewModel.createGoogleSignInIntent(context)?.let(googleSignInLauncher::launch)
+                    }
                 }
-                else -> SignInButton { authViewModel.signInWithGoogle(context) }
+                else -> SignInButton {
+                    authViewModel.createGoogleSignInIntent(context)?.let(googleSignInLauncher::launch)
+                }
             }
         }
     }

@@ -1,14 +1,12 @@
 package com.llmwiki.ui.auth
 
 import android.content.Context
-import androidx.credentials.CredentialManager
-import androidx.credentials.GetCredentialRequest
-import androidx.credentials.exceptions.GetCredentialException
+import android.content.Intent
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.google.android.libraries.identity.googleid.GetGoogleIdOption
-import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
-import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
+import com.google.android.gms.auth.api.signin.GoogleSignIn
+import com.google.android.gms.auth.api.signin.GoogleSignInOptions
+import com.google.android.gms.common.api.ApiException
 import com.llmwiki.BuildConfig
 import com.llmwiki.data.SupabaseClientProvider
 import io.github.jan.supabase.auth.auth
@@ -31,55 +29,52 @@ class AuthViewModel : ViewModel() {
     private val _state = MutableStateFlow<AuthState>(AuthState.Idle)
     val state: StateFlow<AuthState> = _state
 
-    fun signInWithGoogle(context: Context) {
+    fun createGoogleSignInIntent(context: Context): Intent? {
+        val googleClientId = BuildConfig.GOOGLE_CLIENT_ID.trim()
+        if (googleClientId.isBlank()) {
+            _state.value = AuthState.Error("Missing Google Web Client ID. Rebuild the Android app with GOOGLE_CLIENT_ID or GOOGLE_OAUTH_CLIENT_ID configured.")
+            return null
+        }
+
+        _state.value = AuthState.Loading
+        val options = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+            .requestIdToken(googleClientId)
+            .requestEmail()
+            .build()
+
+        return GoogleSignIn.getClient(context, options).signInIntent
+    }
+
+    fun handleGoogleSignInResult(data: Intent?) {
         viewModelScope.launch {
-            _state.value = AuthState.Loading
             try {
-                val credentialManager = CredentialManager.create(context)
-
-                val googleIdOption = GetGoogleIdOption.Builder()
-                    .setFilterByAuthorizedAccounts(false)
-                    .setServerClientId(BuildConfig.GOOGLE_CLIENT_ID)
-                    .setAutoSelectEnabled(false)
-                    .build()
-
-                // Fallback for devices where One Tap is unavailable or returns "No credentials available"
-                val signInWithGoogleOption = GetSignInWithGoogleOption.Builder(BuildConfig.GOOGLE_CLIENT_ID)
-                    .build()
-
-                val request = GetCredentialRequest.Builder()
-                    .addCredentialOption(googleIdOption)
-                    .addCredentialOption(signInWithGoogleOption)
-                    .build()
-
-                val result = credentialManager.getCredential(context, request)
-                val credential = result.credential
-
-                if (credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
-                    val googleCredential = GoogleIdTokenCredential.createFrom(credential.data)
-
-                    val supabase = SupabaseClientProvider.client
-                    supabase.auth.signInWith(IDToken) {
-                        idToken = googleCredential.idToken
-                        provider = Google
-                    }
-
-                    // Fetch first workspace
-                    val workspaces = supabase
-                        .from("workspaces")
-                        .select()
-                        .decodeList<com.llmwiki.data.WorkspaceRow>()
-
-                    // googleCredential.id is the email — used as GoogleAccountCredential account name
-                    _state.value = AuthState.Success(
-                        workspaceId = workspaces.firstOrNull()?.id,
-                        accountName = googleCredential.id,
-                    )
-                } else {
-                    _state.value = AuthState.Error("Unexpected credential type")
+                val account = GoogleSignIn.getSignedInAccountFromIntent(data)
+                    .getResult(ApiException::class.java)
+                val idToken = account.idToken
+                if (idToken.isNullOrBlank()) {
+                    _state.value = AuthState.Error("Google sign-in did not return an ID token. Verify GOOGLE_CLIENT_ID is the Web OAuth client ID.")
+                    return@launch
                 }
-            } catch (e: GetCredentialException) {
-                _state.value = AuthState.Error(e.message ?: "Sign-in cancelled")
+
+                val supabase = SupabaseClientProvider.client
+                supabase.auth.signInWith(IDToken) {
+                    this.idToken = idToken
+                    provider = Google
+                }
+
+                val workspaces = supabase
+                    .from("workspaces")
+                    .select()
+                    .decodeList<com.llmwiki.data.WorkspaceRow>()
+
+                _state.value = AuthState.Success(
+                    workspaceId = workspaces.firstOrNull()?.id,
+                    accountName = account.email ?: account.account?.name.orEmpty(),
+                )
+            } catch (e: ApiException) {
+                _state.value = AuthState.Error(
+                    "Google sign-in failed (${e.statusCode}). Verify the Android OAuth client package com.llmwiki and this build's SHA-1 in Google Cloud Console."
+                )
             } catch (e: Exception) {
                 _state.value = AuthState.Error(e.message ?: "Unknown error")
             }
