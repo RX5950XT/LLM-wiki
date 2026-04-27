@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { Trash2 } from 'lucide-react';
+import { useTranslations } from 'next-intl';
 
 interface Profile {
   id: string;
@@ -12,6 +13,7 @@ interface Profile {
 }
 
 export function ProfileList({ profiles }: { profiles: Profile[] }) {
+  const t = useTranslations('settings');
   const [list, setList] = useState(profiles);
 
   const handleDelete = async (id: string) => {
@@ -22,7 +24,7 @@ export function ProfileList({ profiles }: { profiles: Profile[] }) {
   if (list.length === 0) {
     return (
       <p className="text-sm" style={{ color: 'var(--fg-muted)' }}>
-        No profiles yet. Add one below.
+        {t('noProfiles')}
       </p>
     );
   }
@@ -45,7 +47,7 @@ export function ProfileList({ profiles }: { profiles: Profile[] }) {
                   className="rounded px-1.5 py-0.5 text-xs font-medium"
                   style={{ background: 'var(--color-accent-muted)', color: 'var(--color-accent)' }}
                 >
-                  default
+                  {t('default')}
                 </span>
               )}
             </div>
@@ -57,7 +59,7 @@ export function ProfileList({ profiles }: { profiles: Profile[] }) {
             onClick={() => handleDelete(p.id)}
             className="rounded p-1.5 transition-opacity hover:opacity-70"
             style={{ color: 'var(--fg-muted)' }}
-            aria-label="Delete profile"
+            aria-label={t('deleteProfile')}
           >
             <Trash2 size={14} />
           </button>

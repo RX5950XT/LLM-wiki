@@ -155,7 +155,8 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
             onClick={() => setLeftOpen((o) => !o)}
             className="rounded p-1 transition-all duration-100 hover:opacity-70 active:scale-90"
             style={{ color: 'var(--fg-muted)' }}
-            aria-label="Toggle sidebar"
+            aria-label={t('workspace.toggleSidebar')}
+            title={t('workspace.toggleSidebar')}
           >
             <PanelLeft size={16} />
           </button>
@@ -214,8 +215,8 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
             onClick={() => setShowGraph((g) => !g)}
             className="rounded p-1 transition-all duration-100 hover:opacity-70 active:scale-90"
             style={{ color: showGraph ? 'var(--color-accent)' : 'var(--fg-muted)' }}
-            aria-label="Toggle graph view"
-            title="Graph view"
+            aria-label={t('workspace.toggleGraphView')}
+            title={t('workspace.graphView')}
           >
             <GitFork size={16} />
           </button>
@@ -226,8 +227,8 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
             disabled={lintRunning}
             className="rounded p-1 transition-all duration-100 hover:opacity-70 active:scale-90 disabled:opacity-40"
             style={{ color: 'var(--fg-muted)' }}
-            aria-label="Run lint"
-            title={lintRunning ? 'Lint running…' : 'Run wiki lint'}
+            aria-label={t('workspace.runLint')}
+            title={lintRunning ? t('workspace.lintRunning') : t('workspace.runLint')}
           >
             <FlaskConical size={16} />
           </button>
@@ -236,7 +237,8 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
             onClick={() => setRightOpen((o) => !o)}
             className="rounded p-1 transition-all duration-100 hover:opacity-70 active:scale-90"
             style={{ color: 'var(--fg-muted)' }}
-            aria-label="Toggle conversation"
+            aria-label={t('workspace.toggleConversation')}
+            title={t('workspace.toggleConversation')}
           >
             <PanelRight size={16} />
           </button>
@@ -275,7 +277,6 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
               style={{ width: leftWidth, borderRight: '1px solid var(--border)', background: 'var(--bg-2)' }}
             >
               <PageTree
-                workspaceId={workspaceId}
                 initialPages={pages}
                 activePage={activePage}
                 onSelectPage={setActivePage}

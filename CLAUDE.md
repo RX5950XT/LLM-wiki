@@ -118,7 +118,7 @@ Query API 在文字串流結尾附加：
 
 ## 功能開發原則
 
-**Web 與 Android 功能必須同步**：實作任何使用者功能時，Web 和 Android 都要一起更新，不可只改一端。  
+**Web 與 Android 功能必須同步**：實作任何使用者可見功能時，需檢查 Web 與 Android 是否都需要對齊；若只適用單一平台（例如 Web-only 的版面、tooltip、route loading），需在回報時明確說明。  
 Android 呼叫與 Web 相同的後端 API（`/api/ingest`、`/api/query`、`/api/pages/…`、`/api/workspaces/…`），無需另建端點。
 
 ## 進度狀態
@@ -132,6 +132,7 @@ Android 呼叫與 Web 相同的後端 API（`/api/ingest`、`/api/query`、`/api
 - **Phase 6** ✅：介面優化 — 完整繁體中文 i18n、多工作區切換 + 新增工作區、登出按鈕、設定返回按鈕
 - **Phase 7** ✅：Ingest 任意格式（URL/文字/Markdown）、側邊欄拖移調整寬度、設定頁個人資料、Drive token 失效重授權
 - **Phase 8** ✅：Android 功能對齊 — Chat/Query 串流、citations、synthesis file-back、文字/Markdown ingest、lock toggle、登出
+- **Phase 9** ✅：Web 介面精修 — 設定頁主題切換、route loading 骨架屏、檔案上傳 ingest、完整 i18n tooltip；Android 無需變更（本階段為 Web-only UI/效能調整）
 
 ## 目錄速查（Android）
 

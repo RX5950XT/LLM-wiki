@@ -23,7 +23,13 @@
     "description": "描述",
     "noWorkspaces": "目前沒有工作區，建立一個開始使用吧。",
     "switchWorkspace": "切換工作區",
-    "addWorkspace": "新增工作區"
+    "addWorkspace": "新增工作區",
+    "toggleSidebar": "切換側邊欄",
+    "toggleGraphView": "切換知識圖譜",
+    "toggleConversation": "切換對話面板",
+    "graphView": "知識圖譜",
+    "runLint": "執行 Wiki 健康檢查",
+    "lintRunning": "健康檢查執行中…"
   },
   "wiki": {
     "index": "索引",
@@ -87,6 +93,10 @@
     "theme": "外觀主題",
     "themeLight": "淺色",
     "themeDark": "深色",
-    "themeSystem": "跟隨系統"
+    "themeSystem": "跟隨系統",
+    "noProfiles": "尚無設定檔，請在下方新增。",
+    "default": "預設",
+    "deleteProfile": "刪除設定檔",
+    "saveFailed": "儲存設定檔失敗"
   }
 }

@@ -3,8 +3,6 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { ChevronDown } from 'lucide-react';
-
 const PROVIDER_PRESETS = [
   { label: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', model: 'anthropic/claude-opus-4-7' },
   { label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o' },
@@ -16,6 +14,7 @@ const PROVIDER_PRESETS = [
 
 export function ProfileForm() {
   const t = useTranslations('settings');
+  const tCommon = useTranslations('common');
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -46,7 +45,7 @@ export function ProfileForm() {
     const data = await res.json();
 
     if (!res.ok) {
-      setError(data.error ?? 'Failed to save profile');
+      setError(data.error ?? t('saveFailed'));
       setSubmitting(false);
       return;
     }
@@ -148,7 +147,7 @@ export function ProfileForm() {
               className="rounded-lg px-4 py-2 text-sm"
               style={{ color: 'var(--fg-muted)' }}
             >
-              Cancel
+              {tCommon('cancel')}
             </button>
           </div>
         </form>

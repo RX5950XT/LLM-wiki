@@ -23,7 +23,13 @@
     "description": "Description",
     "noWorkspaces": "No workspaces yet. Create one to get started.",
     "switchWorkspace": "Switch workspace",
-    "addWorkspace": "New workspace"
+    "addWorkspace": "New workspace",
+    "toggleSidebar": "Toggle sidebar",
+    "toggleGraphView": "Toggle graph view",
+    "toggleConversation": "Toggle conversation",
+    "graphView": "Graph view",
+    "runLint": "Run wiki lint",
+    "lintRunning": "Lint running…"
   },
   "wiki": {
     "index": "Index",
@@ -87,6 +93,10 @@
     "theme": "Appearance",
     "themeLight": "Light",
     "themeDark": "Dark",
-    "themeSystem": "System"
+    "themeSystem": "System",
+    "noProfiles": "No profiles yet. Add one below.",
+    "default": "default",
+    "deleteProfile": "Delete profile",
+    "saveFailed": "Failed to save profile"
   }
 }

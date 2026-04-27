@@ -1,9 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import Link from 'next/link';
 import { useTranslations } from 'next-intl';
-import { FileText, Settings, ChevronDown, ChevronRight } from 'lucide-react';
+import { FileText, ChevronDown, ChevronRight } from 'lucide-react';
 
 interface PageEntry {
   slug: string;
@@ -13,7 +12,6 @@ interface PageEntry {
 }
 
 interface PageTreeProps {
-  workspaceId: string;
   initialPages: PageEntry[];
   activePage: string | null;
   onSelectPage: (slug: string) => void;
@@ -28,7 +26,7 @@ function groupByZone(pages: PageEntry[]) {
   return groups;
 }
 
-export function PageTree({ workspaceId, initialPages, activePage, onSelectPage }: PageTreeProps) {
+export function PageTree({ initialPages, activePage, onSelectPage }: PageTreeProps) {
   const t = useTranslations();
   const [pages] = useState(initialPages);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({ wiki: true });
@@ -81,17 +79,6 @@ export function PageTree({ workspaceId, initialPages, activePage, onSelectPage }
           )}
         </div>
       ))}
-
-      <div className="mt-auto border-t px-3 py-3" style={{ borderColor: 'var(--border)' }}>
-        <Link
-          href="/settings"
-          className="flex items-center gap-2 text-xs transition-opacity hover:opacity-70"
-          style={{ color: 'var(--fg-muted)' }}
-        >
-          <Settings size={13} />
-          {t('common.settings')}
-        </Link>
-      </div>
     </nav>
   );
 }
