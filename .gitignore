@@ -60,3 +60,5 @@ supabase/.temp/
 .DS_Store
 
 .vercel
+
+llm-wiki-apk/

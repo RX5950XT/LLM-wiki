@@ -1,7 +1,9 @@
 'use client';
 
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { PanelLeft, PanelRight, GitFork, FlaskConical, ChevronDown, LogOut, Plus } from 'lucide-react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { PanelLeft, PanelRight, GitFork, FlaskConical, ChevronDown, LogOut, Plus, Settings } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { PageTree } from '@/components/wiki/page-tree';
 import { PageViewer } from '@/components/wiki/page-viewer';
@@ -31,6 +33,7 @@ interface WorkspaceShellProps {
 
 export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initialPages }: WorkspaceShellProps) {
   const t = useTranslations();
+  const router = useRouter();
   const [activePage, setActivePage] = useState<string>('index.md');
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
@@ -75,6 +78,10 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
   );
 
   useRealtimePages(workspaceId, handleRealtimeChange);
+
+  useEffect(() => {
+    router.prefetch('/settings');
+  }, [router]);
 
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
@@ -146,7 +153,7 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
         <div className="flex items-center gap-3">
           <button
             onClick={() => setLeftOpen((o) => !o)}
-            className="rounded p-1 transition-opacity hover:opacity-70"
+            className="rounded p-1 transition-all duration-100 hover:opacity-70 active:scale-90"
             style={{ color: 'var(--fg-muted)' }}
             aria-label="Toggle sidebar"
           >
@@ -171,7 +178,7 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
                   onClick={() => setShowWsMenu(false)}
                 />
                 <div
-                  className="absolute left-0 top-full z-50 mt-1 w-52 overflow-hidden rounded-lg border shadow-lg"
+                  className="animate-dropdown absolute left-0 top-full z-50 mt-1 w-52 overflow-hidden rounded-lg border shadow-lg"
                   style={{ background: 'var(--bg-2)', borderColor: 'var(--border)' }}
                 >
                   {workspaces.map((ws) => (
@@ -205,8 +212,8 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
           {/* Graph view toggle */}
           <button
             onClick={() => setShowGraph((g) => !g)}
-            className="rounded p-1 transition-opacity hover:opacity-70"
-            style={{ color: showGraph ? 'var(--accent)' : 'var(--fg-muted)' }}
+            className="rounded p-1 transition-all duration-100 hover:opacity-70 active:scale-90"
+            style={{ color: showGraph ? 'var(--color-accent)' : 'var(--fg-muted)' }}
             aria-label="Toggle graph view"
             title="Graph view"
           >
@@ -217,7 +224,7 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
           <button
             onClick={runLint}
             disabled={lintRunning}
-            className="rounded p-1 transition-opacity hover:opacity-70 disabled:opacity-40"
+            className="rounded p-1 transition-all duration-100 hover:opacity-70 active:scale-90 disabled:opacity-40"
             style={{ color: 'var(--fg-muted)' }}
             aria-label="Run lint"
             title={lintRunning ? 'Lint running…' : 'Run wiki lint'}
@@ -227,17 +234,28 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
 
           <button
             onClick={() => setRightOpen((o) => !o)}
-            className="rounded p-1 transition-opacity hover:opacity-70"
+            className="rounded p-1 transition-all duration-100 hover:opacity-70 active:scale-90"
             style={{ color: 'var(--fg-muted)' }}
             aria-label="Toggle conversation"
           >
             <PanelRight size={16} />
           </button>
 
+          <Link
+            href="/settings"
+            prefetch
+            className="rounded p-1 transition-all duration-100 hover:opacity-70 active:scale-90"
+            style={{ color: 'var(--fg-muted)' }}
+            aria-label={t('common.settings')}
+            title={t('common.settings')}
+          >
+            <Settings size={16} />
+          </Link>
+
           {/* Logout */}
           <button
             onClick={handleSignOut}
-            className="rounded p-1 transition-opacity hover:opacity-70"
+            className="rounded p-1 transition-all duration-100 hover:opacity-70 active:scale-90"
             style={{ color: 'var(--fg-muted)' }}
             aria-label={t('auth.signOut')}
             title={t('auth.signOut')}

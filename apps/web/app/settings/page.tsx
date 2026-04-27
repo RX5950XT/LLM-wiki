@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/server';
 import { ProfileList } from '@/components/settings/profile-list';
 import { ProfileForm } from '@/components/settings/profile-form';
 import { LocaleSwitcher } from '@/components/settings/locale-switcher';
+import { ThemeSwitcher } from '@/components/settings/theme-switcher';
 
 export default async function SettingsPage() {
   const supabase = await createClient();
@@ -85,6 +86,13 @@ export default async function SettingsPage() {
           </h2>
           <ProfileList profiles={profiles ?? []} />
           <ProfileForm />
+        </section>
+
+        <section className="space-y-4">
+          <h2 className="text-sm font-medium uppercase tracking-wider" style={{ color: 'var(--fg-muted)' }}>
+            {t('settings.theme')}
+          </h2>
+          <ThemeSwitcher />
         </section>
 
         <section className="space-y-4">

@@ -1,7 +1,9 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Send, Bookmark, Loader2, CheckCircle, ChevronRight } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { Send, Bookmark, Loader2, CheckCircle, ChevronRight, Plus } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { parseCitations } from '@/lib/ai/citation-parser';
 
@@ -17,9 +19,10 @@ interface ConversationPanelProps {
   workspaceId: string;
   onSourceAdded?: () => void;
   onPageWritten?: (slug: string) => void;
-  /** Called when user wants to view a wiki page */
   onPageClick?: (slug: string) => void;
 }
+
+const MAX_INGEST_FILE_BYTES = 2 * 1024 * 1024;
 
 function isUrl(text: string): boolean {
   try {
@@ -46,6 +49,7 @@ export function ConversationPanel({
   const [ingesting, setIngesting] = useState(false);
   const [ingestError, setIngestError] = useState<string | null>(null);
   const [ingestResult, setIngestResult] = useState<string | null>(null);
+  const [isDraggingFile, setIsDraggingFile] = useState(false);
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
@@ -57,6 +61,33 @@ export function ConversationPanel({
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  const loadFileIntoIngest = useCallback(
+    async (file: File) => {
+      setIngestError(null);
+      setIngestResult(null);
+
+      const isSupported = file.name.endsWith('.md') || file.name.endsWith('.txt') || file.type.startsWith('text/');
+      if (!isSupported) {
+        setIngestError(t('ingest.unsupportedType'));
+        return;
+      }
+
+      if (file.size > MAX_INGEST_FILE_BYTES) {
+        setIngestError(t('ingest.fileTooLarge'));
+        return;
+      }
+
+      try {
+        const text = await file.text();
+        setIngestInput(text);
+        setIngestResult(t('ingest.fileLoaded', { name: file.name }));
+      } catch {
+        setIngestError(t('ingest.fileReadError'));
+      }
+    },
+    [t],
+  );
 
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
@@ -191,6 +222,25 @@ export function ConversationPanel({
         style={{ borderColor: 'var(--border)' }}
       >
         <div className="flex gap-2">
+          <label
+            className="self-end rounded-md border p-1.5 transition-all duration-100 hover:opacity-70 active:scale-90"
+            style={{ borderColor: 'var(--border)', color: 'var(--fg-muted)' }}
+            title={t('ingest.uploadFile')}
+            aria-label={t('ingest.uploadFile')}
+          >
+            <Plus size={14} />
+            <input
+              type="file"
+              accept=".md,.txt,text/*"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) void loadFileIntoIngest(file);
+                e.target.value = '';
+              }}
+              disabled={ingesting}
+            />
+          </label>
           <textarea
             value={ingestInput}
             onChange={(e) => {
@@ -198,17 +248,28 @@ export function ConversationPanel({
               e.target.style.height = 'auto';
               e.target.style.height = `${Math.min(e.target.scrollHeight, 80)}px`;
             }}
+            onDragOver={(e) => {
+              e.preventDefault();
+              setIsDraggingFile(true);
+            }}
+            onDragLeave={() => setIsDraggingFile(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setIsDraggingFile(false);
+              const file = e.dataTransfer.files[0];
+              if (file) void loadFileIntoIngest(file);
+            }}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
                 handleIngest(e as unknown as React.FormEvent);
               }
             }}
-            placeholder={t('ingest.placeholder')}
+            placeholder={isDraggingFile ? t('ingest.dropHere') : t('ingest.placeholder')}
             rows={1}
-            className="flex-1 resize-none rounded-md border px-3 py-1.5 text-xs outline-none"
+            className="flex-1 resize-none rounded-md border px-3 py-1.5 text-xs outline-none transition-all duration-150"
             style={{
-              background: 'var(--bg-2)',
-              borderColor: 'var(--border)',
+              background: isDraggingFile ? 'var(--color-accent-glow)' : 'var(--bg-2)',
+              borderColor: isDraggingFile ? 'var(--color-accent)' : 'var(--border)',
               color: 'var(--fg)',
               overflow: 'hidden',
             }}
@@ -217,7 +278,7 @@ export function ConversationPanel({
           <button
             type="submit"
             disabled={ingesting || !ingestInput.trim()}
-            className="self-end rounded-md px-3 py-1.5 text-xs font-medium disabled:opacity-50"
+            className="self-end rounded-md px-3 py-1.5 text-xs font-medium transition-all duration-100 active:scale-95 disabled:opacity-50"
             style={{ background: 'var(--color-accent)', color: 'oklch(10% 0.015 250)' }}
           >
             {ingesting ? <Loader2 size={12} className="animate-spin" /> : t('ingest.button')}
@@ -271,15 +332,31 @@ export function ConversationPanel({
           >
             <div
               className={`inline-block max-w-[85%] rounded-lg px-3 py-2 text-sm ${
-                m.role === 'user' ? 'ml-auto' : 'llm-content'
+                m.role === 'user' ? 'ml-auto' : 'chat-prose llm-content'
               }`}
               style={{
                 background: m.role === 'user' ? 'var(--color-accent-muted)' : 'var(--bg-2)',
                 color: 'var(--fg)',
-                whiteSpace: 'pre-wrap',
+                whiteSpace: m.role === 'user' ? 'pre-wrap' : undefined,
               }}
             >
-              {m.content}
+              {m.role === 'assistant' ? (
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  components={{
+                    img: () => null,
+                    a: ({ children, ...props }) => (
+                      <a {...props} target="_blank" rel="noopener noreferrer">
+                        {children}
+                      </a>
+                    ),
+                  }}
+                >
+                  {m.content}
+                </ReactMarkdown>
+              ) : (
+                m.content
+              )}
             </div>
 
             {/* Citations */}

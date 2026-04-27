@@ -57,7 +57,13 @@
     "placeholder": "貼上 URL、文字或 Markdown…",
     "button": "整合",
     "doneStatus": "完成 — {status}",
-    "savedSynthesis": "已儲存為綜合頁面"
+    "savedSynthesis": "已儲存為綜合頁面",
+    "uploadFile": "上傳檔案",
+    "dropHere": "拖曳檔案至此",
+    "fileLoaded": "已載入：{name}",
+    "unsupportedType": "僅支援 .txt 與 .md 格式",
+    "fileReadError": "讀取檔案失敗",
+    "fileTooLarge": "檔案需小於 2 MB"
   },
   "query": {
     "placeholder": "問問你的 Wiki 任何問題...",
@@ -77,6 +83,10 @@
     "setDefault": "設為預設",
     "language": "語言",
     "backToWorkspace": "返回工作區",
-    "profile": "個人資料"
+    "profile": "個人資料",
+    "theme": "外觀主題",
+    "themeLight": "淺色",
+    "themeDark": "深色",
+    "themeSystem": "跟隨系統"
   }
 }

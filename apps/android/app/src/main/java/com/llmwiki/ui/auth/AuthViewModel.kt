@@ -7,6 +7,7 @@ import androidx.credentials.exceptions.GetCredentialException
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
+import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.llmwiki.BuildConfig
 import com.llmwiki.data.SupabaseClientProvider
@@ -42,8 +43,13 @@ class AuthViewModel : ViewModel() {
                     .setAutoSelectEnabled(false)
                     .build()
 
+                // Fallback for devices where One Tap is unavailable or returns "No credentials available"
+                val signInWithGoogleOption = GetSignInWithGoogleOption.Builder(BuildConfig.GOOGLE_CLIENT_ID)
+                    .build()
+
                 val request = GetCredentialRequest.Builder()
                     .addCredentialOption(googleIdOption)
+                    .addCredentialOption(signInWithGoogleOption)
                     .build()
 
                 val result = credentialManager.getCredential(context, request)

@@ -57,7 +57,13 @@
     "placeholder": "Paste URL, text, or Markdown…",
     "button": "Ingest",
     "doneStatus": "Done — {status}",
-    "savedSynthesis": "Saved as synthesis page"
+    "savedSynthesis": "Saved as synthesis page",
+    "uploadFile": "Upload file",
+    "dropHere": "Drop file here",
+    "fileLoaded": "Loaded: {name}",
+    "unsupportedType": "Only .txt and .md files are supported",
+    "fileReadError": "Failed to read file",
+    "fileTooLarge": "File must be under 2 MB"
   },
   "query": {
     "placeholder": "Ask your wiki anything...",
@@ -77,6 +83,10 @@
     "setDefault": "Set as default",
     "language": "Language",
     "backToWorkspace": "Back to workspace",
-    "profile": "Profile"
+    "profile": "Profile",
+    "theme": "Appearance",
+    "themeLight": "Light",
+    "themeDark": "Dark",
+    "themeSystem": "System"
   }
 }
