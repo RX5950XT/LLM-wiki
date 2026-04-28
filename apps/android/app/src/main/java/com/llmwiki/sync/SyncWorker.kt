@@ -28,7 +28,7 @@ class SyncWorker(
             val db = AppDatabase.getInstance(applicationContext)
             val drive = DriveClient(applicationContext, accountName)
             val repo = PageRepository(db, drive)
-            repo.syncPages(workspaceId)
+            repo.syncPages(workspaceId, accountName)
             Result.success()
         } catch (e: Exception) {
             // Retry on transient failures; the WorkManager back-off policy handles timing

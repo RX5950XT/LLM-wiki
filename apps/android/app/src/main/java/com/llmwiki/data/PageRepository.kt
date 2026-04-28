@@ -12,12 +12,10 @@ class PageRepository(
 ) {
     private val supabase get() = SupabaseClientProvider.client
 
-    /** Observe local Room cache (updates in real time via Flow) */
-    fun observePages(workspaceId: String): Flow<List<PageEntity>> =
-        db.pageDao().observePages(workspaceId)
+    fun observePages(workspaceId: String, accountName: String): Flow<List<PageEntity>> =
+        db.pageDao().observePages(workspaceId, accountName)
 
-    /** Refresh page list from Supabase and sync metadata to Room */
-    suspend fun syncPages(workspaceId: String) {
+    suspend fun syncPages(workspaceId: String, accountName: String) {
         val rows: List<PageRow> = supabase.from("pages")
             .select {
                 filter { eq("workspace_id", workspaceId) }
@@ -29,6 +27,7 @@ class PageRepository(
         val entities = rows.map { row ->
             PageEntity(
                 workspaceId = row.workspaceId,
+                accountName = accountName,
                 slug = row.slug,
                 title = row.title,
                 content = db.pageDao().getPage(row.workspaceId, row.slug)?.content,
@@ -43,14 +42,9 @@ class PageRepository(
         db.pageDao().upsertAll(entities)
     }
 
-    /** Fetch page content from Drive; update Room cache; return content */
     suspend fun loadPageContent(workspaceId: String, slug: String): String? {
         val entity = db.pageDao().getPage(workspaceId, slug) ?: return null
-
-        // Return cached content immediately if available
         if (entity.content != null) return entity.content
-
-        // Fetch from Drive
         val content = driveClient?.readFile(entity.driveFileId) ?: return null
         db.pageDao().updateContent(workspaceId, slug, content)
         return content

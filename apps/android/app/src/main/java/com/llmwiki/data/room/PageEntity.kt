@@ -7,6 +7,7 @@ import androidx.room.Entity
 data class PageEntity(
     @ColumnInfo(name = "workspace_id") val workspaceId: String,
     val slug: String,
+    @ColumnInfo(name = "account_name") val accountName: String,
     val title: String?,
     /** Cached Drive content — null if not yet fetched */
     val content: String?,

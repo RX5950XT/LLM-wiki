@@ -25,8 +25,6 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DrawerValue
@@ -43,6 +41,8 @@ import androidx.compose.material3.NavigationDrawerItem
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SmallFloatingActionButton
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -60,10 +60,12 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.llmwiki.R
 import com.llmwiki.data.room.PageEntity
 import kotlinx.coroutines.launch
 
@@ -109,7 +111,7 @@ fun WikiScreen(
             ModalDrawerSheet {
                 Spacer(Modifier.height(16.dp))
                 Text(
-                    text = uiState.workspace?.name ?: "LLM Wiki",
+                    text = uiState.workspace?.name ?: stringResource(R.string.app_name),
                     style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                 )
@@ -121,7 +123,7 @@ fun WikiScreen(
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(
-                            "No pages yet.\nTap + to ingest.",
+                            stringResource(R.string.wiki_no_pages),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -149,7 +151,10 @@ fun WikiScreen(
                     onClick = { wikiViewModel.signOut() },
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                 ) {
-                    Text("Sign out", color = MaterialTheme.colorScheme.error)
+                    Text(
+                        stringResource(R.string.auth_sign_out),
+                        color = MaterialTheme.colorScheme.error,
+                    )
                 }
                 Spacer(Modifier.height(8.dp))
             }
@@ -160,11 +165,11 @@ fun WikiScreen(
             topBar = {
                 TopAppBar(
                     title = {
-                        Text(uiState.activePage?.title ?: uiState.workspace?.name ?: "LLM Wiki")
+                        Text(uiState.activePage?.title ?: uiState.workspace?.name ?: stringResource(R.string.app_name))
                     },
                     navigationIcon = {
                         IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                            Icon(Icons.AutoMirrored.Filled.List, contentDescription = "Open pages")
+                            Icon(Icons.AutoMirrored.Filled.List, contentDescription = stringResource(R.string.wiki_open_pages))
                         }
                     },
                     actions = {
@@ -175,7 +180,7 @@ fun WikiScreen(
                             )
                         } else {
                             IconButton(onClick = { wikiViewModel.syncPages() }) {
-                                Icon(Icons.Default.Refresh, contentDescription = "Sync")
+                                Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.wiki_sync))
                             }
                         }
                     },
@@ -187,12 +192,12 @@ fun WikiScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     SmallFloatingActionButton(onClick = { showChatSheet = true }) {
-                        Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Chat")
+                        Icon(Icons.AutoMirrored.Filled.Send, contentDescription = stringResource(R.string.wiki_chat))
                     }
                     FloatingActionButton(
                         onClick = { pendingShareUrl = null; showIngestDialog = true },
                     ) {
-                        Icon(Icons.Default.Add, contentDescription = "Ingest")
+                        Icon(Icons.Default.Add, contentDescription = stringResource(R.string.wiki_ingest_confirm))
                     }
                 }
             },
@@ -215,8 +220,8 @@ fun WikiScreen(
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(
-                            if (pages.isEmpty()) "Tap + to ingest your first source"
-                            else "Select a page from the menu",
+                            if (pages.isEmpty()) stringResource(R.string.wiki_empty_first)
+                            else stringResource(R.string.wiki_empty_select),
                             style = MaterialTheme.typography.bodyLarge,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -236,7 +241,7 @@ fun WikiScreen(
                         Modifier.weight(1f).fillMaxWidth(),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text("No content available", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(stringResource(R.string.wiki_no_content), color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
@@ -297,7 +302,10 @@ private fun PageListItem(
             IconButton(onClick = onToggleLock) {
                 Icon(
                     Icons.Default.Lock,
-                    contentDescription = if (page.lockedByHuman) "Locked" else "Unlocked",
+                    contentDescription = if (page.lockedByHuman)
+                        stringResource(R.string.wiki_locked)
+                    else
+                        stringResource(R.string.wiki_unlocked),
                     modifier = Modifier.size(20.dp),
                     tint = if (page.lockedByHuman)
                         MaterialTheme.colorScheme.primary
@@ -337,7 +345,7 @@ private fun ChatBottomSheet(
     ) {
         Column(Modifier.fillMaxSize().imePadding()) {
             Text(
-                "Chat",
+                stringResource(R.string.wiki_chat),
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
             )
@@ -346,7 +354,7 @@ private fun ChatBottomSheet(
             if (messages.isEmpty() && !isLoading) {
                 Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                     Text(
-                        "Ask anything about your wiki",
+                        stringResource(R.string.wiki_chat_empty),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.bodyMedium,
                     )
@@ -387,11 +395,13 @@ private fun ChatBottomSheet(
                         horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
                         Text(
-                            "Saved as synthesis page",
+                            stringResource(R.string.wiki_synthesis_saved),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onPrimaryContainer,
                         )
-                        TextButton(onClick = onClearSynthesis) { Text("Dismiss") }
+                        TextButton(onClick = onClearSynthesis) {
+                            Text(stringResource(R.string.action_dismiss))
+                        }
                     }
                 }
             }
@@ -404,7 +414,7 @@ private fun ChatBottomSheet(
                 OutlinedTextField(
                     value = input,
                     onValueChange = { input = it },
-                    placeholder = { Text("Ask about your wiki…") },
+                    placeholder = { Text(stringResource(R.string.wiki_chat_input_hint)) },
                     modifier = Modifier.weight(1f),
                     maxLines = 4,
                     keyboardOptions = KeyboardOptions(
@@ -419,7 +429,7 @@ private fun ChatBottomSheet(
                     onClick = { if (input.isNotBlank() && !isLoading) { onSend(input); input = "" } },
                     enabled = input.isNotBlank() && !isLoading,
                 ) {
-                    Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
+                    Icon(Icons.AutoMirrored.Filled.Send, contentDescription = stringResource(R.string.wiki_send))
                 }
             }
         }
@@ -456,7 +466,7 @@ private fun ChatBubble(
         }
         if (message.citedSlugs.isNotEmpty()) {
             Text(
-                text = "Sources: ${message.citedSlugs.joinToString(", ")}",
+                text = stringResource(R.string.wiki_sources, message.citedSlugs.joinToString(", ")),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
@@ -470,7 +480,7 @@ private fun ChatBubble(
                         onSaveSynthesis(prevUser.content, message.content, message.citedSlugs)
                     },
                 ) {
-                    Text("Save as synthesis page", style = MaterialTheme.typography.labelSmall)
+                    Text(stringResource(R.string.query_file_back), style = MaterialTheme.typography.labelSmall)
                 }
             }
         }
@@ -489,11 +499,11 @@ private fun IngestInputDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Ingest source") },
+        title = { Text(stringResource(R.string.wiki_ingest_title)) },
         text = {
             Column {
                 Text(
-                    "Paste a URL, plain text, or Markdown",
+                    stringResource(R.string.wiki_ingest_hint),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(bottom = 8.dp),
@@ -501,7 +511,7 @@ private fun IngestInputDialog(
                 OutlinedTextField(
                     value = text,
                     onValueChange = { text = it },
-                    placeholder = { Text("https://… or paste text / Markdown") },
+                    placeholder = { Text(stringResource(R.string.wiki_ingest_placeholder)) },
                     modifier = Modifier.fillMaxWidth(),
                     maxLines = 8,
                 )
@@ -511,9 +521,11 @@ private fun IngestInputDialog(
             Button(
                 onClick = { if (text.isNotBlank()) onConfirm(text.trim()) },
                 enabled = text.isNotBlank(),
-            ) { Text("Ingest") }
+            ) { Text(stringResource(R.string.wiki_ingest_confirm)) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
+        },
     )
 }
 

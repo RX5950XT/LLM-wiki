@@ -14,4 +14,28 @@
     <string name="query_file_back">Save as synthesis page</string>
     <string name="settings_title">Settings</string>
     <string name="settings_llm_profiles">LLM Profiles</string>
+
+    <!-- Wiki screen -->
+    <string name="wiki_no_pages">No pages yet.\nTap + to ingest.</string>
+    <string name="wiki_empty_first">Tap + to ingest your first source</string>
+    <string name="wiki_empty_select">Select a page from the menu</string>
+    <string name="wiki_no_content">No content available</string>
+    <string name="wiki_open_pages">Open pages</string>
+    <string name="wiki_sync">Sync</string>
+    <string name="wiki_chat">Chat</string>
+    <string name="wiki_chat_empty">Ask anything about your wiki</string>
+    <string name="wiki_chat_input_hint">Ask about your wiki…</string>
+    <string name="wiki_send">Send</string>
+    <string name="wiki_locked">Locked</string>
+    <string name="wiki_unlocked">Unlocked</string>
+    <string name="wiki_ingest_title">Ingest source</string>
+    <string name="wiki_ingest_hint">Paste a URL, plain text, or Markdown</string>
+    <string name="wiki_ingest_placeholder">https://… or paste text / Markdown</string>
+    <string name="wiki_ingest_confirm">Ingest</string>
+    <string name="wiki_synthesis_saved">Saved as synthesis page</string>
+    <string name="wiki_sources">Sources: %1$s</string>
+    <string name="wiki_snack_ingest_started">Ingest started</string>
+    <string name="wiki_snack_ingest_failed">Ingest failed</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="action_dismiss">Dismiss</string>
 </resources>

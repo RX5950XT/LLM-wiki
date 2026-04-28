@@ -9,8 +9,8 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface PageDao {
 
-    @Query("SELECT * FROM pages WHERE workspace_id = :workspaceId ORDER BY updated_at DESC")
-    fun observePages(workspaceId: String): Flow<List<PageEntity>>
+    @Query("SELECT * FROM pages WHERE workspace_id = :workspaceId AND account_name = :accountName ORDER BY updated_at DESC")
+    fun observePages(workspaceId: String, accountName: String): Flow<List<PageEntity>>
 
     @Query("SELECT * FROM pages WHERE workspace_id = :workspaceId AND slug = :slug LIMIT 1")
     suspend fun getPage(workspaceId: String, slug: String): PageEntity?
