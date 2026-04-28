@@ -45,6 +45,10 @@ class SyncWorker(
          * Enqueue a periodic background sync (once per hour while network is available).
          * Replaces any previously enqueued sync with the same unique name.
          */
+        fun cancel(context: Context, workspaceId: String) {
+            WorkManager.getInstance(context).cancelUniqueWork("$TAG/$workspaceId")
+        }
+
         fun schedule(context: Context, accountName: String, workspaceId: String) {
             val constraints = Constraints.Builder()
                 .setRequiredNetworkType(NetworkType.CONNECTED)

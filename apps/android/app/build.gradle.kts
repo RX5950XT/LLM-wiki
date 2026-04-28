@@ -65,6 +65,11 @@ android {
             "GOOGLE_CLIENT_ID",
             buildConfigString(requiredConfigValue("GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_ID", "GOOGLE_OAUTH_CLIENT_ID")),
         )
+        buildConfigField(
+            "String",
+            "WEB_API_BASE_URL",
+            buildConfigString(requiredConfigValue("WEB_API_BASE_URL", "WEB_API_BASE_URL", "NEXT_PUBLIC_SITE_URL")),
+        )
     }
 
     buildFeatures {

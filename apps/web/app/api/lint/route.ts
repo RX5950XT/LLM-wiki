@@ -70,6 +70,7 @@ async function runLint(workspaceId: string, userId: string) {
     .from('llm_profiles')
     .select('*')
     .eq('id', profileId)
+    .eq('owner_id', userId)
     .single();
   if (!profile) return NextResponse.json({ error: 'Profile not found' }, { status: 404 });
 

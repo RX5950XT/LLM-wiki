@@ -133,6 +133,22 @@ Android 呼叫與 Web 相同的後端 API（`/api/ingest`、`/api/query`、`/api
 - **Phase 7** ✅：Ingest 任意格式（URL/文字/Markdown）、側邊欄拖移調整寬度、設定頁個人資料、Drive token 失效重授權
 - **Phase 8** ✅：Android 功能對齊 — Chat/Query 串流、citations、synthesis file-back、文字/Markdown ingest、lock toggle、登出
 - **Phase 9** ✅：Web 介面精修 — 設定頁主題切換、route loading 骨架屏、檔案上傳 ingest、完整 i18n tooltip；Android 無需變更（本階段為 Web-only UI/效能調整）
+- **Phase 10** ✅：安全性強化 + Android 手機 UI 適配 — 見下方安全注意事項
+
+## 安全注意事項（Phase 10）
+
+**已修復的漏洞**：
+
+| 嚴重度 | 位置 | 問題 | 修復方式 |
+|--------|------|------|---------|
+| P0 | `api/lint/route.ts` | admin client 查 `llm_profiles` 缺 `.eq('owner_id', userId)`，攻擊者可設 `lint_profile_id` 指向他人 profile 以使用他人 API key | 加入 `.eq('owner_id', userId)` |
+| P0 | `WikiViewModel.kt` | `webApiUrl()` 用字串替換 Supabase URL 推導 Vercel URL，Supabase URL 格式改變時 bearer token 可送到錯誤 domain | 改用 `BuildConfig.WEB_API_BASE_URL` |
+| P1 | `WikiViewModel.signOut()` | 登出後未清空 Room DB cache，未取消 WorkManager job | 加入 `db.pageDao().deleteAll()` + `SyncWorker.cancel()` |
+| P1 | `apps/web/.env.example` | `ENCRYPTION_KEY` 說明寫 `openssl rand -hex 32`（hex），但程式碼用 `base64` 解碼，runtime 會爆 | 改為 `openssl rand -base64 32` |
+
+**Android 設定注意**：
+- `WEB_API_BASE_URL` 現在是必要 build config 欄位（來源：`local.properties` 或 `NEXT_PUBLIC_SITE_URL`）
+- `GOOGLE_CLIENT_ID` 必須是 **Web OAuth client ID**，不是 Android client ID
 
 ## 目錄速查（Android）
 
@@ -169,9 +185,12 @@ apps/android/app/src/main/java/com/llmwiki/
 - `Icons.AutoMirrored.Filled.List` 取代舊版 `Icons.Default.Menu`（Compose Material 3 方向性圖示）
 - `SyncWorker.schedule()` 使用 `ExistingPeriodicWorkPolicy.KEEP`（不重複排程同一個 workspace）
 - `ingestUrl()` / `ingestText()` 呼叫 Web app 的 `/api/ingest`，使用 Supabase session accessToken
+- Web API 端點位址由 `BuildConfig.WEB_API_BASE_URL` 決定（從 `local.properties` 的 `WEB_API_BASE_URL` 或 `NEXT_PUBLIC_SITE_URL` 注入）
 - Chat 串流協定：POST `/api/query` → `text/plain` stream，結尾附 `\x00CITATIONS\x00[...]`；Android 用 Ktor `bodyAsChannel()` + `readUTF8Line()` 消費
 - Lock toggle：PATCH `/api/pages/{wid}/{slug}` `{locked_by_human:bool}`，同步更新 Room cache（`PageDao.updateLock`）
 - 登出後 NavController navigate("auth") popUpTo(0) inclusive=true
+- 登出時 `WikiViewModel.signOut()` 會清空 Room DB（`PageDao.deleteAll()`）並取消 WorkManager job（`SyncWorker.cancel()`）
+- `GOOGLE_CLIENT_ID` 必須使用 **Web OAuth client ID**（非 Android client ID），`requestIdToken()` 需要它來取得 ID token
 
 ## Graph View 注意事項
 

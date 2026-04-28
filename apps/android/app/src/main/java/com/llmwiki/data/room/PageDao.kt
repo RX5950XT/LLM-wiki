@@ -26,4 +26,7 @@ interface PageDao {
 
     @Query("UPDATE pages SET locked_by_human = :locked WHERE workspace_id = :workspaceId AND slug = :slug")
     suspend fun updateLock(workspaceId: String, slug: String, locked: Boolean)
+
+    @Query("DELETE FROM pages")
+    suspend fun deleteAll()
 }

@@ -25,6 +25,8 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DrawerValue
@@ -83,6 +85,7 @@ fun WikiScreen(
     var showIngestDialog by remember { mutableStateOf(false) }
     var pendingShareUrl by remember { mutableStateOf<String?>(null) }
     var showChatSheet by remember { mutableStateOf(false) }
+    val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(workspaceId, accountName) {
         if (accountName.isNotBlank()) wikiViewModel.init(workspaceId, accountName)
@@ -153,6 +156,7 @@ fun WikiScreen(
         },
     ) {
         Scaffold(
+            snackbarHost = { SnackbarHost(snackbarHostState) },
             topBar = {
                 TopAppBar(
                     title = {
@@ -246,10 +250,17 @@ fun WikiScreen(
             onConfirm = { text ->
                 showIngestDialog = false
                 pendingShareUrl = null
+                val onDone: (Boolean) -> Unit = { success ->
+                    scope.launch {
+                        snackbarHostState.showSnackbar(
+                            if (success) "Ingest started" else "Ingest failed"
+                        )
+                    }
+                }
                 if (isUrl(text)) {
-                    wikiViewModel.ingestUrl(text) {}
+                    wikiViewModel.ingestUrl(text, onDone)
                 } else {
-                    wikiViewModel.ingestText(extractTitle(text), text) {}
+                    wikiViewModel.ingestText(extractTitle(text), text, onDone)
                 }
             },
         )
@@ -283,11 +294,11 @@ private fun PageListItem(
         onClick = onClick,
         modifier = Modifier.padding(horizontal = 8.dp),
         badge = {
-            IconButton(onClick = onToggleLock, modifier = Modifier.size(24.dp)) {
+            IconButton(onClick = onToggleLock) {
                 Icon(
                     Icons.Default.Lock,
                     contentDescription = if (page.lockedByHuman) "Locked" else "Unlocked",
-                    modifier = Modifier.size(16.dp),
+                    modifier = Modifier.size(20.dp),
                     tint = if (page.lockedByHuman)
                         MaterialTheme.colorScheme.primary
                     else

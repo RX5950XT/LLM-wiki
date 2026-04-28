@@ -53,20 +53,26 @@ git clone https://github.com/your-org/llm-wiki
 cd llm-wiki
 bun install
 cp apps/web/.env.example apps/web/.env.local
-# 填入 SUPABASE_URL、SUPABASE_ANON_KEY、SUPABASE_SERVICE_ROLE_KEY、
-#       ENCRYPTION_KEY、GOOGLE_OAUTH_CLIENT_ID、GOOGLE_OAUTH_CLIENT_SECRET
+# 填入 SUPABASE_URL、SUPABASE_ANON_KEY、SUPABASE_SERVICE_ROLE_KEY
+#       ENCRYPTION_KEY（openssl rand -base64 32）
+#       GOOGLE_OAUTH_CLIENT_ID、GOOGLE_OAUTH_CLIENT_SECRET
+#       NEXT_PUBLIC_SITE_URL（部署後改為 Vercel URL）
 bun run dev
 ```
 
 ### Android
 
 1. 用 Android Studio 開啟 `apps/android`
-2. 建立 `local.properties`：
+2. 建立 `apps/android/local.properties`（參考 `local.properties.example`）：
    ```
-   SUPABASE_URL=...
-   SUPABASE_ANON_KEY=...
-   GOOGLE_CLIENT_ID=...
+   SUPABASE_URL=https://your-project.supabase.co
+   SUPABASE_ANON_KEY=your-anon-key
+   # 必須填 Web OAuth client ID（不是 Android client ID）
+   GOOGLE_CLIENT_ID=xxx-yyy.apps.googleusercontent.com
+   WEB_API_BASE_URL=https://your-app.vercel.app
    ```
+   - `GOOGLE_CLIENT_ID` 在 Google Cloud Console → APIs & Services → Credentials → **Web client**（`requestIdToken` 需要）
+   - `WEB_API_BASE_URL` 是 Vercel 部署後的 URL，本機測試時改為 `http://10.0.2.2:3000`（模擬器）
 3. 在裝置或模擬器上執行（API 26+）
 
 ## 如何使用

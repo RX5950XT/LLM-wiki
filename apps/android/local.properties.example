@@ -1,3 +1,4 @@
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_ANON_KEY=your-supabase-anon-key
 GOOGLE_CLIENT_ID=your-web-oauth-client-id.apps.googleusercontent.com
+WEB_API_BASE_URL=https://your-app.vercel.app
