@@ -37,22 +37,27 @@ export function ProfileForm() {
     setSubmitting(true);
     setError(null);
 
-    const res = await fetch('/api/settings/profiles', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(fields),
-    });
-    const data = await res.json();
+    try {
+      const res = await fetch('/api/settings/profiles', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(fields),
+      });
+      const data = await res.json();
 
-    if (!res.ok) {
-      setError(data.error ?? t('saveFailed'));
+      if (!res.ok) {
+        setError(data.error ?? t('saveFailed'));
+        return;
+      }
+
+      setOpen(false);
+      setFields({ name: '', base_url: 'https://openrouter.ai/api/v1', api_key: '', model: '', is_default: false });
+      router.refresh();
+    } catch {
+      setError(t('saveFailed'));
+    } finally {
       setSubmitting(false);
-      return;
     }
-
-    setOpen(false);
-    setFields({ name: '', base_url: 'https://openrouter.ai/api/v1', api_key: '', model: '', is_default: false });
-    router.refresh();
   };
 
   const field = (key: keyof typeof fields) => ({

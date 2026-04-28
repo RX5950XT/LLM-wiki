@@ -8,6 +8,9 @@ import { getGoogleRefreshToken, saveGoogleRefreshToken } from '@/lib/google/oaut
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get('code');
+  const rawNext = searchParams.get('next');
+  // Accept only relative paths to prevent open-redirect
+  const next = rawNext && /^\/[^/]/.test(rawNext) ? rawNext : null;
 
   if (!code) {
     return NextResponse.redirect(`${origin}/login?error=missing_code`);
@@ -45,7 +48,7 @@ export async function GET(request: NextRequest) {
     .limit(1);
 
   if (workspaces && workspaces.length > 0) {
-    return NextResponse.redirect(`${origin}/w/${workspaces[0]?.id ?? ''}`);
+    return NextResponse.redirect(`${origin}${next ?? `/w/${workspaces[0]?.id ?? ''}`}`);
   }
 
   // First login — auto-create default workspace + Drive folder structure

@@ -20,7 +20,7 @@ export function CreateWorkspaceForm() {
     await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
+        redirectTo: `${window.location.origin}/auth/callback?next=/w/create`,
         scopes: 'https://www.googleapis.com/auth/drive.file',
         queryParams: { access_type: 'offline', prompt: 'consent' },
       },
@@ -32,23 +32,28 @@ export function CreateWorkspaceForm() {
     setSubmitting(true);
     setError(null);
 
-    const res = await fetch('/api/workspaces', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, description }),
-    });
+    try {
+      const res = await fetch('/api/workspaces', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, description }),
+      });
 
-    const data = await res.json();
+      const data = await res.json();
 
-    if (!res.ok) {
-      const msg: string = data.error ?? 'Failed to create workspace';
-      setError(msg);
-      if (res.status === 403 && msg.includes('Google Drive')) setNeedsReauth(true);
+      if (!res.ok) {
+        const msg: string = data.error ?? 'Failed to create workspace';
+        setError(msg);
+        if (res.status === 403 && msg.includes('Google Drive')) setNeedsReauth(true);
+        return;
+      }
+
+      router.push(`/w/${data.id}`);
+    } catch {
+      setError('Failed to create workspace');
+    } finally {
       setSubmitting(false);
-      return;
     }
-
-    router.push(`/w/${data.id}`);
   };
 
   return (
