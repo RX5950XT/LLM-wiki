@@ -37,6 +37,7 @@ export async function POST(request: NextRequest) {
     .from('workspaces')
     .select('id, drive_folder_id, ingest_profile_id, default_profile_id')
     .eq('id', workspace_id)
+    .eq('owner_id', user.id)
     .single();
   if (!workspace) return NextResponse.json({ error: 'Workspace not found' }, { status: 404 });
 
@@ -53,6 +54,7 @@ export async function POST(request: NextRequest) {
     .from('llm_profiles')
     .select('*')
     .eq('id', profileId)
+    .eq('owner_id', user.id)
     .single();
   if (!profile) return NextResponse.json({ error: 'LLM profile not found' }, { status: 404 });
 

@@ -89,7 +89,7 @@ bun run build        # 建置
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
-ENCRYPTION_KEY=          # 32-byte hex，用於 AES-256-GCM 加密 API key
+ENCRYPTION_KEY=          # base64 32 bytes，用於 AES-256-GCM 加密 API key / Google refresh token
 GOOGLE_OAUTH_CLIENT_ID=
 GOOGLE_OAUTH_CLIENT_SECRET=
 ```
@@ -134,6 +134,7 @@ Android 呼叫與 Web 相同的後端 API（`/api/ingest`、`/api/query`、`/api
 - **Phase 8** ✅：Android 功能對齊 — Chat/Query 串流、citations、synthesis file-back、文字/Markdown ingest、lock toggle、登出
 - **Phase 9** ✅：Web 介面精修 — 設定頁主題切換、route loading 骨架屏、檔案上傳 ingest、完整 i18n tooltip；Android 無需變更（本階段為 Web-only UI/效能調整）
 - **Phase 10** ✅：安全性強化 + Android 手機 UI 適配 — 見下方安全注意事項
+- **Phase 10b** ✅：Android i18n + 每帳號 Room cache 隔離 + LLM profile owner guard migration
 
 ## 安全注意事項（Phase 10）
 
@@ -145,6 +146,7 @@ Android 呼叫與 Web 相同的後端 API（`/api/ingest`、`/api/query`、`/api
 | P0 | `WikiViewModel.kt` | `webApiUrl()` 用字串替換 Supabase URL 推導 Vercel URL，Supabase URL 格式改變時 bearer token 可送到錯誤 domain | 改用 `BuildConfig.WEB_API_BASE_URL` |
 | P1 | `WikiViewModel.signOut()` | 登出後未清空 Room DB cache，未取消 WorkManager job | 加入 `db.pageDao().deleteAll()` + `SyncWorker.cancel()` |
 | P1 | `apps/web/.env.example` | `ENCRYPTION_KEY` 說明寫 `openssl rand -hex 32`（hex），但程式碼用 `base64` 解碼，runtime 會爆 | 改為 `openssl rand -base64 32` |
+| P1 | `supabase/migrations/0003_profile_ownership_guards.sql` | `workspaces.*_profile_id` 與 `ingest_jobs.profile_id` 原本只有一般 FK，未在 DB 層保證 profile owner 與 workspace owner 相同 | 加入 `(profile_id, owner_id)` composite FK 與 ingest job trigger guard |
 
 **Android 設定注意**：
 - `WEB_API_BASE_URL` 現在是必要 build config 欄位（來源：`local.properties` 或 `NEXT_PUBLIC_SITE_URL`）
@@ -172,8 +174,8 @@ apps/android/app/src/main/java/com/llmwiki/
 │   ├── Models.kt             ← WorkspaceRow, PageRow（@Serializable）
 │   └── room/
 │       ├── AppDatabase.kt
-│       ├── PageDao.kt        ← observePages Flow + upsertAll
-│       └── PageEntity.kt     ← (workspace_id, slug) PK
+│       ├── PageDao.kt        ← observePages(workspace_id, account_name) Flow + upsertAll
+│       └── PageEntity.kt     ← (workspace_id, account_name, slug) PK，確保每帳號 Room cache 隔離
 └── sync/
     └── SyncWorker.kt         ← CoroutineWorker，schedule() 每小時 KEEP 策略
 

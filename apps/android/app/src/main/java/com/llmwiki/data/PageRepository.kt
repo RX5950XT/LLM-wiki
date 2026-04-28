@@ -30,7 +30,7 @@ class PageRepository(
                 accountName = accountName,
                 slug = row.slug,
                 title = row.title,
-                content = db.pageDao().getPage(row.workspaceId, row.slug)?.content,
+                content = db.pageDao().getPage(row.workspaceId, accountName, row.slug)?.content,
                 version = row.version,
                 driveFileId = row.driveFileId,
                 kind = row.kind,
@@ -42,11 +42,11 @@ class PageRepository(
         db.pageDao().upsertAll(entities)
     }
 
-    suspend fun loadPageContent(workspaceId: String, slug: String): String? {
-        val entity = db.pageDao().getPage(workspaceId, slug) ?: return null
+    suspend fun loadPageContent(workspaceId: String, accountName: String, slug: String): String? {
+        val entity = db.pageDao().getPage(workspaceId, accountName, slug) ?: return null
         if (entity.content != null) return entity.content
         val content = driveClient?.readFile(entity.driveFileId) ?: return null
-        db.pageDao().updateContent(workspaceId, slug, content)
+        db.pageDao().updateContent(workspaceId, accountName, slug, content)
         return content
     }
 

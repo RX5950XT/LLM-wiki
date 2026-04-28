@@ -3,11 +3,11 @@ package com.llmwiki.data.room
 import androidx.room.ColumnInfo
 import androidx.room.Entity
 
-@Entity(tableName = "pages", primaryKeys = ["workspace_id", "slug"])
+@Entity(tableName = "pages", primaryKeys = ["workspace_id", "account_name", "slug"])
 data class PageEntity(
     @ColumnInfo(name = "workspace_id") val workspaceId: String,
-    val slug: String,
     @ColumnInfo(name = "account_name") val accountName: String,
+    val slug: String,
     val title: String?,
     /** Cached Drive content — null if not yet fetched */
     val content: String?,

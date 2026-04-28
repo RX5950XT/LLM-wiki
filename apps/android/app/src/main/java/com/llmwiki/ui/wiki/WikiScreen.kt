@@ -130,7 +130,7 @@ fun WikiScreen(
                     }
                 } else {
                     LazyColumn(Modifier.weight(1f)) {
-                        items(pages, key = { "${it.workspaceId}/${it.slug}" }) { page ->
+                        items(pages, key = { "${it.workspaceId}/${it.accountName}/${it.slug}" }) { page ->
                             PageListItem(
                                 page = page,
                                 isSelected = uiState.activePage?.slug == page.slug,

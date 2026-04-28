@@ -10,9 +10,7 @@ import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.llmwiki.data.DriveClient
 import com.llmwiki.data.PageRepository
-import com.llmwiki.data.SupabaseClientProvider
 import com.llmwiki.data.room.AppDatabase
-import io.github.jan.supabase.auth.auth
 import java.util.concurrent.TimeUnit
 
 class SyncWorker(
@@ -41,15 +39,13 @@ class SyncWorker(
         const val KEY_ACCOUNT_NAME = "accountName"
         const val KEY_WORKSPACE_ID = "workspaceId"
 
-        /**
-         * Enqueue a periodic background sync (once per hour while network is available).
-         * Replaces any previously enqueued sync with the same unique name.
-         */
-        fun cancel(context: Context, workspaceId: String) {
-            WorkManager.getInstance(context).cancelUniqueWork("$TAG/$workspaceId")
+        fun cancel(context: Context, accountName: String, workspaceId: String) {
+            WorkManager.getInstance(context).cancelUniqueWork(uniqueWorkName(accountName, workspaceId))
+            WorkManager.getInstance(context).cancelUniqueWork(legacyWorkName(workspaceId))
         }
 
         fun schedule(context: Context, accountName: String, workspaceId: String) {
+            WorkManager.getInstance(context).cancelUniqueWork(legacyWorkName(workspaceId))
             val constraints = Constraints.Builder()
                 .setRequiredNetworkType(NetworkType.CONNECTED)
                 .build()
@@ -67,10 +63,15 @@ class SyncWorker(
 
             WorkManager.getInstance(context)
                 .enqueueUniquePeriodicWork(
-                    "$TAG/$workspaceId",
+                    uniqueWorkName(accountName, workspaceId),
                     androidx.work.ExistingPeriodicWorkPolicy.KEEP,
                     request,
                 )
         }
+
+        private fun uniqueWorkName(accountName: String, workspaceId: String) =
+            "$TAG/$accountName/$workspaceId"
+
+        private fun legacyWorkName(workspaceId: String) = "$TAG/$workspaceId"
     }
 }

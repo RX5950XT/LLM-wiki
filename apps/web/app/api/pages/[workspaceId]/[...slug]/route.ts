@@ -55,6 +55,14 @@ export async function PATCH(
     return NextResponse.json({ error: 'Bad request' }, { status: 400 });
   }
 
+  const { data: ws } = await supabase
+    .from('workspaces')
+    .select('id')
+    .eq('id', workspaceId)
+    .eq('owner_id', user.id)
+    .single();
+  if (!ws) return NextResponse.json({ error: 'Workspace not found' }, { status: 404 });
+
   const { error } = await supabase
     .from('pages')
     .update({ locked_by_human: parsed.data.locked_by_human })
