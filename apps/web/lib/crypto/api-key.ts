@@ -1,14 +1,15 @@
 import crypto from 'crypto';
+import { getRequiredEnv } from '@/lib/env';
 
 const ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 12;
 const TAG_LENGTH = 16;
 
 function getKey(): Buffer {
-  const raw = process.env.ENCRYPTION_KEY;
-  if (!raw) throw new Error('ENCRYPTION_KEY environment variable is not set');
-  const buf = Buffer.from(raw, 'base64');
-  if (buf.length !== 32) throw new Error('ENCRYPTION_KEY must be 32 bytes (base64-encoded)');
+  const raw = getRequiredEnv('ENCRYPTION_KEY');
+  const hex = /^[0-9a-fA-F]{64}$/;
+  const buf = hex.test(raw) ? Buffer.from(raw, 'hex') : Buffer.from(raw, 'base64');
+  if (buf.length !== 32) throw new Error('ENCRYPTION_KEY must be 32 bytes (base64 or 64-char hex)');
   return buf;
 }
 

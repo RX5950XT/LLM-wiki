@@ -31,9 +31,12 @@ export async function GET(request: NextRequest) {
   const refreshToken = session.provider_refresh_token ?? existingRefreshToken;
 
   if (session.provider_refresh_token) {
-    await saveGoogleRefreshToken(userId, session.provider_refresh_token).catch((err) => {
+    try {
+      await saveGoogleRefreshToken(userId, session.provider_refresh_token);
+    } catch (err) {
       console.error('[auth/callback] failed to store refresh token:', err);
-    });
+      return NextResponse.redirect(`${origin}/login?error=token_save_failed`);
+    }
   }
 
   if (!refreshToken) {

@@ -39,7 +39,13 @@ export async function POST(request: NextRequest) {
   }
 
   const { api_key, is_default, ...rest } = parsed.data;
-  const encrypted = encryptApiKey(api_key);
+  let encrypted: string;
+  try {
+    encrypted = encryptApiKey(api_key);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Encryption failed';
+    return NextResponse.json({ error: `Server configuration error: ${msg}` }, { status: 500 });
+  }
 
   if (is_default) {
     await supabase

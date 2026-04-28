@@ -1,11 +1,12 @@
 import { google } from 'googleapis';
 import type { drive_v3 } from 'googleapis';
+import { getRequiredEnv } from '@/lib/env';
 
 /** Build a Drive v3 client authenticated with a short-lived access token. */
 export function createDriveClient(accessToken: string): drive_v3.Drive {
   const auth = new google.auth.OAuth2(
-    process.env.GOOGLE_OAUTH_CLIENT_ID,
-    process.env.GOOGLE_OAUTH_CLIENT_SECRET,
+    getRequiredEnv('GOOGLE_OAUTH_CLIENT_ID'),
+    getRequiredEnv('GOOGLE_OAUTH_CLIENT_SECRET'),
   );
   auth.setCredentials({ access_token: accessToken });
   return google.drive({ version: 'v3', auth });
@@ -17,8 +18,8 @@ export function createDriveClient(accessToken: string): drive_v3.Drive {
  */
 export async function getAccessToken(refreshToken: string): Promise<string> {
   const oauth2Client = new google.auth.OAuth2(
-    process.env.GOOGLE_OAUTH_CLIENT_ID,
-    process.env.GOOGLE_OAUTH_CLIENT_SECRET,
+    getRequiredEnv('GOOGLE_OAUTH_CLIENT_ID'),
+    getRequiredEnv('GOOGLE_OAUTH_CLIENT_SECRET'),
   );
   oauth2Client.setCredentials({ refresh_token: refreshToken });
   const { credentials } = await oauth2Client.refreshAccessToken();

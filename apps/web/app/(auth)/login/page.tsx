@@ -31,6 +31,11 @@ export default async function LoginPage({
             {t('driveAccessRequired')}
           </p>
         )}
+        {error === 'token_save_failed' && (
+          <p className="text-sm" style={{ color: 'oklch(65% 0.18 30)' }}>
+            Server configuration error: ENCRYPTION_KEY may be missing or invalid. Check your environment variables.
+          </p>
+        )}
         <LoginButton label={t('signIn')} />
       </div>
     </div>
