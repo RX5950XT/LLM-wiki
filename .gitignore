@@ -47,6 +47,7 @@ apps/android/.cxx/
 apps/android/app/release/
 *.keystore
 !debug.keystore
+apps/android/.kotlin/
 
 # Supabase
 supabase/.branches/
