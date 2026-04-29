@@ -7,6 +7,7 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
 const SUPABASE_DB_HOST = 'db.mjuciqffwayydobpxzcz.supabase.co';
+const SUPABASE_PROJECT_REF = 'mjuciqffwayydobpxzcz';
 
 const FULLTEXT_SEARCH_MIGRATION = `
 ALTER TABLE public.pages
@@ -81,12 +82,21 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Missing db_password' }, { status: 400 });
   }
 
+  const host = typeof body?.host === 'string' ? body.host : SUPABASE_DB_HOST;
+  const port = typeof body?.port === 'number' ? body.port : 5432;
+  const user =
+    typeof body?.user === 'string'
+      ? body.user
+      : port === 6543
+        ? `postgres.${SUPABASE_PROJECT_REF}`
+        : 'postgres';
+
   const Client = loadPgClient();
   const client = new Client({
-    host: SUPABASE_DB_HOST,
-    port: 5432,
+    host,
+    port,
     database: 'postgres',
-    user: 'postgres',
+    user,
     password: dbPassword,
     ssl: { rejectUnauthorized: false },
     connectionTimeoutMillis: 15_000,
@@ -99,7 +109,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown migration error';
     console.error('[api/migrate]', error);
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: message, target: `${host}:${port}` }, { status: 500 });
   } finally {
     await client.end().catch(() => undefined);
   }
