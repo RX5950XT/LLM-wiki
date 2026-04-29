@@ -114,7 +114,10 @@ export function ConversationPanel({
           }),
         });
 
-        if (!res.ok) throw new Error(`Query failed: ${res.statusText}`);
+        if (!res.ok) {
+          const bodyText = await res.text();
+          throw new Error(bodyText || `Query failed: ${res.statusText}`);
+        }
         if (!res.body) throw new Error('No response body');
 
         const reader = res.body.getReader();

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Trash2 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 
@@ -15,6 +15,10 @@ interface Profile {
 export function ProfileList({ profiles }: { profiles: Profile[] }) {
   const t = useTranslations('settings');
   const [list, setList] = useState(profiles);
+
+  useEffect(() => {
+    setList(profiles);
+  }, [profiles]);
 
   const handleDelete = async (id: string) => {
     const res = await fetch(`/api/settings/profiles?id=${id}`, { method: 'DELETE' });
