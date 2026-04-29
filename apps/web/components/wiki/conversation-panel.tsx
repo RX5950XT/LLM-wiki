@@ -57,6 +57,7 @@ export function ConversationPanel({
   const [ingestError, setIngestError] = useState<string | null>(null);
   const [ingestResult, setIngestResult] = useState<string | null>(null);
   const [isDraggingFile, setIsDraggingFile] = useState(false);
+  const [uploadQueue, setUploadQueue] = useState<{ name: string; status: 'pending' | 'uploading' | 'done' | 'error'; error?: string }[]>([]);
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
@@ -110,23 +111,95 @@ export function ConversationPanel({
       const isSupported = file.name.endsWith('.md') || file.name.endsWith('.txt') || file.type.startsWith('text/');
       if (!isSupported) {
         setIngestError(t('ingest.unsupportedType'));
-        return;
+        return false;
       }
 
       if (file.size > MAX_INGEST_FILE_BYTES) {
         setIngestError(t('ingest.fileTooLarge'));
-        return;
+        return false;
       }
 
       try {
         const text = await file.text();
         setIngestInput(text);
         setIngestResult(t('ingest.fileLoaded', { name: file.name }));
+        return true;
       } catch {
         setIngestError(t('ingest.fileReadError'));
+        return false;
       }
     },
     [t],
+  );
+
+  const ingestText = useCallback(
+    async (title: string, content: string): Promise<boolean> => {
+      try {
+        const payload = {
+          kind: 'text' as const,
+          title,
+          content,
+          workspace_id: workspaceId,
+          profile_id: selectedProfileId,
+        };
+        const res = await fetch('/api/ingest', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        return res.ok;
+      } catch {
+        return false;
+      }
+    },
+    [workspaceId, selectedProfileId],
+  );
+
+  const handleBatchIngest = useCallback(
+    async (files: FileList | null) => {
+      if (!files || files.length === 0) return;
+      const validFiles: File[] = [];
+
+      for (const file of Array.from(files)) {
+        const isSupported = file.name.endsWith('.md') || file.name.endsWith('.txt') || file.type.startsWith('text/');
+        const isSmallEnough = file.size <= MAX_INGEST_FILE_BYTES;
+        if (isSupported && isSmallEnough) {
+          validFiles.push(file);
+        }
+      }
+
+      if (validFiles.length === 0) {
+        setIngestError(t('ingest.unsupportedType'));
+        return;
+      }
+
+      setUploadQueue(validFiles.map((f) => ({ name: f.name, status: 'pending' })));
+      setIngesting(true);
+
+      let idx = 0;
+      for (const file of validFiles) {
+        setUploadQueue((prev) => prev.map((item, i) => (i === idx ? { ...item, status: 'uploading' } : item)));
+
+        try {
+          const text = await file.text();
+          const ok = await ingestText(extractTitle(text), text);
+
+          setUploadQueue((prev) =>
+            prev.map((item, i) => (i === idx ? { ...item, status: ok ? 'done' : 'error', error: ok ? undefined : 'Ingest failed' } : item)),
+          );
+
+          if (ok) {
+            onSourceAdded?.();
+          }
+        } catch {
+          setUploadQueue((prev) => prev.map((item, i) => (i === idx ? { ...item, status: 'error', error: 'Read failed' } : item)));
+        }
+        idx++;
+      }
+
+      setIngesting(false);
+    },
+    [t, ingestText, onSourceAdded],
   );
 
   const handleSubmit = useCallback(
@@ -281,10 +354,11 @@ export function ConversationPanel({
             <input
               type="file"
               accept=".md,.txt,text/*"
+              multiple
               className="hidden"
               onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) void loadFileIntoIngest(file);
+                const files = e.target.files;
+                if (files && files.length > 0) void handleBatchIngest(files);
                 e.target.value = '';
               }}
               disabled={ingesting}
@@ -305,8 +379,8 @@ export function ConversationPanel({
             onDrop={(e) => {
               e.preventDefault();
               setIsDraggingFile(false);
-              const file = e.dataTransfer.files[0];
-              if (file) void loadFileIntoIngest(file);
+              const files = e.dataTransfer.files;
+              if (files && files.length > 0) void handleBatchIngest(files);
             }}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
@@ -342,6 +416,19 @@ export function ConversationPanel({
           <p className="mt-1 text-xs" style={{ color: 'var(--color-accent)' }}>
             {ingestResult}
           </p>
+        )}
+        {uploadQueue.length > 0 && (
+          <div className="mt-2 space-y-1">
+            {uploadQueue.map((item, idx) => (
+              <div key={idx} className="flex items-center gap-2 text-xs">
+                <span className="truncate" style={{ color: 'var(--fg-muted)' }}>{item.name}</span>
+                {item.status === 'pending' && <span style={{ color: 'var(--fg-muted)' }}>等待中</span>}
+                {item.status === 'uploading' && <Loader2 size={10} className="animate-spin" style={{ color: 'var(--color-accent)' }} />}
+                {item.status === 'done' && <CheckCircle size={10} style={{ color: 'oklch(65% 0.22 145)' }} />}
+                {item.status === 'error' && <span style={{ color: 'oklch(65% 0.18 30)' }}>{item.error ?? '失敗'}</span>}
+              </div>
+            ))}
+          </div>
         )}
       </form>
 
