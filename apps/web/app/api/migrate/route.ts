@@ -96,6 +96,10 @@ export async function POST(request: NextRequest) {
     await client.connect();
     await client.query(FULLTEXT_SEARCH_MIGRATION);
     return NextResponse.json({ ok: true, migration: '0004_fulltext_search' });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown migration error';
+    console.error('[api/migrate]', error);
+    return NextResponse.json({ error: message }, { status: 500 });
   } finally {
     await client.end().catch(() => undefined);
   }
