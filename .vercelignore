@@ -1,0 +1,11 @@
+node_modules
+.vercel
+*.log
+.env.local
+.env
+apps/android
+.turbo
+coverage
+out
+dist
+build
