@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
     .single();
   if (!workspace) return NextResponse.json({ error: 'Workspace not found' }, { status: 404 });
 
-  // Use RPC for full-text search
+  // Try RPC first, fallback to basic ilike search
   const { data: pages, error } = await supabase
     .rpc('search_pages', {
       p_workspace_id: workspaceId,
@@ -31,7 +31,16 @@ export async function GET(request: NextRequest) {
     });
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    // Fallback if search_pages function doesn't exist yet
+    const { data: fallbackPages } = await supabase
+      .from('pages')
+      .select('slug, title, kind, updated_at')
+      .eq('workspace_id', workspaceId)
+      .or(`slug.ilike.%${query}%,title.ilike.%${query}%`)
+      .order('updated_at', { ascending: false })
+      .limit(20);
+
+    return NextResponse.json({ pages: fallbackPages ?? [] });
   }
 
   return NextResponse.json({ pages: pages ?? [] });
