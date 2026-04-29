@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Send, Bookmark, Loader2, CheckCircle, ChevronRight, Plus } from 'lucide-react';
+import { Send, Bookmark, Loader2, CheckCircle, ChevronRight, Plus, Bot } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { parseCitations } from '@/lib/ai/citation-parser';
 
@@ -13,6 +13,13 @@ interface Message {
   content: string;
   /** Slugs of wiki pages the LLM referenced to produce this answer */
   citedSlugs?: string[];
+}
+
+interface Profile {
+  id: string;
+  name: string;
+  model: string;
+  is_default: boolean;
 }
 
 interface ConversationPanelProps {
@@ -58,9 +65,42 @@ export function ConversationPanel({
   const [savedSlug, setSavedSlug] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
+  const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const profileMenuRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  useEffect(() => {
+    fetch('/api/settings/profiles')
+      .then((r) => r.json())
+      .then((d) => {
+        const list = d.profiles ?? [];
+        setProfiles(list);
+        const defaultOne = list.find((p: Profile) => p.is_default);
+        if (defaultOne) {
+          setSelectedProfileId(defaultOne.id);
+        } else if (list.length > 0) {
+          setSelectedProfileId(list[0].id);
+        }
+      })
+      .catch(() => {
+        /* silently ignore profile fetch errors */ 
+      });
+  }, []);
+
+  useEffect(() => {
+    const onClick = (e: MouseEvent) => {
+      if (profileMenuRef.current && !profileMenuRef.current.contains(e.target as Node)) {
+        setShowProfileMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', onClick);
+    return () => document.removeEventListener('mousedown', onClick);
+  }, []);
 
   const loadFileIntoIngest = useCallback(
     async (file: File) => {
@@ -111,6 +151,7 @@ export function ConversationPanel({
           body: JSON.stringify({
             messages: allMessages.map((m) => ({ role: m.role, content: m.content })),
             workspace_id: workspaceId,
+            profile_id: selectedProfileId,
           }),
         });
 
@@ -154,7 +195,7 @@ export function ConversationPanel({
         setIsLoading(false);
       }
     },
-    [input, isLoading, messages, workspaceId],
+    [input, isLoading, messages, workspaceId, selectedProfileId],
   );
 
   const handleIngest = async (e: React.FormEvent) => {
@@ -164,25 +205,30 @@ export function ConversationPanel({
     setIngestError(null);
     setIngestResult(null);
 
-    const trimmed = ingestInput.trim();
-    const payload = isUrl(trimmed)
-      ? { kind: 'url' as const, url: trimmed, workspace_id: workspaceId }
-      : { kind: 'text' as const, title: extractTitle(trimmed), content: trimmed, workspace_id: workspaceId };
+    try {
+      const trimmed = ingestInput.trim();
+      const payload = isUrl(trimmed)
+        ? { kind: 'url' as const, url: trimmed, workspace_id: workspaceId, profile_id: selectedProfileId }
+        : { kind: 'text' as const, title: extractTitle(trimmed), content: trimmed, workspace_id: workspaceId, profile_id: selectedProfileId };
 
-    const res = await fetch('/api/ingest', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    const data = await res.json();
+      const res = await fetch('/api/ingest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
 
-    setIngesting(false);
-    if (!res.ok) {
-      setIngestError(data.error ?? 'Ingest failed');
-    } else {
-      setIngestResult(t('ingest.doneStatus', { status: data.status }));
-      setIngestInput('');
-      onSourceAdded?.();
+      if (!res.ok) {
+        setIngestError(data.error ?? 'Ingest failed');
+      } else {
+        setIngestResult(t('ingest.doneStatus', { status: data.status }));
+        setIngestInput('');
+        onSourceAdded?.();
+      }
+    } catch {
+      setIngestError('Ingest failed');
+    } finally {
+      setIngesting(false);
     }
   };
 
@@ -416,6 +462,69 @@ export function ConversationPanel({
         style={{ borderColor: 'var(--border)' }}
       >
         <div className="flex gap-2">
+          {/* Model selector */}
+          {profiles.length > 0 && (
+            <div className="relative shrink-0" ref={profileMenuRef}>
+              <button
+                type="button"
+                onClick={() => setShowProfileMenu((s) => !s)}
+                disabled={isLoading}
+                className="flex h-full items-center gap-1 rounded-md border px-2.5 py-2 text-xs font-medium transition-all duration-100 hover:opacity-70 active:scale-95 disabled:opacity-40"
+                style={{
+                  background: 'var(--bg-2)',
+                  borderColor: 'var(--border)',
+                  color: 'var(--fg)',
+                }}
+                title="Select model"
+              >
+                <Bot size={13} />
+                <span className="max-w-[80px] truncate">
+                  {profiles.find((p) => p.id === selectedProfileId)?.name ?? 'Model'}
+                </span>
+              </button>
+
+              {showProfileMenu && (
+                <div
+                  className="absolute bottom-full left-0 z-50 mb-1 w-56 overflow-hidden rounded-lg border shadow-lg"
+                  style={{
+                    background: 'var(--bg-2)',
+                    borderColor: 'var(--border)',
+                    maxHeight: 240,
+                    overflowY: 'auto',
+                  }}
+                >
+                  <div className="px-3 py-2 text-xs font-medium" style={{ color: 'var(--fg-muted)' }}>
+                    Select model
+                  </div>
+                  {profiles.map((p) => {
+                    const isSelected = p.id === selectedProfileId;
+                    return (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedProfileId(p.id);
+                          setShowProfileMenu(false);
+                        }}
+                        className="flex w-full flex-col px-3 py-2 text-left text-xs transition-all duration-100 hover:opacity-70"
+                        style={{
+                          color: 'var(--fg)',
+                          borderLeft: isSelected ? '3px solid oklch(65% 0.22 145)' : '3px solid transparent',
+                          background: isSelected ? 'var(--color-accent-glow)' : undefined,
+                        }}
+                      >
+                        <span className="font-medium">{p.name}</span>
+                        <span className="truncate" style={{ color: 'var(--fg-muted)', fontSize: 10 }}>
+                          {p.model}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}

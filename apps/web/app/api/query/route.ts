@@ -36,7 +36,26 @@ export async function POST(request: NextRequest) {
     .single();
   if (!workspace) return new Response('Workspace not found', { status: 404 });
 
-  const profileId = workspace.query_profile_id ?? workspace.default_profile_id;
+  // Allow client-side profile override with ownership check
+  const profileIdOverride = z.string().uuid().safeParse(body?.profile_id);
+  let profileId: string | null = null;
+
+  if (profileIdOverride.success) {
+    const { data: overriddenProfile } = await supabase
+      .from('llm_profiles')
+      .select('id')
+      .eq('id', profileIdOverride.data)
+      .eq('owner_id', user.id)
+      .single();
+    if (overriddenProfile) {
+      profileId = overriddenProfile.id;
+    }
+  }
+
+  if (!profileId) {
+    profileId = workspace.query_profile_id ?? workspace.default_profile_id ?? null;
+  }
+
   if (!profileId) return new Response('No LLM profile configured', { status: 422 });
 
   const { data: profile } = await supabase

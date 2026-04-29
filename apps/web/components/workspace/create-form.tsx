@@ -14,17 +14,25 @@ export function CreateWorkspaceForm() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [needsReauth, setNeedsReauth] = useState(false);
+  const [reauthError, setReauthError] = useState<string | null>(null);
 
   const handleReauth = async () => {
-    const supabase = createClient();
-    await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo: `${window.location.origin}/auth/callback?next=/w/create`,
-        scopes: 'https://www.googleapis.com/auth/drive.file',
-        queryParams: { access_type: 'offline', prompt: 'consent' },
-      },
-    });
+    setReauthError(null);
+    try {
+      const supabase = createClient();
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: `${window.location.origin}/auth/callback?next=/w/create`,
+          scopes: 'https://www.googleapis.com/auth/drive.file',
+          queryParams: { access_type: 'offline', prompt: 'consent' },
+        },
+      });
+      if (error) throw error;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to start Google sign-in';
+      setReauthError(msg);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -114,14 +122,21 @@ export function CreateWorkspaceForm() {
         <div className="space-y-2">
           <p className="text-sm" style={{ color: 'oklch(65% 0.18 30)' }}>{error}</p>
           {needsReauth && (
-            <button
-              type="button"
-              onClick={handleReauth}
-              className="w-full rounded-lg px-4 py-2 text-sm font-medium"
-              style={{ background: 'var(--bg-2)', border: '1px solid var(--border)', color: 'var(--fg)' }}
-            >
-              Re-connect Google Drive
-            </button>
+            <div className="space-y-2">
+              <button
+                type="button"
+                onClick={handleReauth}
+                className="w-full rounded-lg px-4 py-2 text-sm font-medium"
+                style={{ background: 'var(--bg-2)', border: '1px solid var(--border)', color: 'var(--fg)' }}
+              >
+                Re-connect Google Drive
+              </button>
+              {reauthError && (
+                <p className="text-xs" style={{ color: 'oklch(65% 0.18 30)' }}>
+                  {reauthError}
+                </p>
+              )}
+            </div>
           )}
         </div>
       )}

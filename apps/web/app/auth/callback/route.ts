@@ -84,6 +84,21 @@ export async function GET(request: NextRequest) {
     }));
     await admin.from('pages').insert(seedPages);
 
+    // Auto-bind user's default LLM profile
+    const { data: defaultProfile } = await admin
+      .from('llm_profiles')
+      .select('id')
+      .eq('owner_id', userId)
+      .eq('is_default', true)
+      .single();
+
+    if (defaultProfile) {
+      await admin
+        .from('workspaces')
+        .update({ default_profile_id: defaultProfile.id })
+        .eq('id', workspaceId);
+    }
+
     return NextResponse.redirect(`${origin}/w/${workspaceId}`);
   } catch (err) {
     console.error('[auth/callback] workspace init failed:', err);

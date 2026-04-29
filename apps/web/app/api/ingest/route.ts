@@ -41,8 +41,26 @@ export async function POST(request: NextRequest) {
     .single();
   if (!workspace) return NextResponse.json({ error: 'Workspace not found' }, { status: 404 });
 
-  // Resolve LLM profile
-  const profileId = workspace.ingest_profile_id ?? workspace.default_profile_id;
+  // Resolve LLM profile (allow client-side override with ownership check)
+  const profileIdOverride = z.string().uuid().safeParse(body?.profile_id);
+  let profileId: string | null = null;
+
+  if (profileIdOverride.success) {
+    const { data: overriddenProfile } = await supabase
+      .from('llm_profiles')
+      .select('id')
+      .eq('id', profileIdOverride.data)
+      .eq('owner_id', user.id)
+      .single();
+    if (overriddenProfile) {
+      profileId = overriddenProfile.id;
+    }
+  }
+
+  if (!profileId) {
+    profileId = workspace.ingest_profile_id ?? workspace.default_profile_id ?? null;
+  }
+
   if (!profileId) {
     return NextResponse.json(
       { error: 'No LLM profile configured. Go to Settings to add one.' },

@@ -57,6 +57,21 @@ export async function POST(request: NextRequest) {
     }));
     await admin.from('pages').insert(seedPages);
 
+    // Auto-bind user's default LLM profile
+    const { data: defaultProfile } = await admin
+      .from('llm_profiles')
+      .select('id')
+      .eq('owner_id', user.id)
+      .eq('is_default', true)
+      .single();
+
+    if (defaultProfile) {
+      await admin
+        .from('workspaces')
+        .update({ default_profile_id: defaultProfile.id })
+        .eq('id', workspaceId);
+    }
+
     return NextResponse.json({ id: workspaceId }, { status: 201 });
   } catch (err) {
     console.error('[POST /api/workspaces]', err);
