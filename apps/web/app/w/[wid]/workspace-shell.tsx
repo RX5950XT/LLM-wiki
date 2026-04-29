@@ -3,7 +3,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { PanelLeft, PanelRight, GitFork, FlaskConical, ChevronDown, LogOut, Plus, Settings } from 'lucide-react';
+import { PanelLeft, PanelRight, GitFork, FlaskConical, ChevronDown, LogOut, Plus, Settings, Search, Loader2 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { PageTree } from '@/components/wiki/page-tree';
 import { PageViewer } from '@/components/wiki/page-viewer';
@@ -44,6 +44,12 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
   const [leftWidth, setLeftWidth] = useState(240);
   const [rightWidth, setRightWidth] = useState(384);
   const dragging = useRef<{ side: 'left' | 'right'; startX: number; startWidth: number } | null>(null);
+
+  const [showSearch, setShowSearch] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<{ slug: string; title: string | null; kind: string }[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const searchRef = useRef<HTMLDivElement>(null);
   /**
    * Incremented each time Realtime notifies us that the *currently viewed* page
    * has been updated. PageViewer watches this to show the staleness banner.
@@ -82,6 +88,37 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
   useEffect(() => {
     router.prefetch('/settings');
   }, [router]);
+
+  useEffect(() => {
+    const onClick = (e: MouseEvent) => {
+      if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
+        setShowSearch(false);
+      }
+    };
+    document.addEventListener('mousedown', onClick);
+    return () => document.removeEventListener('mousedown', onClick);
+  }, []);
+
+  useEffect(() => {
+    if (!showSearch || searchQuery.trim().length < 2) {
+      setSearchResults([]);
+      return;
+    }
+    const timer = setTimeout(() => {
+      setSearchLoading(true);
+      fetch(`/api/search?workspace_id=${workspaceId}&q=${encodeURIComponent(searchQuery)}`)
+        .then((r) => r.json())
+        .then((d) => {
+          setSearchResults(d.pages ?? []);
+          setSearchLoading(false);
+        })
+        .catch(() => {
+          setSearchResults([]);
+          setSearchLoading(false);
+        });
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [searchQuery, showSearch, workspaceId]);
 
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
@@ -210,6 +247,68 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Search */}
+          <div className="relative" ref={searchRef}>
+            <button
+              onClick={() => setShowSearch((s) => !s)}
+              className="rounded p-1 transition-all duration-100 hover:opacity-70 active:scale-90"
+              style={{ color: showSearch ? 'var(--color-accent)' : 'var(--fg-muted)' }}
+              aria-label="Search"
+              title="Search"
+            >
+              <Search size={16} />
+            </button>
+
+            {showSearch && (
+              <div
+                className="absolute right-0 top-full z-50 mt-1 w-72 overflow-hidden rounded-lg border shadow-lg"
+                style={{ background: 'var(--bg-2)', borderColor: 'var(--border)' }}
+              >
+                <div className="px-3 py-2">
+                  <input
+                    autoFocus
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Search wiki..."
+                    className="w-full rounded-md border px-3 py-1.5 text-sm outline-none"
+                    style={{ background: 'var(--bg)', borderColor: 'var(--border)', color: 'var(--fg)' }}
+                  />
+                </div>
+                {searchLoading && (
+                  <div className="flex items-center justify-center px-3 py-2">
+                    <Loader2 size={14} className="animate-spin" style={{ color: 'var(--fg-muted)' }} />
+                  </div>
+                )}
+                {searchResults.length > 0 && (
+                  <div className="max-h-60 overflow-y-auto">
+                    {searchResults.map((r) => (
+                      <button
+                        key={r.slug}
+                        onClick={() => {
+                          setActivePage(r.slug);
+                          setShowSearch(false);
+                          setSearchQuery('');
+                        }}
+                        className="flex w-full flex-col px-3 py-2 text-left text-xs transition-opacity hover:opacity-70"
+                        style={{ color: 'var(--fg)' }}
+                      >
+                        <span className="font-medium">{r.title ?? r.slug}</span>
+                        <span className="truncate" style={{ color: 'var(--fg-muted)' }}>
+                          {r.kind} · {r.slug}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {!searchLoading && searchQuery.trim().length >= 2 && searchResults.length === 0 && (
+                  <div className="px-3 py-2 text-xs" style={{ color: 'var(--fg-muted)' }}>
+                    No results
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
           {/* Graph view toggle */}
           <button
             onClick={() => setShowGraph((g) => !g)}

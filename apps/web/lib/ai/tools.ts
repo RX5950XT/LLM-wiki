@@ -72,6 +72,8 @@ export function buildWikiTools(ctx: ToolContext) {
 
         const contentHash = await hashContent(content_md);
 
+        const searchText = content_md.slice(0, 2000);
+
         if (existing) {
           await ctx.supabase
             .from('pages')
@@ -81,6 +83,7 @@ export function buildWikiTools(ctx: ToolContext) {
               version: existing.version + 1,
               updated_by: 'llm',
               title: title ?? existing.title,
+              search_text: searchText,
             })
             .eq('id', existing.id);
         } else {
@@ -93,6 +96,7 @@ export function buildWikiTools(ctx: ToolContext) {
             content_hash: contentHash,
             title: title ?? null,
             updated_by: 'llm',
+            search_text: searchText,
           });
         }
 
@@ -149,6 +153,110 @@ export function buildWikiTools(ctx: ToolContext) {
         if (kind) q = q.eq('kind', kind);
         const { data: pages } = await q.limit(100);
         return { pages: pages ?? [] };
+      },
+    }),
+
+    deletePage: tool({
+      description: 'Delete a wiki page by its slug. Use with caution.',
+      inputSchema: z.object({
+        slug: z.string().describe('Page slug to delete'),
+      }),
+      execute: async ({ slug }: { slug: string }) => {
+        const { data: page } = await ctx.supabase
+          .from('pages')
+          .select('id, drive_file_id')
+          .eq('workspace_id', ctx.workspaceId)
+          .eq('slug', slug)
+          .single();
+        if (!page) return { error: `Page not found: ${slug}` };
+
+        // Remove page_links referencing this page
+        await ctx.supabase
+          .from('page_links')
+          .delete()
+          .eq('workspace_id', ctx.workspaceId)
+          .eq('from_slug', slug);
+        await ctx.supabase
+          .from('page_links')
+          .delete()
+          .eq('workspace_id', ctx.workspaceId)
+          .eq('to_slug', slug);
+
+        // Delete Drive file
+        try {
+          await ctx.drive.files.delete({ fileId: page.drive_file_id });
+        } catch {
+          /* ignore Drive deletion errors */
+        }
+
+        // Delete page record
+        await ctx.supabase.from('pages').delete().eq('id', page.id);
+
+        return { ok: true, slug };
+      },
+    }),
+
+    movePage: tool({
+      description: 'Rename/move a wiki page to a new slug. Updates all incoming wikilinks.',
+      inputSchema: z.object({
+        oldSlug: z.string().describe('Current slug'),
+        newSlug: z.string().describe('Target slug'),
+      }),
+      execute: async ({ oldSlug, newSlug }: { oldSlug: string; newSlug: string }) => {
+        const { data: page } = await ctx.supabase
+          .from('pages')
+          .select('id, drive_file_id, content_hash, title, kind, version, updated_by')
+          .eq('workspace_id', ctx.workspaceId)
+          .eq('slug', oldSlug)
+          .single();
+        if (!page) return { error: `Page not found: ${oldSlug}` };
+
+        // Read content, rewrite wikilinks in other pages pointing to oldSlug
+        const { data: incomingLinks } = await ctx.supabase
+          .from('page_links')
+          .select('from_slug')
+          .eq('workspace_id', ctx.workspaceId)
+          .eq('to_slug', oldSlug);
+
+        for (const link of incomingLinks ?? []) {
+          const { data: fromPage } = await ctx.supabase
+            .from('pages')
+            .select('drive_file_id')
+            .eq('workspace_id', ctx.workspaceId)
+            .eq('slug', link.from_slug)
+            .single();
+          if (fromPage) {
+            const content = await readDriveFile(ctx.drive, fromPage.drive_file_id);
+            const updated = content.replace(
+              new RegExp(`\\[\\[${oldSlug.replace('.', '\\.')}([^\\]]*)\\]\\]`, 'g'),
+              `[[${newSlug}$1]]`,
+            );
+            if (updated !== content) {
+              await writeDriveFile(ctx.drive, updated, {
+                fileId: fromPage.drive_file_id,
+                name: link.from_slug.split('/').at(-1) ?? link.from_slug,
+                parentId: await resolveParentFolder(ctx, link.from_slug),
+              });
+            }
+          }
+        }
+
+        // Update slug in DB
+        await ctx.supabase.from('pages').update({ slug: newSlug }).eq('id', page.id);
+
+        // Update page_links
+        await ctx.supabase
+          .from('page_links')
+          .update({ from_slug: newSlug })
+          .eq('workspace_id', ctx.workspaceId)
+          .eq('from_slug', oldSlug);
+        await ctx.supabase
+          .from('page_links')
+          .update({ to_slug: newSlug })
+          .eq('workspace_id', ctx.workspaceId)
+          .eq('to_slug', oldSlug);
+
+        return { ok: true, oldSlug, newSlug };
       },
     }),
   };
