@@ -31,6 +31,7 @@ export function CreateWorkspaceForm() {
     e.preventDefault();
     setSubmitting(true);
     setError(null);
+    setNeedsReauth(false);
 
     try {
       const res = await fetch('/api/workspaces', {
@@ -39,12 +40,26 @@ export function CreateWorkspaceForm() {
         body: JSON.stringify({ name, description }),
       });
 
-      const data = await res.json();
+      const raw = await res.text();
+      let data: { error?: unknown; id?: string } | null = null;
+
+      if (raw) {
+        try {
+          data = JSON.parse(raw) as { error?: string; id?: string };
+        } catch {
+          data = null;
+        }
+      }
 
       if (!res.ok) {
-        const msg: string = data.error ?? 'Failed to create workspace';
+        const msg = typeof data?.error === 'string' ? data.error : 'Failed to create workspace';
         setError(msg);
         if (res.status === 403 && msg.includes('Google Drive')) setNeedsReauth(true);
+        return;
+      }
+
+      if (!data?.id) {
+        setError('Failed to create workspace');
         return;
       }
 

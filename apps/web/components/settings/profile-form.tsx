@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
+
 const PROVIDER_PRESETS = [
   { label: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', model: 'anthropic/claude-opus-4-7' },
   { label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o' },
@@ -43,10 +44,19 @@ export function ProfileForm() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(fields),
       });
-      const data = await res.json();
+      const raw = await res.text();
+      let data: { error?: unknown } | null = null;
+
+      if (raw) {
+        try {
+          data = JSON.parse(raw) as { error?: string };
+        } catch {
+          data = null;
+        }
+      }
 
       if (!res.ok) {
-        setError(data.error ?? t('saveFailed'));
+        setError(typeof data?.error === 'string' ? data.error : t('saveFailed'));
         return;
       }
 
