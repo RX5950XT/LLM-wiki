@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
-import { getGoogleRefreshToken } from '@/lib/google/oauth-token';
-import { createDriveClient, getAccessToken, writeDriveFile, findFile, readDriveFile } from '@/lib/drive/client';
+import { writeDriveFile, findFile, readDriveFile } from '@/lib/drive/client';
+import {
+  createDriveClientForUser,
+  GOOGLE_DRIVE_REAUTH_MESSAGE,
+  isGoogleDriveAuthError,
+} from '@/lib/google/drive-auth';
 
 export const maxDuration = 300;
 import { urlToMarkdown } from '@/lib/fetch/url-to-markdown';
@@ -94,13 +98,18 @@ export async function POST(request: NextRequest) {
   }
 
   // Store raw source in Drive
-  const refreshToken = await getGoogleRefreshToken(user.id);
-  if (!refreshToken) {
-    return NextResponse.json({ error: 'Google Drive not connected' }, { status: 403 });
+  let drive: Awaited<ReturnType<typeof createDriveClientForUser>>;
+  try {
+    drive = await createDriveClientForUser(user.id);
+  } catch (error) {
+    if (isGoogleDriveAuthError(error)) {
+      return NextResponse.json(
+        { error: error.message || GOOGLE_DRIVE_REAUTH_MESSAGE },
+        { status: 403 },
+      );
+    }
+    throw error;
   }
-
-  const accessToken = await getAccessToken(refreshToken);
-  const drive = createDriveClient(accessToken);
 
   // Find sources/ folder
   const sourcesFolderId = await findFile(

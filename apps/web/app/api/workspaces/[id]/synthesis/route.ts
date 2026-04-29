@@ -1,14 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
-import { getGoogleRefreshToken } from '@/lib/google/oauth-token';
 import {
-  createDriveClient,
-  getAccessToken,
   writeDriveFile,
   findFile,
   ensureFolder,
 } from '@/lib/drive/client';
+import {
+  createDriveClientForUser,
+  GOOGLE_DRIVE_REAUTH_MESSAGE,
+  isGoogleDriveAuthError,
+} from '@/lib/google/drive-auth';
 
 const SynthesisSchema = z.object({
   question: z.string().min(1).max(500),
@@ -52,13 +54,18 @@ export async function POST(
     .single();
   if (!workspace) return NextResponse.json({ error: 'Workspace not found' }, { status: 404 });
 
-  const refreshToken = await getGoogleRefreshToken(user.id);
-  if (!refreshToken) {
-    return NextResponse.json({ error: 'Google Drive not connected' }, { status: 403 });
+  let drive: Awaited<ReturnType<typeof createDriveClientForUser>>;
+  try {
+    drive = await createDriveClientForUser(user.id);
+  } catch (error) {
+    if (isGoogleDriveAuthError(error)) {
+      return NextResponse.json(
+        { error: error.message || GOOGLE_DRIVE_REAUTH_MESSAGE },
+        { status: 403 },
+      );
+    }
+    throw error;
   }
-
-  const accessToken = await getAccessToken(refreshToken);
-  const drive = createDriveClient(accessToken);
 
   const wikiFolderId = await findFile(
     drive,

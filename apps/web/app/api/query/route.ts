@@ -2,8 +2,12 @@ import { NextRequest } from 'next/server';
 import { streamText, stepCountIs, type ModelMessage } from 'ai';
 import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
-import { createDriveClient, getAccessToken, findFile, readDriveFile } from '@/lib/drive/client';
-import { getGoogleRefreshToken } from '@/lib/google/oauth-token';
+import { findFile, readDriveFile } from '@/lib/drive/client';
+import {
+  createDriveClientForUser,
+  GOOGLE_DRIVE_REAUTH_MESSAGE,
+  isGoogleDriveAuthError,
+} from '@/lib/google/drive-auth';
 import { createLLMClient } from '@/lib/ai/client';
 import { buildWikiTools } from '@/lib/ai/tools';
 import { DEFAULT_PROMPTS } from '@llm-wiki/prompts';
@@ -66,11 +70,15 @@ export async function POST(request: NextRequest) {
     .single();
   if (!profile) return new Response('LLM profile not found', { status: 404 });
 
-  const refreshToken = await getGoogleRefreshToken(user.id);
-  if (!refreshToken) return new Response('Google Drive not connected', { status: 403 });
-
-  const accessToken = await getAccessToken(refreshToken);
-  const drive = createDriveClient(accessToken);
+  let drive: Awaited<ReturnType<typeof createDriveClientForUser>>;
+  try {
+    drive = await createDriveClientForUser(user.id);
+  } catch (error) {
+    if (isGoogleDriveAuthError(error)) {
+      return new Response(error.message || GOOGLE_DRIVE_REAUTH_MESSAGE, { status: 403 });
+    }
+    throw error;
+  }
 
   const wikiFolderId = await findFile(
     drive,

@@ -6,6 +6,7 @@ import remarkGfm from 'remark-gfm';
 import { Send, Bookmark, Loader2, CheckCircle, ChevronRight, Plus, Bot } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { parseCitations } from '@/lib/ai/citation-parser';
+import { isDriveReconnectError, reconnectGoogleDrive } from '@/lib/google/drive-reconnect';
 
 interface Message {
   id: string;
@@ -58,6 +59,7 @@ export function ConversationPanel({
   const [ingestResult, setIngestResult] = useState<string | null>(null);
   const [isDraggingFile, setIsDraggingFile] = useState(false);
   const [uploadQueue, setUploadQueue] = useState<{ name: string; status: 'pending' | 'uploading' | 'done' | 'error'; error?: string }[]>([]);
+  const [driveReconnectPending, setDriveReconnectPending] = useState(false);
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
@@ -70,6 +72,18 @@ export function ConversationPanel({
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const profileMenuRef = useRef<HTMLDivElement>(null);
+
+  const startDriveReconnect = useCallback(async () => {
+    setDriveReconnectPending(true);
+    try {
+      await reconnectGoogleDrive(`/w/${workspaceId}`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to start Google sign-in';
+      setDriveReconnectPending(false);
+      setError(new Error(msg));
+      setIngestError(msg);
+    }
+  }, [workspaceId]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -133,7 +147,7 @@ export function ConversationPanel({
   );
 
   const ingestText = useCallback(
-    async (title: string, content: string): Promise<boolean> => {
+    async (title: string, content: string): Promise<{ ok: boolean; error?: string }> => {
       try {
         const payload = {
           kind: 'text' as const,
@@ -147,12 +161,30 @@ export function ConversationPanel({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         });
-        return res.ok;
+        const raw = await res.text();
+        let message = 'Ingest failed';
+        if (raw) {
+          try {
+            const data = JSON.parse(raw) as { error?: unknown };
+            message = typeof data.error === 'string' ? data.error : message;
+          } catch {
+            message = raw;
+          }
+        }
+
+        if (!res.ok) {
+          if (res.status === 403 && isDriveReconnectError(message)) {
+            await startDriveReconnect();
+          }
+          return { ok: false, error: message };
+        }
+
+        return { ok: true };
       } catch {
-        return false;
+        return { ok: false, error: 'Ingest failed' };
       }
     },
-    [workspaceId, selectedProfileId],
+    [workspaceId, selectedProfileId, startDriveReconnect],
   );
 
   const handleBatchIngest = useCallback(
@@ -182,13 +214,17 @@ export function ConversationPanel({
 
         try {
           const text = await file.text();
-          const ok = await ingestText(extractTitle(text), text);
+          const result = await ingestText(extractTitle(text), text);
 
           setUploadQueue((prev) =>
-            prev.map((item, i) => (i === idx ? { ...item, status: ok ? 'done' : 'error', error: ok ? undefined : 'Ingest failed' } : item)),
+            prev.map((item, i) =>
+              i === idx
+                ? { ...item, status: result.ok ? 'done' : 'error', error: result.ok ? undefined : result.error ?? 'Ingest failed' }
+                : item,
+            ),
           );
 
-          if (ok) {
+          if (result.ok) {
             onSourceAdded?.();
           }
         } catch {
@@ -230,7 +266,11 @@ export function ConversationPanel({
 
         if (!res.ok) {
           const bodyText = await res.text();
-          throw new Error(bodyText || `Query failed: ${res.statusText}`);
+          const message = bodyText || `Query failed: ${res.statusText}`;
+          if (res.status === 403 && isDriveReconnectError(message)) {
+            await startDriveReconnect();
+          }
+          throw new Error(message);
         }
         if (!res.body) throw new Error('No response body');
 
@@ -268,7 +308,7 @@ export function ConversationPanel({
         setIsLoading(false);
       }
     },
-    [input, isLoading, messages, workspaceId, selectedProfileId],
+    [input, isLoading, messages, workspaceId, selectedProfileId, startDriveReconnect],
   );
 
   const handleIngest = async (e: React.FormEvent) => {
@@ -292,7 +332,11 @@ export function ConversationPanel({
       const data = await res.json();
 
       if (!res.ok) {
-        setIngestError(data.error ?? 'Ingest failed');
+        const message = data.error ?? 'Ingest failed';
+        setIngestError(message);
+        if (res.status === 403 && isDriveReconnectError(message)) {
+          await startDriveReconnect();
+        }
       } else {
         setIngestResult(t('ingest.doneStatus', { status: data.status }));
         setIngestInput('');
@@ -539,6 +583,11 @@ export function ConversationPanel({
             {error.message}
           </p>
         )}
+        {driveReconnectPending && (
+          <p className="text-xs" style={{ color: 'var(--fg-muted)' }}>
+            Google Drive reconnecting...
+          </p>
+        )}
         <div ref={bottomRef} />
       </div>
 
@@ -622,11 +671,11 @@ export function ConversationPanel({
               borderColor: 'var(--border)',
               color: 'var(--fg)',
             }}
-            disabled={isLoading}
+            disabled={isLoading || driveReconnectPending}
           />
           <button
             type="submit"
-            disabled={isLoading || !input.trim()}
+            disabled={isLoading || driveReconnectPending || !input.trim()}
             className="rounded-md p-2 disabled:opacity-50"
             style={{ background: 'var(--color-accent)', color: 'oklch(10% 0.015 250)' }}
           >

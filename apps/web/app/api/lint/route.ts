@@ -3,10 +3,14 @@ import { z } from 'zod';
 import { generateText, stepCountIs } from 'ai';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { getGoogleRefreshToken } from '@/lib/google/oauth-token';
+import {
+  createDriveClientForUser,
+  GOOGLE_DRIVE_REAUTH_MESSAGE,
+  isGoogleDriveAuthError,
+} from '@/lib/google/drive-auth';
 
 export const maxDuration = 300;
-import { createDriveClient, getAccessToken, findFile, readDriveFile } from '@/lib/drive/client';
+import { findFile, readDriveFile } from '@/lib/drive/client';
 import { createLLMClient } from '@/lib/ai/client';
 import { buildWikiTools } from '@/lib/ai/tools';
 import { DEFAULT_PROMPTS } from '@llm-wiki/prompts';
@@ -74,11 +78,18 @@ async function runLint(workspaceId: string, userId: string) {
     .single();
   if (!profile) return NextResponse.json({ error: 'Profile not found' }, { status: 404 });
 
-  const refreshToken = await getGoogleRefreshToken(userId);
-  if (!refreshToken) return NextResponse.json({ error: 'No Drive token' }, { status: 403 });
-
-  const accessToken = await getAccessToken(refreshToken);
-  const drive = createDriveClient(accessToken);
+  let drive: Awaited<ReturnType<typeof createDriveClientForUser>>;
+  try {
+    drive = await createDriveClientForUser(userId);
+  } catch (error) {
+    if (isGoogleDriveAuthError(error)) {
+      return NextResponse.json(
+        { error: error.message || GOOGLE_DRIVE_REAUTH_MESSAGE },
+        { status: 403 },
+      );
+    }
+    throw error;
+  }
 
   const wikiFolderId = await findFile(
     drive, 'wiki', workspace.drive_folder_id, 'application/vnd.google-apps.folder',

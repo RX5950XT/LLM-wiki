@@ -66,12 +66,13 @@ export async function GET(request: NextRequest) {
     const { driveFolderId, pageFileIds } = await initWorkspaceDrive(drive, workspaceId);
 
     // Insert workspace
-    await admin.from('workspaces').insert({
+    const { error: workspaceError } = await admin.from('workspaces').insert({
       id: workspaceId,
       owner_id: userId,
       name: 'My Wiki',
       drive_folder_id: driveFolderId,
     });
+    if (workspaceError) throw new Error(`Failed to create workspace record: ${workspaceError.message}`);
 
     // Insert seeded pages (index.md, log.md)
     const seedPages = Object.entries(pageFileIds).map(([slug, driveFileId]) => ({
@@ -82,7 +83,8 @@ export async function GET(request: NextRequest) {
       drive_file_id: driveFileId,
       updated_by: 'llm',
     }));
-    await admin.from('pages').insert(seedPages);
+    const { error: pagesError } = await admin.from('pages').insert(seedPages);
+    if (pagesError) throw new Error(`Failed to create seed pages: ${pagesError.message}`);
 
     // Auto-bind user's default LLM profile
     const { data: defaultProfile } = await admin
@@ -90,13 +92,14 @@ export async function GET(request: NextRequest) {
       .select('id')
       .eq('owner_id', userId)
       .eq('is_default', true)
-      .single();
+      .maybeSingle();
 
     if (defaultProfile) {
-      await admin
+      const { error: bindError } = await admin
         .from('workspaces')
         .update({ default_profile_id: defaultProfile.id })
         .eq('id', workspaceId);
+      if (bindError) throw new Error(`Failed to bind default profile: ${bindError.message}`);
     }
 
     return NextResponse.redirect(`${origin}/w/${workspaceId}`);

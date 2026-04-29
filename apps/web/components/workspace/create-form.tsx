@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { createClient } from '@/lib/supabase/client';
+import { isDriveReconnectError, reconnectGoogleDrive } from '@/lib/google/drive-reconnect';
 
 export function CreateWorkspaceForm() {
   const t = useTranslations('workspace');
@@ -19,16 +19,7 @@ export function CreateWorkspaceForm() {
   const handleReauth = async () => {
     setReauthError(null);
     try {
-      const supabase = createClient();
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo: `${window.location.origin}/auth/callback?next=/w/create`,
-          scopes: 'https://www.googleapis.com/auth/drive.file',
-          queryParams: { access_type: 'offline', prompt: 'consent' },
-        },
-      });
-      if (error) throw error;
+      await reconnectGoogleDrive('/w/create');
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to start Google sign-in';
       setReauthError(msg);
@@ -62,7 +53,10 @@ export function CreateWorkspaceForm() {
       if (!res.ok) {
         const msg = typeof data?.error === 'string' ? data.error : 'Failed to create workspace';
         setError(msg);
-        if (res.status === 403 && msg.includes('Google Drive')) setNeedsReauth(true);
+        if (res.status === 403 && isDriveReconnectError(msg)) {
+          setNeedsReauth(true);
+          await handleReauth();
+        }
         return;
       }
 

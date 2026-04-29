@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
-import { getGoogleRefreshToken } from '@/lib/google/oauth-token';
-import { createDriveClient, getAccessToken, readDriveFile } from '@/lib/drive/client';
+import { readDriveFile } from '@/lib/drive/client';
+import {
+  createDriveClientForUser,
+  GOOGLE_DRIVE_REAUTH_MESSAGE,
+  isGoogleDriveAuthError,
+} from '@/lib/google/drive-auth';
 
 const LockSchema = z.object({ locked_by_human: z.boolean() });
 
@@ -26,11 +30,18 @@ export async function GET(
 
   if (!page) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
-  const refreshToken = await getGoogleRefreshToken(user.id);
-  if (!refreshToken) return NextResponse.json({ error: 'No Drive token' }, { status: 403 });
-
-  const accessToken = await getAccessToken(refreshToken);
-  const drive = createDriveClient(accessToken);
+  let drive: Awaited<ReturnType<typeof createDriveClientForUser>>;
+  try {
+    drive = await createDriveClientForUser(user.id);
+  } catch (error) {
+    if (isGoogleDriveAuthError(error)) {
+      return NextResponse.json(
+        { error: error.message || GOOGLE_DRIVE_REAUTH_MESSAGE },
+        { status: 403 },
+      );
+    }
+    throw error;
+  }
   const content = await readDriveFile(drive, page.drive_file_id);
 
   return NextResponse.json({ ...page, content });

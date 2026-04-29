@@ -2,9 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { createDriveClient, getAccessToken } from '@/lib/drive/client';
 import { initWorkspaceDrive } from '@/lib/drive/workspace-init';
-import { getGoogleRefreshToken } from '@/lib/google/oauth-token';
+import {
+  createDriveClientForUser,
+  GOOGLE_DRIVE_REAUTH_MESSAGE,
+  isGoogleDriveAuthError,
+} from '@/lib/google/drive-auth';
 
 const CreateWorkspaceSchema = z.object({
   name: z.string().min(1).max(100),
@@ -24,28 +27,20 @@ export async function POST(request: NextRequest) {
 
   const admin = createAdminClient();
 
-  const refreshToken = await getGoogleRefreshToken(user.id);
-  if (!refreshToken) {
-    return NextResponse.json(
-      { error: 'Google Drive access not available. Please sign in again.' },
-      { status: 403 }
-    );
-  }
-
   try {
-    const accessToken = await getAccessToken(refreshToken);
-    const drive = createDriveClient(accessToken);
+    const drive = await createDriveClientForUser(user.id);
     const workspaceId = crypto.randomUUID();
 
     const { driveFolderId, pageFileIds } = await initWorkspaceDrive(drive, workspaceId);
 
-    await admin.from('workspaces').insert({
+    const { error: workspaceError } = await admin.from('workspaces').insert({
       id: workspaceId,
       owner_id: user.id,
       name: parsed.data.name,
       description: parsed.data.description ?? null,
       drive_folder_id: driveFolderId,
     });
+    if (workspaceError) throw new Error(`Failed to create workspace record: ${workspaceError.message}`);
 
     const seedPages = Object.entries(pageFileIds).map(([slug, driveFileId]) => ({
       workspace_id: workspaceId,
@@ -55,7 +50,8 @@ export async function POST(request: NextRequest) {
       drive_file_id: driveFileId,
       updated_by: 'llm',
     }));
-    await admin.from('pages').insert(seedPages);
+    const { error: pagesError } = await admin.from('pages').insert(seedPages);
+    if (pagesError) throw new Error(`Failed to create seed pages: ${pagesError.message}`);
 
     // Auto-bind user's default LLM profile
     const { data: defaultProfile } = await admin
@@ -63,17 +59,24 @@ export async function POST(request: NextRequest) {
       .select('id')
       .eq('owner_id', user.id)
       .eq('is_default', true)
-      .single();
+      .maybeSingle();
 
     if (defaultProfile) {
-      await admin
+      const { error: bindError } = await admin
         .from('workspaces')
         .update({ default_profile_id: defaultProfile.id })
         .eq('id', workspaceId);
+      if (bindError) throw new Error(`Failed to bind default profile: ${bindError.message}`);
     }
 
     return NextResponse.json({ id: workspaceId }, { status: 201 });
   } catch (err) {
+    if (isGoogleDriveAuthError(err)) {
+      return NextResponse.json(
+        { error: err.message || GOOGLE_DRIVE_REAUTH_MESSAGE },
+        { status: 403 },
+      );
+    }
     console.error('[POST /api/workspaces]', err);
     return NextResponse.json({ error: 'Failed to create workspace' }, { status: 500 });
   }

@@ -2,7 +2,7 @@ import { tool } from 'ai';
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { drive_v3 } from 'googleapis';
-import { readDriveFile, writeDriveFile, findFile } from '@/lib/drive/client';
+import { readDriveFile, writeDriveFile, ensureFolder } from '@/lib/drive/client';
 
 interface ToolContext {
   supabase: SupabaseClient;
@@ -75,19 +75,16 @@ export function buildWikiTools(ctx: ToolContext) {
         const searchText = content_md.slice(0, 2000);
 
         if (existing) {
-          await ctx.supabase
-            .from('pages')
-            .update({
-              drive_file_id: fileId,
-              content_hash: contentHash,
-              version: existing.version + 1,
-              updated_by: 'llm',
-              title: title ?? existing.title,
-              search_text: searchText,
-            })
-            .eq('id', existing.id);
+          await updatePageRecord(ctx, existing.id, {
+            drive_file_id: fileId,
+            content_hash: contentHash,
+            version: existing.version + 1,
+            updated_by: 'llm',
+            title: title ?? existing.title,
+            search_text: searchText,
+          });
         } else {
-          await ctx.supabase.from('pages').insert({
+          await insertPageRecord(ctx, {
             workspace_id: ctx.workspaceId,
             slug,
             kind,
@@ -126,7 +123,14 @@ export function buildWikiTools(ctx: ToolContext) {
         limit: z.number().int().min(1).max(20).default(10),
       }),
       execute: async ({ query, limit }: { query: string; limit: number }) => {
-        const { data: pages } = await ctx.supabase
+        const { data: pages, error } = await ctx.supabase.rpc('search_pages', {
+          p_workspace_id: ctx.workspaceId,
+          p_query: query,
+        });
+
+        if (!error) return { pages: (pages ?? []).slice(0, limit) };
+
+        const { data: fallbackPages } = await ctx.supabase
           .from('pages')
           .select('slug, title, kind, updated_at')
           .eq('workspace_id', ctx.workspaceId)
@@ -134,7 +138,7 @@ export function buildWikiTools(ctx: ToolContext) {
           .or(`slug.ilike.%${query}%,title.ilike.%${query}%`)
           .order('updated_at', { ascending: false })
           .limit(limit);
-        return { pages: pages ?? [] };
+        return { pages: fallbackPages ?? [] };
       },
     }),
 
@@ -170,29 +174,31 @@ export function buildWikiTools(ctx: ToolContext) {
           .single();
         if (!page) return { error: `Page not found: ${slug}` };
 
-        // Remove page_links referencing this page
-        await ctx.supabase
+        const { error: outgoingLinksError } = await ctx.supabase
           .from('page_links')
           .delete()
           .eq('workspace_id', ctx.workspaceId)
           .eq('from_slug', slug);
-        await ctx.supabase
+        if (outgoingLinksError) throw new Error(`page_links delete failed: ${outgoingLinksError.message}`);
+
+        const { error: incomingLinksError } = await ctx.supabase
           .from('page_links')
           .delete()
           .eq('workspace_id', ctx.workspaceId)
           .eq('to_slug', slug);
+        if (incomingLinksError) throw new Error(`page_links delete failed: ${incomingLinksError.message}`);
 
-        // Delete Drive file
+        let driveWarning: string | undefined;
         try {
           await ctx.drive.files.delete({ fileId: page.drive_file_id });
-        } catch {
-          /* ignore Drive deletion errors */
+        } catch (error) {
+          driveWarning = error instanceof Error ? error.message : 'unknown Drive delete error';
         }
 
-        // Delete page record
-        await ctx.supabase.from('pages').delete().eq('id', page.id);
+        const { error: pageDeleteError } = await ctx.supabase.from('pages').delete().eq('id', page.id);
+        if (pageDeleteError) throw new Error(`page delete failed: ${pageDeleteError.message}`);
 
-        return { ok: true, slug };
+        return { ok: true, slug, warning: driveWarning };
       },
     }),
 
@@ -211,6 +217,14 @@ export function buildWikiTools(ctx: ToolContext) {
           .single();
         if (!page) return { error: `Page not found: ${oldSlug}` };
 
+        const { data: target } = await ctx.supabase
+          .from('pages')
+          .select('id')
+          .eq('workspace_id', ctx.workspaceId)
+          .eq('slug', newSlug)
+          .maybeSingle();
+        if (target) return { error: `Target page already exists: ${newSlug}` };
+
         // Read content, rewrite wikilinks in other pages pointing to oldSlug
         const { data: incomingLinks } = await ctx.supabase
           .from('page_links')
@@ -221,14 +235,14 @@ export function buildWikiTools(ctx: ToolContext) {
         for (const link of incomingLinks ?? []) {
           const { data: fromPage } = await ctx.supabase
             .from('pages')
-            .select('drive_file_id')
+            .select('id, drive_file_id, version')
             .eq('workspace_id', ctx.workspaceId)
             .eq('slug', link.from_slug)
             .single();
           if (fromPage) {
             const content = await readDriveFile(ctx.drive, fromPage.drive_file_id);
             const updated = content.replace(
-              new RegExp(`\\[\\[${oldSlug.replace('.', '\\.')}([^\\]]*)\\]\\]`, 'g'),
+              new RegExp(`\\[\\[${escapeRegExp(oldSlug)}([^\\]]*)\\]\\]`, 'g'),
               `[[${newSlug}$1]]`,
             );
             if (updated !== content) {
@@ -237,24 +251,48 @@ export function buildWikiTools(ctx: ToolContext) {
                 name: link.from_slug.split('/').at(-1) ?? link.from_slug,
                 parentId: await resolveParentFolder(ctx, link.from_slug),
               });
+              await updatePageRecord(ctx, fromPage.id, {
+                content_hash: await hashContent(updated),
+                search_text: updated.slice(0, 2000),
+                version: fromPage.version + 1,
+                updated_by: 'llm',
+              });
             }
           }
         }
 
-        // Update slug in DB
-        await ctx.supabase.from('pages').update({ slug: newSlug }).eq('id', page.id);
+        const fileName = newSlug.split('/').at(-1) ?? newSlug;
+        const newParentId = await resolveParentFolder(ctx, newSlug);
+        const file = await ctx.drive.files.get({ fileId: page.drive_file_id, fields: 'parents' });
+        const currentParents = file.data.parents ?? [];
+        await ctx.drive.files.update({
+          fileId: page.drive_file_id,
+          requestBody: { name: fileName },
+          addParents: newParentId,
+          removeParents: currentParents.filter((parent) => parent !== newParentId).join(',') || undefined,
+          fields: 'id',
+        });
+
+        await updatePageRecord(ctx, page.id, {
+          slug: newSlug,
+          version: page.version + 1,
+          updated_by: 'llm',
+        });
 
         // Update page_links
-        await ctx.supabase
+        const { error: outgoingLinksError } = await ctx.supabase
           .from('page_links')
           .update({ from_slug: newSlug })
           .eq('workspace_id', ctx.workspaceId)
           .eq('from_slug', oldSlug);
-        await ctx.supabase
+        if (outgoingLinksError) throw new Error(`page_links update failed: ${outgoingLinksError.message}`);
+
+        const { error: incomingLinksError } = await ctx.supabase
           .from('page_links')
           .update({ to_slug: newSlug })
           .eq('workspace_id', ctx.workspaceId)
           .eq('to_slug', oldSlug);
+        if (incomingLinksError) throw new Error(`page_links update failed: ${incomingLinksError.message}`);
 
         return { ok: true, oldSlug, newSlug };
       },
@@ -265,15 +303,12 @@ export function buildWikiTools(ctx: ToolContext) {
 async function resolveParentFolder(ctx: ToolContext, slug: string): Promise<string> {
   const parts = slug.split('/');
   if (parts.length === 1) return ctx.wikiFolderId;
-  const subdir = parts[0] ?? '';
 
-  const subdirId = await findFile(
-    ctx.drive,
-    subdir,
-    ctx.wikiFolderId,
-    'application/vnd.google-apps.folder',
-  );
-  return subdirId ?? ctx.wikiFolderId;
+  let parentId = ctx.wikiFolderId;
+  for (const part of parts.slice(0, -1)) {
+    parentId = await ensureFolder(ctx.drive, part, parentId);
+  }
+  return parentId;
 }
 
 async function hashContent(content: string): Promise<string> {
@@ -293,4 +328,53 @@ function extractWikiLinks(content: string): string[] {
     if (slug) links.add(slug);
   }
   return Array.from(links);
+}
+
+async function insertPageRecord(
+  ctx: ToolContext,
+  values: Record<string, unknown>,
+): Promise<void> {
+  const { error } = await ctx.supabase.from('pages').insert(values);
+  if (!error) return;
+
+  if (isMissingSearchTextError(error)) {
+    const { search_text: _searchText, ...fallbackValues } = values;
+    const { error: fallbackError } = await ctx.supabase.from('pages').insert(fallbackValues);
+    if (!fallbackError) return;
+    throw new Error(`pages insert failed: ${fallbackError.message}`);
+  }
+
+  throw new Error(`pages insert failed: ${error.message}`);
+}
+
+async function updatePageRecord(
+  ctx: ToolContext,
+  pageId: string,
+  values: Record<string, unknown>,
+): Promise<void> {
+  const { error } = await ctx.supabase.from('pages').update(values).eq('id', pageId);
+  if (!error) return;
+
+  if (isMissingSearchTextError(error)) {
+    const { search_text: _searchText, ...fallbackValues } = values;
+    const { error: fallbackError } = await ctx.supabase
+      .from('pages')
+      .update(fallbackValues)
+      .eq('id', pageId);
+    if (!fallbackError) return;
+    throw new Error(`pages update failed: ${fallbackError.message}`);
+  }
+
+  throw new Error(`pages update failed: ${error.message}`);
+}
+
+function isMissingSearchTextError(error: { message?: string }): boolean {
+  const message = error.message?.toLowerCase() ?? '';
+  return message.includes('search_text') && (
+    message.includes('column') || message.includes('schema cache')
+  );
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
