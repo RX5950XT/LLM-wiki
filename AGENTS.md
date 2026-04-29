@@ -106,6 +106,7 @@ CRON_SECRET=                # /api/lint/cron 保護
 
 - **Phase 0-10b** ✅：MVP、Android、Graph、i18n、安全性強化、Room cache 隔離
 - **Phase 11** ✅：批次檔案攝取 + 全文搜尋 + AI 完整檔案操控（deletePage / movePage + backlink rewriting）
+- **Production 2026-04-29** ✅：`0004_fulltext_search.sql` 已套用至 Supabase production；臨時 `/api/migrate` route 已移除。
 
 ## 關鍵功能
 
@@ -172,3 +173,4 @@ Query API 文字串流結尾附加 `\x00CITATIONS\x00["entities/karpathy.md",...
 - i18n cookie-based（`NEXT_LOCALE`），`zh-TW`（預設）和 `en`
 - GraphView 動態 import `react-force-graph-2d` 避免 SSR 問題
 - Vercel Cron：每週一 03:00 UTC `GET /api/lint/cron`
+- Supabase DB migration 若本機 5432/6543 被擋，可從 Vercel/serverless 走 pooler：`aws-1-ap-southeast-1.pooler.supabase.com:6543`，user 格式 `postgres.<project-ref>`
