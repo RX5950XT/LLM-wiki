@@ -99,12 +99,14 @@ GOOGLE_OAUTH_CLIENT_SECRET=
 ```
 apps/web/
 ├── app/api/
+│   ├── search/                     ← GET: 全文搜尋（RPC search_pages + ilike fallback）
 │   ├── workspaces/[id]/synthesis/  ← POST: 儲存 Q&A 為 synthesis page
 │   └── pages/[wid]/[...slug]/lock/ ← PATCH: 切換 locked_by_human
 ├── components/wiki/
-│   ├── conversation-panel.tsx  ← 含 citation chips + file-back 通知
+│   ├── conversation-panel.tsx  ← 含 citation chips + file-back 通知 + 模型選擇器 + 批次上傳佇列
 │   └── page-viewer.tsx         ← 含 staleness banner + lock toggle
 └── lib/ai/
+    ├── tools.ts                  ← AI wiki 工具（read/write/search/list/delete/move）
     └── citation-parser.ts      ← 解析串流尾端的 \x00CITATIONS\x00 block
 ```
 
@@ -135,6 +137,7 @@ Android 呼叫與 Web 相同的後端 API（`/api/ingest`、`/api/query`、`/api
 - **Phase 9** ✅：Web 介面精修 — 設定頁主題切換、route loading 骨架屏、檔案上傳 ingest、完整 i18n tooltip；Android 無需變更（本階段為 Web-only UI/效能調整）
 - **Phase 10** ✅：安全性強化 + Android 手機 UI 適配 — 見下方安全注意事項
 - **Phase 10b** ✅：Android i18n + 每帳號 Room cache 隔離 + LLM profile owner guard migration
+- **Phase 11** ✅：批次檔案攝取 + 全文搜尋 + AI 完整檔案操控 — 多檔上傳/拖曳、PostgreSQL tsvector 搜尋、模型選擇器、deletePage / movePage 工具（自動重寫 backlink）
 
 ## 安全注意事項（Phase 10）
 
@@ -228,6 +231,55 @@ API (`/api/ingest`) 已支援兩種 kind。Ctrl+Enter 快速提交。
 - 顯示「Re-connect Google Drive」按鈕
 - 觸發 `supabase.auth.signInWithOAuth` with `prompt: consent, access_type: offline`
 - 重授權後 auth/callback 重新儲存 refresh token
+
+## 模型選擇器
+
+Conversation panel 輸入框左側有模型選擇按鈕（`Bot` icon），從 `/api/settings/profiles` 取得使用者自訂 LLM profile 列表：
+- 預設選中 `is_default=true` 的 profile
+- Query / Ingest API 支援可選 `profile_id` override，會檢查 `owner_id` 權限
+- 若使用者未設定任何 profile，按鈕隱藏，API fallback 至 workspace 綁定的 default profile
+
+## 批次檔案攝取
+
+`conversation-panel.tsx` 支援多檔案上傳：
+- `<input type="file" multiple>` 選擇多個 `.md` / `.txt` / `text/*` 檔案
+- 拖曳檔案到 textarea 觸發批次上傳
+- `uploadQueue` 狀態顯示每個檔案的進度（pending / uploading / done / error）
+- 每個檔案獨立呼叫 `/api/ingest`（`kind: 'text'`），支援 `profile_id` 覆寫
+
+## 全文搜尋
+
+**資料庫層**：`pages.search_text TEXT` + `pages_fts_idx` GIN index（`to_tsvector('simple', ...)`）
+
+**API**：`GET /api/search?workspace_id=xxx&q=keyword`
+- 優先嘗試 `search_pages` RPC；若函數不存在（migration 尚未執行），graceful fallback 至 `ilike` 基礎搜尋
+
+**UI**：`workspace-shell.tsx` 頂部 `Search` 按鈕
+- 點擊展開下拉搜尋框（`showSearch` state）
+- 輸入 2 字元以上自動 debounce（200ms）搜尋
+- 結果顯示 title / kind / slug，點擊跳轉至該頁面
+
+## AI 完整檔案操控
+
+`lib/ai/tools.ts` 現有 6 個工具：
+
+| 工具 | 說明 |
+|------|------|
+| `readPage` | 讀取頁面內容（Drive file） |
+| `writePage` | 建立/覆寫頁面，自動同步 `page_links` 與 `search_text` |
+| `searchPages` | 基礎 `ilike` 搜尋 title + slug |
+| `listPages` | 列出所有 wiki 頁面，可選 kind 篩選 |
+| `deletePage` | 刪除頁面：清理 `page_links`、刪除 Drive file、刪除 DB record |
+| `movePage` | 重命名/移動頁面：自動重寫所有**引用該頁面**的 `[[wikilink]]`，更新 `page_links` slug |
+
+## 資料庫 Migration
+
+`supabase/migrations/0004_fulltext_search.sql`：
+- `ALTER TABLE pages ADD COLUMN search_text TEXT`
+- `CREATE INDEX pages_fts_idx USING GIN (...)`
+- `CREATE OR REPLACE FUNCTION search_pages(p_workspace_id UUID, p_query TEXT)`
+
+若本地無法連接 PostgreSQL port，可透過臨時部署的 `/api/migrate` endpoint（已於部署後移除）執行。
 
 ## 其他注意事項
 
