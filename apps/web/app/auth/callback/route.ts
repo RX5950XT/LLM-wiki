@@ -27,7 +27,12 @@ export async function GET(request: NextRequest) {
   const userId = session.user.id;
   const admin = createAdminClient();
 
-  const existingRefreshToken = await getGoogleRefreshToken(userId);
+  let existingRefreshToken: string | null = null;
+  try {
+    existingRefreshToken = await getGoogleRefreshToken(userId);
+  } catch (err) {
+    console.error('[auth/callback] failed to read existing refresh token:', err);
+  }
   const refreshToken = session.provider_refresh_token ?? existingRefreshToken;
 
   if (session.provider_refresh_token) {

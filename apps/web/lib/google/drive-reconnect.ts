@@ -10,7 +10,9 @@ export function isDriveReconnectError(message: string): boolean {
 
 export async function reconnectGoogleDrive(nextPath: string): Promise<void> {
   const supabase = createClient();
-  const safeNext = nextPath.startsWith('/') && !nextPath.startsWith('//') ? nextPath : '/w';
+  const base = nextPath.startsWith('/') && !nextPath.startsWith('//') ? nextPath : '/w';
+  const sep = base.includes('?') ? '&' : '?';
+  const safeNext = `${base}${sep}r=1`;
   const redirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(safeNext)}`;
 
   const { error } = await supabase.auth.signInWithOAuth({

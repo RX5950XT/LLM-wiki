@@ -60,6 +60,9 @@ export function ConversationPanel({
   const [isDraggingFile, setIsDraggingFile] = useState(false);
   const [uploadQueue, setUploadQueue] = useState<{ name: string; status: 'pending' | 'uploading' | 'done' | 'error'; error?: string }[]>([]);
   const [driveReconnectPending, setDriveReconnectPending] = useState(false);
+  const [wasReconnected] = useState(() =>
+    typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('r') === '1',
+  );
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
@@ -74,6 +77,12 @@ export function ConversationPanel({
   const profileMenuRef = useRef<HTMLDivElement>(null);
 
   const startDriveReconnect = useCallback(async () => {
+    if (wasReconnected) {
+      const msg = 'Google Drive 重新授權後仍無法連線，請確認帳號已授予 Drive 存取權限後重試。';
+      setError(new Error(msg));
+      setIngestError(msg);
+      return;
+    }
     setDriveReconnectPending(true);
     try {
       await reconnectGoogleDrive(`/w/${workspaceId}`);
@@ -83,7 +92,7 @@ export function ConversationPanel({
       setError(new Error(msg));
       setIngestError(msg);
     }
-  }, [workspaceId]);
+  }, [workspaceId, wasReconnected]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });

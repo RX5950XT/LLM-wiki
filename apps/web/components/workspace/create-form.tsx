@@ -13,24 +13,14 @@ export function CreateWorkspaceForm() {
   const [description, setDescription] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [needsReauth, setNeedsReauth] = useState(false);
-  const [reauthError, setReauthError] = useState<string | null>(null);
-
-  const handleReauth = async () => {
-    setReauthError(null);
-    try {
-      await reconnectGoogleDrive('/w/create');
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to start Google sign-in';
-      setReauthError(msg);
-    }
-  };
+  const [wasReconnected] = useState(() =>
+    typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('r') === '1',
+  );
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
     setError(null);
-    setNeedsReauth(false);
 
     try {
       const res = await fetch('/api/workspaces', {
@@ -52,11 +42,19 @@ export function CreateWorkspaceForm() {
 
       if (!res.ok) {
         const msg = typeof data?.error === 'string' ? data.error : 'Failed to create workspace';
-        setError(msg);
         if (res.status === 403 && isDriveReconnectError(msg)) {
-          setNeedsReauth(true);
-          await handleReauth();
+          if (wasReconnected) {
+            setError('Google Drive 重新授權後仍無法連線，請確認帳號已授予 Drive 存取權限後重試。');
+            return;
+          }
+          try {
+            await reconnectGoogleDrive('/w/create');
+          } catch {
+            setError('無法啟動 Google 授權流程，請重新整理頁面後再試。');
+          }
+          return;
         }
+        setError(msg);
         return;
       }
 
@@ -113,26 +111,7 @@ export function CreateWorkspaceForm() {
       </div>
 
       {error && (
-        <div className="space-y-2">
-          <p className="text-sm" style={{ color: 'oklch(65% 0.18 30)' }}>{error}</p>
-          {needsReauth && (
-            <div className="space-y-2">
-              <button
-                type="button"
-                onClick={handleReauth}
-                className="w-full rounded-lg px-4 py-2 text-sm font-medium"
-                style={{ background: 'var(--bg-2)', border: '1px solid var(--border)', color: 'var(--fg)' }}
-              >
-                Re-connect Google Drive
-              </button>
-              {reauthError && (
-                <p className="text-xs" style={{ color: 'oklch(65% 0.18 30)' }}>
-                  {reauthError}
-                </p>
-              )}
-            </div>
-          )}
-        </div>
+        <p className="text-sm" style={{ color: 'oklch(65% 0.18 30)' }}>{error}</p>
       )}
 
       <button
