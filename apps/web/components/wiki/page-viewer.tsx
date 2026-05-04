@@ -1,10 +1,21 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import { Pencil, Lock, Unlock, RefreshCw, AlertTriangle } from 'lucide-react';
 import { useTranslations } from 'next-intl';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+
+function stripFrontmatterAndWikilinks(content: string): string {
+  let result = content;
+  if (result.startsWith('---')) {
+    const end = result.indexOf('\n---', 3);
+    if (end !== -1) result = result.slice(end + 4).trimStart();
+  }
+  // Convert [[slug]] to markdown links that our custom renderer intercepts
+  result = result.replace(/\[\[([^\]]+)\]\]/g, (_, slug: string) => `[${slug}](wiki://${encodeURIComponent(slug)})`);
+  return result;
+}
 
 interface PageViewerProps {
   workspaceId: string;
@@ -193,28 +204,24 @@ export function PageViewer({ workspaceId, slug, onWikiLinkClick, refreshKey }: P
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             components={{
-              a: ({ href, children, ...props }) => {
-                if (href?.startsWith('wiki://')) {
-                  const target = href.slice(7);
+              a: ({ href, children }) => {
+                if (href?.startsWith('wiki://') && onWikiLinkClick) {
+                  const slug = decodeURIComponent(href.slice(7));
                   return (
-                    <button
-                      onClick={() => onWikiLinkClick?.(target)}
-                      className="text-sm font-medium underline"
+                    <a
+                      href="#"
+                      onClick={(e) => { e.preventDefault(); onWikiLinkClick(slug); }}
                       style={{ color: 'var(--color-accent)' }}
                     >
                       {children}
-                    </button>
+                    </a>
                   );
                 }
-                return (
-                  <a href={href} target="_blank" rel="noopener noreferrer" {...props}>
-                    {children}
-                  </a>
-                );
+                return <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>;
               },
             }}
           >
-            {page.content}
+            {stripFrontmatterAndWikilinks(page.content)}
           </ReactMarkdown>
         </article>
       </div>

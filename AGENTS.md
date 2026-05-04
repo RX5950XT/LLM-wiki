@@ -37,7 +37,7 @@ apps/web/
 ├── components/
 │   ├── wiki/
 │   │   ├── conversation-panel.tsx  ← 聊天 + 模型選擇器 + 批次上傳佇列 + citations
-│   │   ├── page-viewer.tsx         ← staleness banner + lock toggle
+│   │   ├── page-viewer.tsx         ← staleness banner + lock toggle + ReactMarkdown（GFM、frontmatter strip、[[wikilink]] 路由）
 │   │   ├── page-tree.tsx           ← 左側導航樹
 │   │   └── graph-view.tsx          ← react-force-graph-2d（動態 import）
 │   └── workspace/
@@ -166,6 +166,8 @@ Query API 文字串流結尾附加 `\x00CITATIONS\x00["entities/karpathy.md",...
 
 ## 其他
 
+- **Markdown 渲染**：`page-viewer.tsx` 用 `react-markdown` + `remark-gfm`。YAML frontmatter 以 `stripFrontmatterAndWikilinks()` 手動 strip（不用 `remark-frontmatter`，那個不自動隱藏內容）。`[[slug]]` 轉成 `[slug](wiki://slug)` 供自訂 `<a>` renderer 攔截。
+- **`.env.vercel.tmp`**：`vercel env pull` 輸出的暫存檔，已加入 `.gitignore`，不應提交。
 - Lucide v3 已移除 icon 的 `title` prop，改用 `aria-label`
 - `packages/prompts` 的 `.md` import 需要 `markdown.d.ts` + webpack `asset/source` loader
 - TypeScript target 需 ES2023（`Array.prototype.findLast`）

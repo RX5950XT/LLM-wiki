@@ -55,6 +55,7 @@ supabase/.temp/
 
 # Vercel
 .vercel/
+.env.vercel.tmp
 
 # Misc
 *.pem

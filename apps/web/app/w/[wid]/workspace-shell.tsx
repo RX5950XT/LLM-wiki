@@ -87,7 +87,7 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
 
   useEffect(() => {
     router.prefetch('/settings');
-  }, [router]);
+  }, []);
 
   useEffect(() => {
     const onClick = (e: MouseEvent) => {

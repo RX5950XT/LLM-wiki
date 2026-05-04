@@ -104,7 +104,7 @@ apps/web/
 │   └── pages/[wid]/[...slug]/lock/ ← PATCH: 切換 locked_by_human
 ├── components/wiki/
 │   ├── conversation-panel.tsx  ← 含 citation chips + file-back 通知 + 模型選擇器 + 批次上傳佇列
-│   └── page-viewer.tsx         ← 含 staleness banner + lock toggle
+│   └── page-viewer.tsx         ← 含 staleness banner + lock toggle + ReactMarkdown（GFM、frontmatter strip、[[wikilink]] 路由）
 └── lib/ai/
     ├── tools.ts                  ← AI wiki 工具（read/write/search/list/delete/move）
     └── citation-parser.ts      ← 解析串流尾端的 \x00CITATIONS\x00 block
@@ -283,6 +283,8 @@ Conversation panel 輸入框左側有模型選擇按鈕（`Bot` icon），從 `/
 
 ## 其他注意事項
 
+- **Markdown 渲染**：`page-viewer.tsx` 用 `react-markdown` + `remark-gfm`。YAML frontmatter 以 `stripFrontmatterAndWikilinks()` 手動 strip（不用 `remark-frontmatter`，那個不自動隱藏內容）。`[[slug]]` 轉成 `[slug](wiki://slug)` 供自訂 `<a>` renderer 攔截。
+- **`.env.vercel.tmp`**：`vercel env pull` 輸出的暫存檔，已加入 `.gitignore`，不應提交。
 - Lucide v3 已移除 icon 的 `title` prop，改用 `aria-label`
 - `packages/prompts` 的 `.md` import 需要 `markdown.d.ts` 宣告 + next.config webpack `asset/source` loader
 - TypeScript target 需 ES2023（`Array.prototype.findLast`）
