@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { createClient } from '@/lib/supabase/server';
 import {
   writeDriveFile,
   findFile,
   ensureFolder,
 } from '@/lib/drive/client';
+import { getRequestUser } from '@/lib/supabase/request';
 import {
   createDriveClientForUser,
   GOOGLE_DRIVE_REAUTH_MESSAGE,
@@ -34,10 +34,7 @@ export async function POST(
 ) {
   const { id: workspaceId } = await params;
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { supabase, user } = await getRequestUser(request);
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const body = await request.json().catch(() => null);

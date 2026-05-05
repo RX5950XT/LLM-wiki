@@ -16,11 +16,11 @@ class PageRepository(
         db.pageDao().observePages(workspaceId, accountName)
 
     suspend fun syncPages(workspaceId: String, accountName: String) {
+        supabase.requireAccessToken(forceRefresh = true)
         val rows: List<PageRow> = supabase.from("pages")
             .select {
                 filter { eq("workspace_id", workspaceId) }
                 order("updated_at", order = Order.DESCENDING)
-                limit(200)
             }
             .decodeList()
 
@@ -39,6 +39,11 @@ class PageRepository(
                 lockedByHuman = row.lockedByHuman,
             )
         }
+        if (entities.isEmpty()) {
+            db.pageDao().deleteByWorkspace(workspaceId, accountName)
+            return
+        }
+        db.pageDao().deleteMissingPages(workspaceId, accountName, entities.map { it.slug })
         db.pageDao().upsertAll(entities)
     }
 
@@ -50,8 +55,12 @@ class PageRepository(
         return content
     }
 
-    suspend fun getWorkspaces(): List<WorkspaceRow> =
-        supabase.from("workspaces")
-            .select()
+    suspend fun getWorkspaces(): List<WorkspaceRow> {
+        supabase.requireAccessToken(forceRefresh = true)
+        return supabase.from("workspaces")
+            .select {
+                order("created_at", order = Order.ASCENDING)
+            }
             .decodeList()
+    }
 }

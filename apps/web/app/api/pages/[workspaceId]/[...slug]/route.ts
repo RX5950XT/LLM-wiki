@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { createClient } from '@/lib/supabase/server';
 import { readDriveFile } from '@/lib/drive/client';
+import { getRequestUser } from '@/lib/supabase/request';
 import {
   createDriveClientForUser,
   GOOGLE_DRIVE_REAUTH_MESSAGE,
@@ -11,14 +11,13 @@ import {
 const LockSchema = z.object({ locked_by_human: z.boolean() });
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ workspaceId: string; slug: string[] }> }
 ) {
   const { workspaceId, slug } = await params;
   const slugStr = slug.join('/');
 
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const { supabase, user } = await getRequestUser(request);
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const { data: page } = await supabase
@@ -54,10 +53,7 @@ export async function PATCH(
   const { workspaceId, slug: slugParts } = await params;
   const slug = slugParts.join('/');
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { supabase, user } = await getRequestUser(request);
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const body = await request.json().catch(() => null);

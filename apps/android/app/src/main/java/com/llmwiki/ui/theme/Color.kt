@@ -19,4 +19,13 @@ val BorderLight = Color(0xFFE6E3DC) // oklch(90% 0.005 90)
 
 // Single accent (both themes) — soft violet
 val Accent = Color(0xFFA78BFA)      // oklch(70% 0.15 295)
-val AccentMuted = Color(0x66A78BFA) // accent @ 40% alpha
+val AccentDark = Color(0xFF8F79EA)
+val AccentContainerDark = Color(0xFF2B2540)
+val AccentContainerLight = Color(0xFFEAE4FF)
+val AccentOnContainerDark = Color(0xFFF0E9FF)
+val AccentOnContainerLight = Color(0xFF231844)
+val ErrorDark = Color(0xFFFFB4AB)
+val ErrorContainerDark = Color(0xFF5F1B16)
+val ErrorContainerLight = Color(0xFFFFDAD6)
+val ErrorOnContainerDark = Color(0xFFFFDAD6)
+val ErrorOnContainerLight = Color(0xFF410002)

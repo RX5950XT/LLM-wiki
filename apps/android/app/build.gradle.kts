@@ -120,6 +120,7 @@ dependencies {
     implementation(libs.androidx.ui)
     implementation(libs.androidx.ui.graphics)
     implementation(libs.androidx.ui.tooling.preview)
+    implementation(libs.androidx.material.icons.extended)
     implementation(libs.androidx.material3)
     debugImplementation(libs.androidx.ui.tooling)
 
@@ -161,4 +162,3 @@ dependencies {
     implementation(libs.markwon.strikethrough)
     implementation(libs.markwon.tables)
 }
-

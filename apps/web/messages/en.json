@@ -24,6 +24,10 @@
     "noWorkspaces": "No workspaces yet. Create one to get started.",
     "switchWorkspace": "Switch workspace",
     "addWorkspace": "New workspace",
+    "currentWorkspace": "Current workspace",
+    "renameWorkspace": "Rename workspace",
+    "deleteWorkspace": "Delete workspace",
+    "deleteWorkspaceConfirm": "Delete \"{name}\"? This removes its wiki metadata and tries to move its Drive folder to trash.",
     "toggleSidebar": "Toggle sidebar",
     "toggleGraphView": "Toggle graph view",
     "toggleConversation": "Toggle conversation",
@@ -98,5 +102,20 @@
     "default": "default",
     "deleteProfile": "Delete profile",
     "saveFailed": "Failed to save profile"
+  },
+  "help": {
+    "title": "Help",
+    "open": "Open help",
+    "close": "Close help",
+    "workspaceTitle": "Workspaces and pages",
+    "workspaceBody": "Use the MyWiki menu to switch or create workspaces. The page tree switches wiki, notes, and schema pages; locked pages are protected from LLM overwrites.",
+    "ingestTitle": "Import content",
+    "ingestBody": "Paste a URL, text, or Markdown in the right panel, or upload .txt / .md files. The wiki updates related pages after ingest finishes.",
+    "chatTitle": "Chat and synthesis",
+    "chatBody": "Use the right panel to ask questions about the current wiki. Pick an LLM profile near the input; cited answers can be saved as synthesis pages.",
+    "settingsTitle": "Settings and sync",
+    "settingsBody": "Settings manages LLM profiles, language, and appearance. LLM profiles sync across Web and Android through the same Supabase account.",
+    "driveTitle": "Google Drive reconnect",
+    "driveBody": "If Drive access expires, reconnect when prompted. After returning to the app or web page, workspace and profile data refresh automatically."
   }
 }

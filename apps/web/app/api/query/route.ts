@@ -1,8 +1,8 @@
 import { NextRequest } from 'next/server';
 import { streamText, stepCountIs, type ModelMessage } from 'ai';
 import { z } from 'zod';
-import { createClient } from '@/lib/supabase/server';
 import { findFile, readDriveFile } from '@/lib/drive/client';
+import { getRequestUser } from '@/lib/supabase/request';
 import {
   createDriveClientForUser,
   GOOGLE_DRIVE_REAUTH_MESSAGE,
@@ -15,10 +15,7 @@ import { DEFAULT_PROMPTS } from '@llm-wiki/prompts';
 export const maxDuration = 120;
 
 export async function POST(request: NextRequest) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { supabase, user } = await getRequestUser(request);
   if (!user) return new Response('Unauthorized', { status: 401 });
 
   const body = await request.json().catch(() => null);

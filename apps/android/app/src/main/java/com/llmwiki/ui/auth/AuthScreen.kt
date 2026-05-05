@@ -39,6 +39,18 @@ fun AuthScreen(
     ) { result ->
         authViewModel.handleGoogleSignInResult(result.data)
     }
+    val launchGoogleAccountChooser: () -> Unit = {
+        authViewModel.createGoogleSignInIntent(context)?.let { signInIntent ->
+            authViewModel.clearGoogleSignInSession(context) {
+                googleSignInLauncher.launch(signInIntent)
+            }
+        }
+        Unit
+    }
+
+    LaunchedEffect(Unit) {
+        authViewModel.restoreSessionIfPossible()
+    }
 
     LaunchedEffect(state) {
         if (state is AuthState.Success) {
@@ -71,6 +83,7 @@ fun AuthScreen(
             Spacer(modifier = Modifier.height(40.dp))
 
             when (val s = state) {
+                is AuthState.Restoring -> CircularProgressIndicator()
                 is AuthState.Loading -> CircularProgressIndicator()
                 is AuthState.Error -> {
                     Text(
@@ -79,13 +92,9 @@ fun AuthScreen(
                         color = MaterialTheme.colorScheme.error,
                         modifier = Modifier.padding(bottom = 12.dp),
                     )
-                    SignInButton {
-                        authViewModel.createGoogleSignInIntent(context)?.let(googleSignInLauncher::launch)
-                    }
+                    SignInButton(onClick = launchGoogleAccountChooser)
                 }
-                else -> SignInButton {
-                    authViewModel.createGoogleSignInIntent(context)?.let(googleSignInLauncher::launch)
-                }
+                else -> SignInButton(onClick = launchGoogleAccountChooser)
             }
         }
     }
@@ -97,6 +106,6 @@ private fun SignInButton(onClick: () -> Unit) {
         onClick = onClick,
         modifier = Modifier.widthIn(min = 240.dp),
     ) {
-        Text(text = "Sign in with Google")
+        Text(text = stringResource(R.string.auth_sign_in))
     }
 }

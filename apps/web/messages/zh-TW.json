@@ -24,6 +24,10 @@
     "noWorkspaces": "目前沒有工作區，建立一個開始使用吧。",
     "switchWorkspace": "切換工作區",
     "addWorkspace": "新增工作區",
+    "currentWorkspace": "目前工作區",
+    "renameWorkspace": "重新命名工作區",
+    "deleteWorkspace": "刪除工作區",
+    "deleteWorkspaceConfirm": "刪除「{name}」？這會移除 Wiki metadata，並嘗試將 Drive 資料夾移到垃圾桶。",
     "toggleSidebar": "切換側邊欄",
     "toggleGraphView": "切換知識圖譜",
     "toggleConversation": "切換對話面板",
@@ -98,5 +102,20 @@
     "default": "預設",
     "deleteProfile": "刪除設定檔",
     "saveFailed": "儲存設定檔失敗"
+  },
+  "help": {
+    "title": "使用說明",
+    "open": "開啟使用說明",
+    "close": "關閉使用說明",
+    "workspaceTitle": "工作區與頁面",
+    "workspaceBody": "用 MyWiki 選單切換或建立工作區。左側頁面樹可切換 wiki、notes 與 schema；鎖定頁面後 LLM 不會覆寫。",
+    "ingestTitle": "匯入內容",
+    "ingestBody": "右側輸入列可貼上網址、文字或 Markdown，也可上傳 .txt / .md 檔案。匯入完成後 Wiki 會同步更新相關頁面。",
+    "chatTitle": "對話與綜合頁",
+    "chatBody": "右側對話可以詢問目前 Wiki。輸入框旁可選 LLM profile；有引用來源的回答可存成 synthesis page。",
+    "settingsTitle": "設定與同步",
+    "settingsBody": "設定頁可管理 LLM profile、語言與外觀。LLM profile 會依同一個 Supabase 帳號同步到 Web 與 Android。",
+    "driveTitle": "Google Drive 重新授權",
+    "driveBody": "若 Drive 權限失效，系統會要求重新授權。完成後回到 App 或網頁，工作區與設定檔會重新整理。"
   }
 }

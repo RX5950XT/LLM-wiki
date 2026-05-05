@@ -187,8 +187,31 @@ apps/android/app/src/main/java/com/llmwiki/
 ## Android 注意事項
 
 - `AuthState.Success` 含 `accountName`（Google 帳號 email），NavGraph 透過 `rememberSaveable` 保留後傳給 WikiViewModel
+- Android 現在有 `workspace-create` route；若登入後沒有任何 workspace，直接進建立工作區畫面，不再卡在空白 wiki
+- Google Drive 重新授權 deep link 使用 `llmwiki://auth/reconnect?source=...`；`MainActivity` 會接回 App，`apps/web/app/auth/reconnect/page.tsx` 負責啟動 OAuth
+- Android Supabase Auth 必須設定 `SettingsSessionManager()` + `SettingsCodeVerifierCache()`，否則 session 不會跨重啟保留，使用者每次都要重新登入
+- `AppPreferencesRepository` 必須透過 `preferencesDataStore` 共用單一 DataStore；若在 `MainActivity` / `SettingsViewModel` 各自建立獨立 `PreferenceDataStoreFactory`，設定頁會因同檔案多實例而閃退
+- Android 語言切換要讓 `MainActivity` 使用 `AppCompatActivity`，並在 `setContent` 前先套用已儲存 locale；`AppCompatDelegate.setApplicationLocales()` 也要先比較 `toLanguageTags()`，避免每次啟動都重建 Activity 導致閃黑
+- Android 打 Web API 時不可直接信任舊的 `currentSessionOrNull()?.accessToken`；需先經 `requireAccessToken()`，若目前 token 為空但 session 仍存在也要先 refresh，再在 401 時用 `forceRefresh=true` 重試一次，否則設定頁與模型/設定檔同步容易出現 `Unauthorized`
+- Android 呼叫 Web API 前應使用 `requireAccessToken(forceRefresh = true)`，直接 Supabase PostgREST 查詢（例如 pages/workspaces）也要先 refresh session，避免首頁偶發「登入狀態已失效」紅字
+- Android Web API 錯誤解析要處理純文字 `Unauthorized`；部分 route（例如 `/api/query` stream）不一定回 JSON，需轉為本地化錯誤訊息
+- Android 對預期 JSON 的 Web API 回應不可只看 HTTP 2xx；Vercel 對未部署的 method/path 可能回 `200 text/html`，必須確認 body 是 JSON object 才能更新本機狀態
+- Android 讀取 LLM profiles 使用 `LlmProfileRepository` 直接查 Supabase `llm_profiles`（RLS + `owner_id`），不要用 Web API Bearer token 做列表同步；Web API 保留給需要 server-side 加密的 create/delete
+- `MainActivity` 在 `setContent` 前要先 `awaitInitialization()`，讓已登入使用者啟動時能直接進 wiki，不先閃到登入畫面
+- Android `LlmWikiNavGraph` 若已存在 session，啟動時直接進 `wiki` route，不再先經登入頁轉圈；若工作區載入完成但為空，再轉去 `workspace-create`
+- Android 登出與重新登入時，需同時清掉 `GoogleSignIn` 快取，否則再次登入不會跳出 Google 帳號選擇器
+- Android Wiki drawer 已改為工作區下拉選單；「建立工作區」整合進下拉內，檔案匯入除了文字/URL 也支援從手機選取文字檔直接 ingest
+- Android workspace 下拉選單需提供切換、新建、重新命名、刪除；刪除時清掉該 workspace 的 Room cache 並選下一個 workspace 或回建立頁
+- Android Chat 模型選擇用模型/聊天語意 icon（例如 `SmartToy`），不要用設定齒輪；頁面鎖定狀態需以 `Lock` / `LockOpen` 區分，因為鎖頭本身可點擊切換
+- Android `MarkdownViewer` 用 Markwon + `TextView` 時必須在 Compose update 內同步 `MaterialTheme` 的文字與連結顏色，否則深色模式會出現黑底黑字
+- Android FAB 要明確設定 `containerColor` / `contentColor`，不要依賴預設 primaryContainer；淺色模式容易出現不自然白色塊
+- Web API 若要同時服務 Web cookie 與 Android Bearer token，route 需經 `lib/supabase/request.ts` 取 user，不能只靠 `lib/supabase/server.ts`
+- `lib/supabase/request.ts` 驗證 Android Bearer token 時需用 admin client `auth.getUser(token)`，再回傳 bearer Supabase client 給 RLS 查詢；只用 anon/bearer client 驗證會造成有效 token 被判定 Unauthorized
+- Workspace 管理需 Web / Android 對齊：`PATCH /api/workspaces/[id]` 更新名稱，`DELETE /api/workspaces/[id]` 刪除 workspace；刪除會嘗試 trash Google Drive folder，但 Drive 清理失敗不阻擋 DB 刪除，僅回傳 warning
+- Android 端 workspace 刪除只有在 API 回 `{ ok: true }` 後才能清本機 Room / UI 狀態；不可 optimistic remove，否則 production route 漏部署時會出現手機消失但 Web/Drive 仍存在
 - `Icons.AutoMirrored.Filled.List` 取代舊版 `Icons.Default.Menu`（Compose Material 3 方向性圖示）
 - `SyncWorker.schedule()` 使用 `ExistingPeriodicWorkPolicy.KEEP`（不重複排程同一個 workspace）
+- `PageRepository.syncPages()` 不再限制 200 筆，且會刪除本機 Room 中伺服器已不存在的頁面，避免 Android 側欄殘留舊頁
 - `ingestUrl()` / `ingestText()` 呼叫 Web app 的 `/api/ingest`，使用 Supabase session accessToken
 - Web API 端點位址由 `BuildConfig.WEB_API_BASE_URL` 決定（從 `local.properties` 的 `WEB_API_BASE_URL` 或 `NEXT_PUBLIC_SITE_URL` 注入）
 - Chat 串流協定：POST `/api/query` → `text/plain` stream，結尾附 `\x00CITATIONS\x00[...]`；Android 用 Ktor `bodyAsChannel()` + `readUTF8Line()` 消費
@@ -196,6 +219,8 @@ apps/android/app/src/main/java/com/llmwiki/
 - 登出後 NavController navigate("auth") popUpTo(0) inclusive=true
 - 登出時 `WikiViewModel.signOut()` 會清空 Room DB（`PageDao.deleteAll()`）並取消 WorkManager job（`SyncWorker.cancel()`）
 - `GOOGLE_CLIENT_ID` 必須使用 **Web OAuth client ID**（非 Android client ID），`requestIdToken()` 需要它來取得 ID token
+- Web / Android 建立工作區 UI 不保留 description 欄位；Web `/w/create` 需提供返回 `/w` 的按鈕
+- 使用說明入口需在 Web top bar 與 Android drawer 同步提供，說明內容涵蓋工作區、匯入、對話、設定同步與 Drive 重授權
 
 ## Graph View 注意事項
 

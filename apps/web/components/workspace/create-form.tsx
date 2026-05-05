@@ -10,7 +10,6 @@ export function CreateWorkspaceForm() {
   const tc = useTranslations('common');
   const router = useRouter();
   const [name, setName] = useState('My Wiki');
-  const [description, setDescription] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [wasReconnected] = useState(() =>
@@ -26,7 +25,7 @@ export function CreateWorkspaceForm() {
       const res = await fetch('/api/workspaces', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, description }),
+        body: JSON.stringify({ name }),
       });
 
       const raw = await res.text();
@@ -91,25 +90,6 @@ export function CreateWorkspaceForm() {
           }}
         />
       </div>
-
-      <div className="space-y-1.5">
-        <label className="text-sm font-medium" style={{ color: 'var(--fg)' }}>
-          {t('description')}
-        </label>
-        <textarea
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          rows={2}
-          maxLength={500}
-          className="w-full resize-none rounded-md border px-3 py-2 text-sm outline-none focus:ring-1"
-          style={{
-            background: 'var(--bg-2)',
-            borderColor: 'var(--border)',
-            color: 'var(--fg)',
-          }}
-        />
-      </div>
-
       {error && (
         <p className="text-sm" style={{ color: 'oklch(65% 0.18 30)' }}>{error}</p>
       )}

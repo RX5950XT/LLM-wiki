@@ -1,5 +1,7 @@
+import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
+import { ArrowLeft } from 'lucide-react';
 import { createClient } from '@/lib/supabase/server';
 import { CreateWorkspaceForm } from '@/components/workspace/create-form';
 
@@ -14,6 +16,7 @@ export default async function CreateWorkspacePage({
 
   const { error } = await searchParams;
   const t = await getTranslations('workspace');
+  const tc = await getTranslations('common');
 
   return (
     <div
@@ -21,6 +24,14 @@ export default async function CreateWorkspacePage({
       style={{ background: 'var(--bg)' }}
     >
       <div className="w-full max-w-md space-y-6 px-6">
+        <Link
+          href="/w"
+          className="inline-flex items-center gap-1.5 text-sm transition-opacity hover:opacity-70"
+          style={{ color: 'var(--fg-muted)' }}
+        >
+          <ArrowLeft size={15} />
+          {tc('back')}
+        </Link>
         <div className="space-y-1">
           <h1 className="text-xl font-semibold" style={{ color: 'var(--fg)' }}>
             {t('create')}

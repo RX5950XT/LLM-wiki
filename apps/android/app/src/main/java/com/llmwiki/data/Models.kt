@@ -28,3 +28,20 @@ data class PageRow(
     @SerialName("updated_by") val updatedBy: String,
     @SerialName("locked_by_human") val lockedByHuman: Boolean = false,
 )
+
+@Serializable
+data class LlmProfile(
+    val id: String,
+    val name: String,
+    @SerialName("base_url") val baseUrl: String = "",
+    val model: String = "",
+    @SerialName("is_default") val isDefault: Boolean = false,
+)
+
+@Serializable
+data class SearchResult(
+    val slug: String,
+    val title: String? = null,
+    val kind: String = "",
+    @SerialName("updated_at") val updatedAt: String = "",
+)

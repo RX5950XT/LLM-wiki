@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { initWorkspaceDrive } from '@/lib/drive/workspace-init';
+import { getRequestUser } from '@/lib/supabase/request';
 import {
   createDriveClientForUser,
   GOOGLE_DRIVE_REAUTH_MESSAGE,
@@ -11,12 +11,10 @@ import {
 
 const CreateWorkspaceSchema = z.object({
   name: z.string().min(1).max(100),
-  description: z.string().max(500).optional(),
 });
 
 export async function POST(request: NextRequest) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const { user } = await getRequestUser(request);
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const body = await request.json().catch(() => null);
@@ -37,7 +35,6 @@ export async function POST(request: NextRequest) {
       id: workspaceId,
       owner_id: user.id,
       name: parsed.data.name,
-      description: parsed.data.description ?? null,
       drive_folder_id: driveFolderId,
     });
     if (workspaceError) throw new Error(`Failed to create workspace record: ${workspaceError.message}`);
@@ -82,9 +79,8 @@ export async function POST(request: NextRequest) {
   }
 }
 
-export async function GET() {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+export async function GET(request: NextRequest) {
+  const { supabase, user } = await getRequestUser(request);
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const { data: workspaces, error } = await supabase

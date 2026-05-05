@@ -10,7 +10,12 @@ export async function GET(request: NextRequest) {
   const code = searchParams.get('code');
   const rawNext = searchParams.get('next');
   // Accept only relative paths to prevent open-redirect
-  const next = rawNext && /^\/[^/]/.test(rawNext) ? rawNext : null;
+  const next = rawNext && /^\/[^/]/.test(rawNext)
+    ? rawNext
+    : rawNext && /^llmwiki:\/\/auth\/reconnect(?:\?|$)/.test(rawNext)
+      ? rawNext
+      : null;
+  const isAppReconnect = typeof next === 'string' && next.startsWith('llmwiki://auth/reconnect');
 
   if (!code) {
     return NextResponse.redirect(`${origin}/login?error=missing_code`);
@@ -56,7 +61,14 @@ export async function GET(request: NextRequest) {
     .limit(1);
 
   if (workspaces && workspaces.length > 0) {
-    return NextResponse.redirect(`${origin}${next ?? `/w/${workspaces[0]?.id ?? ''}`}`);
+    const redirectTarget = isAppReconnect
+      ? appendAppQuery(next, 'workspaceId', workspaces[0]?.id ?? '')
+      : `${origin}${next ?? `/w/${workspaces[0]?.id ?? ''}`}`;
+    return NextResponse.redirect(redirectTarget);
+  }
+
+  if (isAppReconnect && next) {
+    return NextResponse.redirect(next);
   }
 
   // First login — auto-create default workspace + Drive folder structure
@@ -112,5 +124,16 @@ export async function GET(request: NextRequest) {
     console.error('[auth/callback] workspace init failed:', err);
     // Fall back to manual create flow
     return NextResponse.redirect(`${origin}/w/create?error=init_failed`);
+  }
+}
+
+function appendAppQuery(target: string, key: string, value: string): string {
+  if (!value) return target;
+  try {
+    const url = new URL(target);
+    url.searchParams.set(key, value);
+    return url.toString();
+  } catch {
+    return target;
   }
 }

@@ -5,6 +5,18 @@
     <string name="auth_description">你的個人 AI 知識庫。Wiki 內容儲存在你自己的 Google Drive 中。</string>
     <string name="auth_sign_in">使用 Google 登入</string>
     <string name="auth_sign_out">登出</string>
+    <string name="workspace_name">工作區名稱</string>
+    <string name="workspace_description">描述</string>
+    <string name="workspace_create_title">建立工作區</string>
+    <string name="workspace_create_description">先建立 wiki 工作區，Android 端才能同步頁面、對話與匯入來源。</string>
+    <string name="workspace_create_action">建立工作區</string>
+    <string name="workspace_rename_title">重新命名工作區</string>
+    <string name="workspace_delete_title">刪除工作區</string>
+    <string name="workspace_delete_body">刪除「%1$s」？這會移除 Wiki metadata，並嘗試將 Drive 資料夾移到垃圾桶。</string>
+    <string name="workspace_drive_reconnected">Google Drive 已重新連線，可以繼續在 App 內操作。</string>
+    <string name="workspace_drive_reconnect_title">重新連線 Google Drive</string>
+    <string name="workspace_drive_reconnect_body">你的 Google Drive 授權已失效。請在瀏覽器完成重新授權後回到 App。</string>
+    <string name="workspace_drive_reconnect_action">重新連線 Google Drive</string>
     <string name="workspace_no_workspaces">目前沒有工作區，建立一個開始使用吧。</string>
     <string name="wiki_index">索引</string>
     <string name="wiki_log">日誌</string>
@@ -12,6 +24,84 @@
     <string name="ingest_running">整合中…</string>
     <string name="query_placeholder">問問你的 Wiki 任何問題…</string>
     <string name="query_file_back">存成綜合頁面</string>
+
+    <!-- Wiki 畫面 -->
+    <string name="wiki_no_pages">尚無頁面。\n點 + 開始匯入。</string>
+    <string name="wiki_empty_first">點 + 匯入你的第一個來源</string>
+    <string name="wiki_empty_select">從選單選擇一個頁面</string>
+    <string name="wiki_no_content">無可用內容</string>
+    <string name="wiki_open_pages">開啟頁面列表</string>
+    <string name="wiki_sync">同步</string>
+    <string name="wiki_chat">對話</string>
+    <string name="wiki_chat_empty">問問你的 Wiki 任何問題</string>
+    <string name="wiki_chat_input_hint">問問你的 Wiki…</string>
+    <string name="wiki_send">傳送</string>
+    <string name="wiki_locked">已鎖定</string>
+    <string name="wiki_unlocked">未鎖定</string>
+    <string name="wiki_ingest_title">匯入來源</string>
+    <string name="wiki_ingest_hint">貼上 URL、純文字或 Markdown</string>
+    <string name="wiki_ingest_placeholder">https://… 或貼上文字 / Markdown</string>
+    <string name="wiki_ingest_confirm">匯入</string>
+    <string name="wiki_attach_file">附加檔案</string>
+    <string name="wiki_synthesis_saved">已存成綜合頁面</string>
+    <string name="wiki_sources">來源：%1$s</string>
+    <string name="wiki_snack_ingest_started">開始匯入</string>
+    <string name="wiki_snack_ingest_failed">匯入失敗</string>
+    <string name="wiki_switch_workspace">切換工作區</string>
+    <string name="wiki_search">搜尋</string>
+    <string name="wiki_search_placeholder">搜尋頁面…</string>
+    <string name="wiki_search_close">關閉搜尋</string>
+    <string name="wiki_search_empty">找不到結果</string>
+    <string name="wiki_select_model">選擇模型</string>
+    <string name="wiki_current_workspace">目前工作區</string>
+
+    <!-- 設定畫面 -->
     <string name="settings_title">設定</string>
+    <string name="settings_account">帳號</string>
+    <string name="settings_signed_in_as">目前登入帳號</string>
+    <string name="settings_unknown_account">未知帳號</string>
     <string name="settings_llm_profiles">LLM 設定檔</string>
+    <string name="settings_add_profile">新增設定檔</string>
+    <string name="settings_no_profiles">尚無設定檔。新增一個以使用自訂 LLM。</string>
+    <string name="settings_theme">外觀主題</string>
+    <string name="settings_theme_light">淺色</string>
+    <string name="settings_theme_dark">深色</string>
+    <string name="settings_theme_system">跟隨系統</string>
+    <string name="settings_language">語言</string>
+    <string name="settings_language_system">跟隨系統</string>
+    <string name="settings_language_zh_tw">繁體中文</string>
+    <string name="settings_language_en">English</string>
+    <string name="settings_profile_name">名稱</string>
+    <string name="settings_profile_base_url">Base URL</string>
+    <string name="settings_profile_model">模型</string>
+    <string name="settings_profile_api_key">API Key</string>
+    <string name="settings_set_as_default">設為預設</string>
+    <string name="settings_default_profile">預設</string>
+    <string name="settings_delete_profile">刪除設定檔</string>
+    <string name="settings_delete_profile_confirm">刪除「%1$s」？此動作無法復原。</string>
+
+    <!-- 使用說明 -->
+    <string name="help_title">使用說明</string>
+    <string name="help_workspace_title">工作區與頁面</string>
+    <string name="help_workspace_body">用工作區選單切換或建立工作區。從側邊欄選頁面；鎖定的頁面不會被 LLM 覆寫。</string>
+    <string name="help_ingest_title">匯入內容</string>
+    <string name="help_ingest_body">用 + 貼上網址、文字或 Markdown。用附加檔案按鈕可從手機匯入文字檔。</string>
+    <string name="help_chat_title">對話與綜合頁</string>
+    <string name="help_chat_body">打開對話詢問 Wiki。可在輸入列選模型設定檔，並將有用回答存成綜合頁面。</string>
+    <string name="help_settings_title">設定與 LLM 設定檔</string>
+    <string name="help_settings_body">設定頁管理 LLM profile、語言與外觀。Profile 會透過同一個 Supabase 帳號同步。</string>
+    <string name="help_drive_title">Google Drive 重新連線</string>
+    <string name="help_drive_body">若 Drive 授權失效，請在瀏覽器重新授權後回到 App，App 會重新整理工作區與設定檔。</string>
+    <string name="workspace_create_menu_hint">新增另一個連到 Drive 的 Wiki</string>
+
+    <!-- 操作 -->
+    <string name="action_cancel">取消</string>
+    <string name="action_dismiss">關閉</string>
+    <string name="action_delete">刪除</string>
+    <string name="action_save">儲存</string>
+    <string name="action_back">返回</string>
+    <string name="action_refresh">重新整理</string>
+    <string name="action_done">完成</string>
+    <string name="error_unauthorized">登入狀態已失效，請重新登入。</string>
+    <string name="error_api_not_json">後端回傳網頁而不是 API JSON。請更新並部署網頁版後再試。</string>
 </resources>

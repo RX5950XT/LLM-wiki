@@ -1,5 +1,13 @@
 package com.llmwiki.ui.wiki
 
+import android.content.Intent
+import android.net.Uri
+import android.provider.OpenableColumns
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -8,37 +16,62 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.automirrored.filled.Help
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.ChatBubbleOutline
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.NavigationDrawerItem
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.SnackbarHost
@@ -47,6 +80,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -60,12 +94,24 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.llmwiki.R
+import com.llmwiki.data.parseDriveReconnectSource
+import com.llmwiki.data.LlmProfile
+import com.llmwiki.data.SearchResult
+import com.llmwiki.data.WorkspaceRow
 import com.llmwiki.data.room.PageEntity
 import kotlinx.coroutines.launch
 
@@ -75,7 +121,10 @@ fun WikiScreen(
     workspaceId: String?,
     accountName: String,
     shareUrl: String? = null,
+    authReturnUri: String? = null,
     modifier: Modifier = Modifier,
+    onNavigateToSettings: () -> Unit = {},
+    onNavigateToCreateWorkspace: () -> Unit = {},
     onSignedOut: () -> Unit = {},
     wikiViewModel: WikiViewModel = viewModel(),
 ) {
@@ -87,7 +136,41 @@ fun WikiScreen(
     var showIngestDialog by remember { mutableStateOf(false) }
     var pendingShareUrl by remember { mutableStateOf<String?>(null) }
     var showChatSheet by remember { mutableStateOf(false) }
+    var showWorkspaceMenu by remember { mutableStateOf(false) }
+    var showHelpDialog by remember { mutableStateOf(false) }
+    var renameWorkspace by remember { mutableStateOf<WorkspaceRow?>(null) }
+    var deleteWorkspace by remember { mutableStateOf<WorkspaceRow?>(null) }
+    val workspaceArrowRotation by animateFloatAsState(
+        targetValue = if (showWorkspaceMenu) 180f else 0f,
+        label = "workspace-menu-arrow",
+    )
     val snackbarHostState = remember { SnackbarHostState() }
+    val searchFocusRequester = remember { FocusRequester() }
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val filePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val fileContent = readTextFromUri(context, uri)
+        if (fileContent.isNullOrBlank()) {
+            scope.launch {
+                snackbarHostState.showSnackbar(context.getString(R.string.wiki_snack_ingest_failed))
+            }
+            return@rememberLauncherForActivityResult
+        }
+        val fileName = readDisplayName(context, uri) ?: "Imported file"
+        wikiViewModel.ingestText(fileName, fileContent) { success ->
+            scope.launch {
+                snackbarHostState.showSnackbar(
+                    context.getString(
+                        if (success) R.string.wiki_snack_ingest_started
+                        else R.string.wiki_snack_ingest_failed,
+                    )
+                )
+            }
+        }
+    }
 
     LaunchedEffect(workspaceId, accountName) {
         if (accountName.isNotBlank()) wikiViewModel.init(workspaceId, accountName)
@@ -104,17 +187,186 @@ fun WikiScreen(
         if (uiState.signedOut) onSignedOut()
     }
 
+    LaunchedEffect(uiState.workspacesLoaded, uiState.workspaces.size, accountName) {
+        if (accountName.isNotBlank() && uiState.workspacesLoaded && uiState.workspaces.isEmpty()) {
+            onNavigateToCreateWorkspace()
+        }
+    }
+
+    LaunchedEffect(uiState.showSearch) {
+        if (uiState.showSearch) {
+            runCatching { searchFocusRequester.requestFocus() }
+        }
+    }
+
+    LaunchedEffect(authReturnUri) {
+        val source = parseDriveReconnectSource(authReturnUri)
+        if (source == "query" || source == "ingest" || source == "synthesis") {
+            wikiViewModel.onDriveReconnectCompleted()
+            snackbarHostState.showSnackbar(
+                context.getString(R.string.workspace_drive_reconnected)
+            )
+        }
+    }
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME && accountName.isNotBlank()) {
+                wikiViewModel.refreshAfterForeground()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
     ModalNavigationDrawer(
         drawerState = drawerState,
+        gesturesEnabled = !showChatSheet && !showIngestDialog,
         modifier = modifier,
         drawerContent = {
-            ModalDrawerSheet {
+            ModalDrawerSheet(
+                drawerContainerColor = MaterialTheme.colorScheme.surface,
+                drawerContentColor = MaterialTheme.colorScheme.onSurface,
+            ) {
                 Spacer(Modifier.height(16.dp))
-                Text(
-                    text = uiState.workspace?.name ?: stringResource(R.string.app_name),
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-                )
+
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 6.dp),
+                ) {
+                    OutlinedButton(
+                        onClick = { showWorkspaceMenu = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = MaterialTheme.shapes.medium,
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                            contentColor = MaterialTheme.colorScheme.onSurface,
+                        ),
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    text = uiState.workspace?.name ?: stringResource(R.string.wiki_switch_workspace),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    style = MaterialTheme.typography.titleMedium,
+                                )
+                                Text(
+                                    text = stringResource(R.string.wiki_switch_workspace),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            Icon(
+                                Icons.Default.ArrowDropDown,
+                                contentDescription = stringResource(R.string.wiki_switch_workspace),
+                                modifier = Modifier.rotate(workspaceArrowRotation),
+                            )
+                        }
+                    }
+                    DropdownMenu(
+                        expanded = showWorkspaceMenu,
+                        onDismissRequest = { showWorkspaceMenu = false },
+                        modifier = Modifier.widthIn(min = 280.dp),
+                    ) {
+                        uiState.workspaces.forEach { workspace ->
+                            val selected = workspace.id == uiState.workspace?.id
+                            DropdownMenuItem(
+                                text = {
+                                    Column {
+                                        Text(
+                                            workspace.name,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        if (selected) {
+                                            Text(
+                                                stringResource(R.string.wiki_current_workspace),
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.primary,
+                                            )
+                                        }
+                                    }
+                                },
+                                onClick = {
+                                    showWorkspaceMenu = false
+                                    wikiViewModel.switchWorkspace(workspace)
+                                    scope.launch { drawerState.close() }
+                                },
+                                trailingIcon = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        if (selected) {
+                                            Icon(
+                                                Icons.Default.Check,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(18.dp),
+                                            )
+                                        }
+                                        IconButton(
+                                            onClick = {
+                                                showWorkspaceMenu = false
+                                                renameWorkspace = workspace
+                                            },
+                                            modifier = Modifier.size(36.dp),
+                                        ) {
+                                            Icon(
+                                                Icons.Default.Edit,
+                                                contentDescription = stringResource(R.string.workspace_rename_title),
+                                                modifier = Modifier.size(18.dp),
+                                            )
+                                        }
+                                        IconButton(
+                                            onClick = {
+                                                showWorkspaceMenu = false
+                                                deleteWorkspace = workspace
+                                            },
+                                            modifier = Modifier.size(36.dp),
+                                            colors = IconButtonDefaults.iconButtonColors(
+                                                contentColor = MaterialTheme.colorScheme.error,
+                                            ),
+                                        ) {
+                                            Icon(
+                                                Icons.Default.Delete,
+                                                contentDescription = stringResource(R.string.workspace_delete_title),
+                                                modifier = Modifier.size(18.dp),
+                                            )
+                                        }
+                                    }
+                                },
+                            )
+                        }
+                        HorizontalDivider(Modifier.padding(vertical = 4.dp))
+                        DropdownMenuItem(
+                            text = {
+                                Column {
+                                    Text(stringResource(R.string.workspace_create_action))
+                                    Text(
+                                        stringResource(R.string.workspace_create_menu_hint),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            },
+                            onClick = {
+                                showWorkspaceMenu = false
+                                scope.launch { drawerState.close() }
+                                onNavigateToCreateWorkspace()
+                            },
+                            leadingIcon = {
+                                Icon(Icons.Default.Add, contentDescription = null)
+                            },
+                        )
+                    }
+                }
+
                 HorizontalDivider(Modifier.padding(vertical = 8.dp))
 
                 if (pages.isEmpty()) {
@@ -147,57 +399,133 @@ fun WikiScreen(
                 }
 
                 HorizontalDivider(Modifier.padding(vertical = 4.dp))
-                TextButton(
-                    onClick = { wikiViewModel.signOut() },
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(
-                        stringResource(R.string.auth_sign_out),
-                        color = MaterialTheme.colorScheme.error,
-                    )
+                    IconButton(
+                        onClick = { wikiViewModel.signOut() },
+                        colors = IconButtonDefaults.iconButtonColors(
+                            contentColor = MaterialTheme.colorScheme.error,
+                        ),
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.Logout,
+                            contentDescription = stringResource(R.string.auth_sign_out),
+                        )
+                    }
+                    IconButton(onClick = { showHelpDialog = true }) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.Help,
+                            contentDescription = stringResource(R.string.help_title),
+                        )
+                    }
+                    IconButton(onClick = {
+                        scope.launch { drawerState.close() }
+                        onNavigateToSettings()
+                    }) {
+                        Icon(
+                            Icons.Default.Settings,
+                            contentDescription = stringResource(R.string.settings_title),
+                        )
+                    }
                 }
                 Spacer(Modifier.height(8.dp))
             }
         },
     ) {
         Scaffold(
+            containerColor = MaterialTheme.colorScheme.background,
+            contentColor = MaterialTheme.colorScheme.onBackground,
             snackbarHost = { SnackbarHost(snackbarHostState) },
             topBar = {
                 TopAppBar(
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.surface,
+                        titleContentColor = MaterialTheme.colorScheme.onSurface,
+                        navigationIconContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        actionIconContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    ),
                     title = {
-                        Text(uiState.activePage?.title ?: uiState.workspace?.name ?: stringResource(R.string.app_name))
+                        if (uiState.showSearch) {
+                            OutlinedTextField(
+                                value = uiState.searchQuery,
+                                onValueChange = { wikiViewModel.updateSearchQuery(it) },
+                                placeholder = { Text(stringResource(R.string.wiki_search_placeholder)) },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .focusRequester(searchFocusRequester),
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                                keyboardActions = KeyboardActions(onSearch = {}),
+                            )
+                        } else {
+                            Text(uiState.activePage?.title ?: uiState.workspace?.name ?: stringResource(R.string.app_name))
+                        }
                     },
                     navigationIcon = {
-                        IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                            Icon(Icons.AutoMirrored.Filled.List, contentDescription = stringResource(R.string.wiki_open_pages))
+                        if (!uiState.showSearch) {
+                            IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                                Icon(Icons.AutoMirrored.Filled.List, contentDescription = stringResource(R.string.wiki_open_pages))
+                            }
                         }
                     },
                     actions = {
-                        if (uiState.contentLoading) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(24.dp).padding(end = 4.dp),
-                                strokeWidth = 2.dp,
-                            )
+                        if (uiState.showSearch) {
+                            if (uiState.searchLoading) {
+                                CircularProgressIndicator(modifier = Modifier.size(24.dp).padding(end = 4.dp), strokeWidth = 2.dp)
+                            }
+                            IconButton(onClick = { wikiViewModel.clearSearch() }) {
+                                Icon(Icons.Default.Close, contentDescription = stringResource(R.string.wiki_search_close))
+                            }
                         } else {
-                            IconButton(onClick = { wikiViewModel.syncPages() }) {
-                                Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.wiki_sync))
+                            IconButton(onClick = { wikiViewModel.toggleSearch() }) {
+                                Icon(Icons.Default.Search, contentDescription = stringResource(R.string.wiki_search))
+                            }
+                            if (uiState.contentLoading) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(24.dp).padding(end = 4.dp),
+                                    strokeWidth = 2.dp,
+                                )
+                            } else {
+                                IconButton(onClick = { wikiViewModel.syncPages() }) {
+                                    Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.wiki_sync))
+                                }
                             }
                         }
                     },
                 )
             },
             floatingActionButton = {
-                Column(
-                    horizontalAlignment = Alignment.End,
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    SmallFloatingActionButton(onClick = { showChatSheet = true }) {
-                        Icon(Icons.AutoMirrored.Filled.Send, contentDescription = stringResource(R.string.wiki_chat))
-                    }
-                    FloatingActionButton(
-                        onClick = { pendingShareUrl = null; showIngestDialog = true },
+                if (!uiState.showSearch) {
+                    Column(
+                        horizontalAlignment = Alignment.End,
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
-                        Icon(Icons.Default.Add, contentDescription = stringResource(R.string.wiki_ingest_confirm))
+                        SmallFloatingActionButton(
+                            onClick = { showChatSheet = true },
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                        ) {
+                            Icon(Icons.Default.ChatBubbleOutline, contentDescription = stringResource(R.string.wiki_chat))
+                        }
+                        SmallFloatingActionButton(
+                            onClick = { filePickerLauncher.launch(arrayOf("text/*", "application/json", "application/xml", "text/markdown", "text/x-markdown")) },
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                        ) {
+                            Icon(Icons.Default.AttachFile, contentDescription = stringResource(R.string.wiki_attach_file))
+                        }
+                        FloatingActionButton(
+                            onClick = { pendingShareUrl = null; showIngestDialog = true },
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary,
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = stringResource(R.string.wiki_ingest_confirm))
+                        }
                     }
                 }
             },
@@ -214,34 +542,47 @@ fun WikiScreen(
                     }
                 }
 
-                when {
-                    uiState.activePage == null -> Box(
-                        Modifier.weight(1f).fillMaxWidth(),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            if (pages.isEmpty()) stringResource(R.string.wiki_empty_first)
-                            else stringResource(R.string.wiki_empty_select),
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    uiState.contentLoading -> Box(
-                        Modifier.weight(1f).fillMaxWidth(),
-                        contentAlignment = Alignment.Center,
-                    ) { CircularProgressIndicator() }
-                    uiState.pageContent != null -> MarkdownViewer(
-                        markdown = uiState.pageContent!!,
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                if (uiState.showSearch) {
+                    SearchResultsPanel(
+                        results = uiState.searchResults,
+                        query = uiState.searchQuery,
+                        isLoading = uiState.searchLoading,
+                        onResultClick = { slug ->
+                            wikiViewModel.selectSearchResult(slug)
+                            scope.launch { drawerState.close() }
+                        },
+                        modifier = Modifier.weight(1f).fillMaxWidth(),
                     )
-                    else -> Box(
-                        Modifier.weight(1f).fillMaxWidth(),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(stringResource(R.string.wiki_no_content), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                } else {
+                    when {
+                        uiState.activePage == null -> Box(
+                            Modifier.weight(1f).fillMaxWidth(),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                if (pages.isEmpty()) stringResource(R.string.wiki_empty_first)
+                                else stringResource(R.string.wiki_empty_select),
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        uiState.contentLoading -> Box(
+                            Modifier.weight(1f).fillMaxWidth(),
+                            contentAlignment = Alignment.Center,
+                        ) { CircularProgressIndicator() }
+                        uiState.pageContent != null -> MarkdownViewer(
+                            markdown = uiState.pageContent!!,
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                        )
+                        else -> Box(
+                            Modifier.weight(1f).fillMaxWidth(),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(stringResource(R.string.wiki_no_content), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
                     }
                 }
             }
@@ -258,7 +599,10 @@ fun WikiScreen(
                 val onDone: (Boolean) -> Unit = { success ->
                     scope.launch {
                         snackbarHostState.showSnackbar(
-                            if (success) "Ingest started" else "Ingest failed"
+                            context.getString(
+                                if (success) R.string.wiki_snack_ingest_started
+                                else R.string.wiki_snack_ingest_failed
+                            )
                         )
                     }
                 }
@@ -276,15 +620,245 @@ fun WikiScreen(
             messages = uiState.chatMessages,
             isLoading = uiState.chatLoading,
             synthesisSavedSlug = uiState.synthesisSavedSlug,
+            profiles = uiState.profiles,
+            selectedProfileId = uiState.selectedProfileId,
+            onProfileSelected = { wikiViewModel.setSelectedProfile(it) },
             onSend = { wikiViewModel.sendQuery(it) },
             onSaveSynthesis = { q, a, slugs -> wikiViewModel.saveSynthesis(q, a, slugs) },
             onClearSynthesis = { wikiViewModel.clearSynthesisSlug() },
             onDismiss = { showChatSheet = false },
         )
     }
+
+    uiState.driveReconnectUrl?.let { reconnectUrl ->
+        AlertDialog(
+            onDismissRequest = wikiViewModel::dismissDriveReconnectPrompt,
+            title = { Text(stringResource(R.string.workspace_drive_reconnect_title)) },
+            text = { Text(stringResource(R.string.workspace_drive_reconnect_body)) },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        wikiViewModel.dismissDriveReconnectPrompt()
+                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(reconnectUrl)))
+                    },
+                ) {
+                    Text(stringResource(R.string.workspace_drive_reconnect_action))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = wikiViewModel::dismissDriveReconnectPrompt) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            },
+        )
+    }
+
+    if (showHelpDialog) {
+        WikiHelpDialog(onDismiss = { showHelpDialog = false })
+    }
+
+    renameWorkspace?.let { workspace ->
+        WorkspaceRenameDialog(
+            workspace = workspace,
+            isLoading = uiState.workspaceActionLoading,
+            onDismiss = { renameWorkspace = null },
+            onConfirm = { newName ->
+                wikiViewModel.renameWorkspace(workspace, newName)
+                renameWorkspace = null
+            },
+        )
+    }
+
+    deleteWorkspace?.let { workspace ->
+        WorkspaceDeleteDialog(
+            workspace = workspace,
+            isLoading = uiState.workspaceActionLoading,
+            onDismiss = { deleteWorkspace = null },
+            onConfirm = {
+                wikiViewModel.deleteWorkspace(workspace)
+                deleteWorkspace = null
+            },
+        )
+    }
 }
 
-// ── Drawer page item with lock toggle ──────────────────────────────────────
+@Composable
+private fun WorkspaceRenameDialog(
+    workspace: WorkspaceRow,
+    isLoading: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit,
+) {
+    var name by remember(workspace.id) { mutableStateOf(workspace.name) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.workspace_rename_title)) },
+        text = {
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                label = { Text(stringResource(R.string.workspace_name)) },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        },
+        confirmButton = {
+            Button(
+                onClick = { onConfirm(name) },
+                enabled = name.trim().isNotBlank() && !isLoading,
+            ) {
+                Text(stringResource(R.string.action_save))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.action_cancel))
+            }
+        },
+    )
+}
+
+@Composable
+private fun WorkspaceDeleteDialog(
+    workspace: WorkspaceRow,
+    isLoading: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.workspace_delete_title)) },
+        text = { Text(stringResource(R.string.workspace_delete_body, workspace.name)) },
+        confirmButton = {
+            Button(
+                onClick = onConfirm,
+                enabled = !isLoading,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.error,
+                    contentColor = MaterialTheme.colorScheme.onError,
+                ),
+            ) {
+                Text(stringResource(R.string.action_delete))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.action_cancel))
+            }
+        },
+    )
+}
+
+@Composable
+private fun WikiHelpDialog(onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.help_title)) },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                HelpSection(
+                    title = stringResource(R.string.help_workspace_title),
+                    body = stringResource(R.string.help_workspace_body),
+                )
+                HelpSection(
+                    title = stringResource(R.string.help_ingest_title),
+                    body = stringResource(R.string.help_ingest_body),
+                )
+                HelpSection(
+                    title = stringResource(R.string.help_chat_title),
+                    body = stringResource(R.string.help_chat_body),
+                )
+                HelpSection(
+                    title = stringResource(R.string.help_settings_title),
+                    body = stringResource(R.string.help_settings_body),
+                )
+                HelpSection(
+                    title = stringResource(R.string.help_drive_title),
+                    body = stringResource(R.string.help_drive_body),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.action_done))
+            }
+        },
+    )
+}
+
+@Composable
+private fun HelpSection(title: String, body: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        Text(
+            text = body,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+// ── Search results panel ────────────────────────────────────────────────────
+
+@Composable
+private fun SearchResultsPanel(
+    results: List<SearchResult>,
+    query: String,
+    isLoading: Boolean,
+    onResultClick: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(modifier) {
+        when {
+            isLoading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
+            }
+            query.length >= 2 && results.isEmpty() -> Box(
+                Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    stringResource(R.string.wiki_search_empty),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+            else -> LazyColumn {
+                item { Spacer(Modifier.height(8.dp)) }
+                items(results, key = { it.slug }) { result ->
+                    ListItem(
+                        headlineContent = { Text(result.title ?: result.slug) },
+                        supportingContent = {
+                            Text(
+                                result.slug,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        },
+                        trailingContent = {
+                            Text(
+                                result.kind,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        },
+                        modifier = Modifier.clickable { onResultClick(result.slug) },
+                    )
+                    HorizontalDivider()
+                }
+                item { Spacer(Modifier.height(8.dp)) }
+            }
+        }
+    }
+}
 
 @Composable
 private fun PageListItem(
@@ -301,7 +875,7 @@ private fun PageListItem(
         badge = {
             IconButton(onClick = onToggleLock) {
                 Icon(
-                    Icons.Default.Lock,
+                    if (page.lockedByHuman) Icons.Default.Lock else Icons.Default.LockOpen,
                     contentDescription = if (page.lockedByHuman)
                         stringResource(R.string.wiki_locked)
                     else
@@ -325,6 +899,9 @@ private fun ChatBottomSheet(
     messages: List<ChatMessage>,
     isLoading: Boolean,
     synthesisSavedSlug: String?,
+    profiles: List<LlmProfile>,
+    selectedProfileId: String?,
+    onProfileSelected: (String?) -> Unit,
     onSend: (String) -> Unit,
     onSaveSynthesis: (question: String, answer: String, slugs: List<String>) -> Unit,
     onClearSynthesis: () -> Unit,
@@ -333,6 +910,7 @@ private fun ChatBottomSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val listState = rememberLazyListState()
     var input by rememberSaveable { mutableStateOf("") }
+    var showProfileMenu by remember { mutableStateOf(false) }
 
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) listState.animateScrollToItem(messages.size - 1)
@@ -344,11 +922,20 @@ private fun ChatBottomSheet(
         modifier = Modifier.fillMaxSize(),
     ) {
         Column(Modifier.fillMaxSize().imePadding()) {
-            Text(
-                stringResource(R.string.wiki_chat),
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-            )
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(stringResource(R.string.wiki_chat), style = MaterialTheme.typography.titleMedium)
+                if (profiles.isNotEmpty()) {
+                    val selectedName = profiles.firstOrNull { it.id == selectedProfileId }?.name
+                        ?: profiles.firstOrNull { it.isDefault }?.name
+                    selectedName?.let {
+                        Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                    }
+                }
+            }
             HorizontalDivider()
 
             if (messages.isEmpty() && !isLoading) {
@@ -376,10 +963,7 @@ private fun ChatBottomSheet(
                     if (isLoading) {
                         item {
                             Box(Modifier.fillMaxWidth().padding(8.dp), contentAlignment = Alignment.Center) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(20.dp),
-                                    strokeWidth = 2.dp,
-                                )
+                                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
                             }
                         }
                     }
@@ -409,13 +993,68 @@ private fun ChatBottomSheet(
             HorizontalDivider()
             Row(
                 Modifier.fillMaxWidth().padding(8.dp),
-                verticalAlignment = Alignment.Bottom,
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                // Profile selector
+                if (profiles.isNotEmpty()) {
+                    Box {
+                        IconButton(
+                            onClick = { showProfileMenu = true },
+                            modifier = Modifier.size(56.dp),
+                            colors = IconButtonDefaults.iconButtonColors(
+                                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                            ),
+                        ) {
+                            Icon(
+                                Icons.Default.SmartToy,
+                                contentDescription = stringResource(R.string.wiki_select_model),
+                                modifier = Modifier.size(22.dp),
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = showProfileMenu,
+                            onDismissRequest = { showProfileMenu = false },
+                        ) {
+                            profiles.forEach { profile ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Column {
+                                            Text(profile.name)
+                                            Text(
+                                                profile.model,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            )
+                                        }
+                                    },
+                                    onClick = {
+                                        onProfileSelected(profile.id)
+                                        showProfileMenu = false
+                                    },
+                                    trailingIcon = {
+                                        if (profile.id == selectedProfileId ||
+                                            (selectedProfileId == null && profile.isDefault)) {
+                                            Icon(
+                                                Icons.Default.Check,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(16.dp),
+                                                tint = MaterialTheme.colorScheme.primary,
+                                            )
+                                        }
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
+
                 OutlinedTextField(
                     value = input,
                     onValueChange = { input = it },
                     placeholder = { Text(stringResource(R.string.wiki_chat_input_hint)) },
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(1f).heightIn(min = 56.dp),
                     maxLines = 4,
                     keyboardOptions = KeyboardOptions(
                         capitalization = KeyboardCapitalization.Sentences,
@@ -428,6 +1067,13 @@ private fun ChatBottomSheet(
                 IconButton(
                     onClick = { if (input.isNotBlank() && !isLoading) { onSend(input); input = "" } },
                     enabled = input.isNotBlank() && !isLoading,
+                    modifier = Modifier.size(56.dp),
+                    colors = IconButtonDefaults.iconButtonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary,
+                        disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    ),
                 ) {
                     Icon(Icons.AutoMirrored.Filled.Send, contentDescription = stringResource(R.string.wiki_send))
                 }
@@ -449,18 +1095,26 @@ private fun ChatBubble(
         MaterialTheme.colorScheme.primaryContainer
     else
         MaterialTheme.colorScheme.surfaceVariant
+    val textColor = if (isUser)
+        MaterialTheme.colorScheme.onPrimaryContainer
+    else
+        MaterialTheme.colorScheme.onSurface
 
     Column(
         Modifier.fillMaxWidth(),
         horizontalAlignment = if (isUser) Alignment.End else Alignment.Start,
     ) {
         Card(
-            colors = CardDefaults.cardColors(containerColor = bgColor),
+            colors = CardDefaults.cardColors(
+                containerColor = bgColor,
+                contentColor = textColor,
+            ),
             modifier = Modifier.fillMaxWidth(if (isUser) 0.85f else 1f),
         ) {
             Text(
                 text = message.content,
                 style = MaterialTheme.typography.bodyMedium,
+                color = textColor,
                 modifier = Modifier.padding(12.dp),
             )
         }
@@ -543,3 +1197,20 @@ private fun extractTitle(text: String): String =
         ?.trim()
         ?.take(80)
         ?: "Untitled"
+
+private fun readTextFromUri(context: android.content.Context, uri: Uri): String? =
+    runCatching {
+        context.contentResolver.openInputStream(uri)?.use { stream ->
+            stream.readBytes().toString(Charsets.UTF_8)
+        }
+    }.getOrNull()
+
+private fun readDisplayName(context: android.content.Context, uri: Uri): String? =
+    runCatching {
+        context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+            ?.use { cursor ->
+                if (!cursor.moveToFirst()) return@use null
+                val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (index >= 0) cursor.getString(index) else null
+            }
+    }.getOrNull()

@@ -5,6 +5,18 @@
     <string name="auth_description">Your personal AI-maintained knowledge base. Wiki content lives in your own Google Drive.</string>
     <string name="auth_sign_in">Sign in with Google</string>
     <string name="auth_sign_out">Sign out</string>
+    <string name="workspace_name">Workspace name</string>
+    <string name="workspace_description">Description</string>
+    <string name="workspace_create_title">Create workspace</string>
+    <string name="workspace_create_description">Create your wiki workspace before syncing pages, chat, and ingest on Android.</string>
+    <string name="workspace_create_action">Create workspace</string>
+    <string name="workspace_rename_title">Rename workspace</string>
+    <string name="workspace_delete_title">Delete workspace</string>
+    <string name="workspace_delete_body">Delete \"%1$s\"? This removes its wiki metadata and tries to move its Drive folder to trash.</string>
+    <string name="workspace_drive_reconnected">Google Drive reconnected. You can continue in the app.</string>
+    <string name="workspace_drive_reconnect_title">Reconnect Google Drive</string>
+    <string name="workspace_drive_reconnect_body">Your Google Drive authorization expired. Reconnect it in the browser, then return to the app.</string>
+    <string name="workspace_drive_reconnect_action">Reconnect Google Drive</string>
     <string name="workspace_no_workspaces">No workspaces yet. Create one to get started.</string>
     <string name="wiki_index">Index</string>
     <string name="wiki_log">Log</string>
@@ -12,8 +24,6 @@
     <string name="ingest_running">Ingesting…</string>
     <string name="query_placeholder">Ask your wiki anything…</string>
     <string name="query_file_back">Save as synthesis page</string>
-    <string name="settings_title">Settings</string>
-    <string name="settings_llm_profiles">LLM Profiles</string>
 
     <!-- Wiki screen -->
     <string name="wiki_no_pages">No pages yet.\nTap + to ingest.</string>
@@ -32,10 +42,66 @@
     <string name="wiki_ingest_hint">Paste a URL, plain text, or Markdown</string>
     <string name="wiki_ingest_placeholder">https://… or paste text / Markdown</string>
     <string name="wiki_ingest_confirm">Ingest</string>
+    <string name="wiki_attach_file">Attach file</string>
     <string name="wiki_synthesis_saved">Saved as synthesis page</string>
     <string name="wiki_sources">Sources: %1$s</string>
     <string name="wiki_snack_ingest_started">Ingest started</string>
     <string name="wiki_snack_ingest_failed">Ingest failed</string>
+    <string name="wiki_switch_workspace">Switch workspace</string>
+    <string name="wiki_search">Search</string>
+    <string name="wiki_search_placeholder">Search pages…</string>
+    <string name="wiki_search_close">Close search</string>
+    <string name="wiki_search_empty">No results found</string>
+    <string name="wiki_select_model">Select model</string>
+    <string name="wiki_current_workspace">Current workspace</string>
+
+    <!-- Settings screen -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_account">Account</string>
+    <string name="settings_signed_in_as">Signed in as</string>
+    <string name="settings_unknown_account">Unknown account</string>
+    <string name="settings_llm_profiles">LLM Profiles</string>
+    <string name="settings_add_profile">Add profile</string>
+    <string name="settings_no_profiles">No profiles yet. Add one to use a custom LLM.</string>
+    <string name="settings_theme">Appearance</string>
+    <string name="settings_theme_light">Light</string>
+    <string name="settings_theme_dark">Dark</string>
+    <string name="settings_theme_system">System</string>
+    <string name="settings_language">Language</string>
+    <string name="settings_language_system">Follow system</string>
+    <string name="settings_language_zh_tw">繁體中文</string>
+    <string name="settings_language_en">English</string>
+    <string name="settings_profile_name">Name</string>
+    <string name="settings_profile_base_url">Base URL</string>
+    <string name="settings_profile_model">Model</string>
+    <string name="settings_profile_api_key">API Key</string>
+    <string name="settings_set_as_default">Set as default</string>
+    <string name="settings_default_profile">Default</string>
+    <string name="settings_delete_profile">Delete profile</string>
+    <string name="settings_delete_profile_confirm">Delete \"%1$s\"? This cannot be undone.</string>
+
+    <!-- Help -->
+    <string name="help_title">Help</string>
+    <string name="help_workspace_title">Workspaces and pages</string>
+    <string name="help_workspace_body">Use the workspace menu to switch or create a workspace. Pick pages from the drawer; locked pages are protected from LLM overwrites.</string>
+    <string name="help_ingest_title">Import content</string>
+    <string name="help_ingest_body">Use + to paste a URL, text, or Markdown. Use the attachment button to import a text file from your phone.</string>
+    <string name="help_chat_title">Chat and synthesis</string>
+    <string name="help_chat_body">Open Chat to ask your wiki questions. Choose a model profile in the chat bar, then save useful answers as synthesis pages.</string>
+    <string name="help_settings_title">Settings and profiles</string>
+    <string name="help_settings_body">Settings manages LLM profiles, language, and appearance. Profiles are synced through your Supabase account.</string>
+    <string name="help_drive_title">Google Drive reconnect</string>
+    <string name="help_drive_body">If Drive permission expires, reconnect in the browser and return to the app. The app will refresh workspace and profile data after reconnecting.</string>
+    <string name="workspace_create_menu_hint">Add another Drive-backed wiki</string>
+
+    <!-- Actions -->
     <string name="action_cancel">Cancel</string>
     <string name="action_dismiss">Dismiss</string>
+    <string name="action_delete">Delete</string>
+    <string name="action_save">Save</string>
+    <string name="action_back">Back</string>
+    <string name="action_refresh">Refresh</string>
+    <string name="action_done">Done</string>
+    <string name="error_unauthorized">Session expired. Please sign in again.</string>
+    <string name="error_api_not_json">The server returned a web page instead of API JSON. Update the web backend and try again.</string>
 </resources>

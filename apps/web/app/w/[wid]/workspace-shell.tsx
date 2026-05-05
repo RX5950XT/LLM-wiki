@@ -3,12 +3,13 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { PanelLeft, PanelRight, GitFork, FlaskConical, ChevronDown, LogOut, Plus, Settings, Search, Loader2 } from 'lucide-react';
+import { PanelLeft, PanelRight, GitFork, FlaskConical, ChevronDown, LogOut, Plus, Settings, Search, Loader2, HelpCircle, Pencil, Trash2 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { PageTree } from '@/components/wiki/page-tree';
 import { PageViewer } from '@/components/wiki/page-viewer';
 import { ConversationPanel } from '@/components/wiki/conversation-panel';
 import { GraphView } from '@/components/wiki/graph-view';
+import { HelpDialog } from '@/components/wiki/help-dialog';
 import { useRealtimePages, type PageChangedEvent } from '@/lib/sync/realtime';
 import { createClient } from '@/lib/supabase/client';
 
@@ -40,6 +41,13 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
   const [showGraph, setShowGraph] = useState(false);
   const [lintRunning, setLintRunning] = useState(false);
   const [showWsMenu, setShowWsMenu] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
+  const [workspaceList, setWorkspaceList] = useState(workspaces);
+  const [currentWorkspaceName, setCurrentWorkspaceName] = useState(workspaceName);
+  const [renamingWorkspace, setRenamingWorkspace] = useState<WorkspaceEntry | null>(null);
+  const [deletingWorkspace, setDeletingWorkspace] = useState<WorkspaceEntry | null>(null);
+  const [workspaceActionError, setWorkspaceActionError] = useState<string | null>(null);
+  const [workspaceActionLoading, setWorkspaceActionLoading] = useState(false);
   const [pages, setPages] = useState(initialPages);
   const [leftWidth, setLeftWidth] = useState(240);
   const [rightWidth, setRightWidth] = useState(384);
@@ -84,6 +92,11 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
   );
 
   useRealtimePages(workspaceId, handleRealtimeChange);
+
+  useEffect(() => {
+    setWorkspaceList(workspaces);
+    setCurrentWorkspaceName(workspaceName);
+  }, [workspaceName, workspaces]);
 
   useEffect(() => {
     router.prefetch('/settings');
@@ -177,6 +190,54 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
     window.location.href = '/login';
   }, []);
 
+  const renameWorkspace = useCallback(async (workspace: WorkspaceEntry, name: string) => {
+    const trimmed = name.trim();
+    if (!trimmed || trimmed === workspace.name) {
+      setRenamingWorkspace(null);
+      return;
+    }
+
+    setWorkspaceActionLoading(true);
+    setWorkspaceActionError(null);
+    try {
+      const res = await fetch(`/api/workspaces/${workspace.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: trimmed }),
+      });
+      const data = await res.json().catch(() => null) as { workspace?: WorkspaceEntry; error?: string } | null;
+      if (!res.ok) throw new Error(data?.error ?? 'Failed to rename workspace');
+      const updated = data?.workspace ?? { ...workspace, name: trimmed };
+      setWorkspaceList((prev) => prev.map((item) => (item.id === updated.id ? { ...item, name: updated.name } : item)));
+      if (updated.id === workspaceId) setCurrentWorkspaceName(updated.name);
+      setRenamingWorkspace(null);
+    } catch (error) {
+      setWorkspaceActionError(error instanceof Error ? error.message : 'Failed to rename workspace');
+    } finally {
+      setWorkspaceActionLoading(false);
+    }
+  }, [workspaceId]);
+
+  const deleteWorkspace = useCallback(async (workspace: WorkspaceEntry) => {
+    setWorkspaceActionLoading(true);
+    setWorkspaceActionError(null);
+    try {
+      const res = await fetch(`/api/workspaces/${workspace.id}`, { method: 'DELETE' });
+      const data = await res.json().catch(() => null) as { error?: string } | null;
+      if (!res.ok) throw new Error(data?.error ?? 'Failed to delete workspace');
+      const remaining = workspaceList.filter((item) => item.id !== workspace.id);
+      setWorkspaceList(remaining);
+      setDeletingWorkspace(null);
+      if (workspace.id === workspaceId) {
+        router.push(remaining[0] ? `/w/${remaining[0].id}` : '/w');
+      }
+    } catch (error) {
+      setWorkspaceActionError(error instanceof Error ? error.message : 'Failed to delete workspace');
+    } finally {
+      setWorkspaceActionLoading(false);
+    }
+  }, [router, workspaceId, workspaceList]);
+
   return (
     <div
       className="flex h-screen flex-col"
@@ -202,11 +263,17 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
           <div className="relative">
             <button
               onClick={() => setShowWsMenu((o) => !o)}
-              className="flex items-center gap-1 rounded px-1 py-0.5 text-sm font-medium transition-opacity hover:opacity-70"
-              style={{ color: 'var(--fg)' }}
+              className="flex min-w-[180px] max-w-[260px] items-center justify-between gap-3 rounded-lg border px-3 py-1.5 text-sm font-medium transition-all duration-150 hover:opacity-80 active:scale-[0.98]"
+              style={{ color: 'var(--fg)', background: 'var(--bg)', borderColor: 'var(--border)' }}
+              aria-expanded={showWsMenu}
+              aria-label={t('workspace.switchWorkspace')}
             >
-              {workspaceName}
-              <ChevronDown size={12} style={{ color: 'var(--fg-muted)' }} />
+              <span className="truncate">{currentWorkspaceName}</span>
+              <ChevronDown
+                size={14}
+                className={`shrink-0 transition-transform duration-150 ${showWsMenu ? 'rotate-180' : ''}`}
+                style={{ color: 'var(--fg-muted)' }}
+              />
             </button>
 
             {showWsMenu && (
@@ -216,27 +283,65 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
                   onClick={() => setShowWsMenu(false)}
                 />
                 <div
-                  className="animate-dropdown absolute left-0 top-full z-50 mt-1 w-52 overflow-hidden rounded-lg border shadow-lg"
+                  className="animate-dropdown absolute left-0 top-full z-50 mt-2 w-64 overflow-hidden rounded-xl border shadow-lg"
                   style={{ background: 'var(--bg-2)', borderColor: 'var(--border)' }}
                 >
-                  {workspaces.map((ws) => (
-                    <a
+                  {workspaceList.map((ws) => (
+                    <div
                       key={ws.id}
-                      href={`/w/${ws.id}`}
-                      className="flex items-center px-3 py-2 text-sm transition-opacity hover:opacity-70"
+                      className="flex items-center gap-1 px-2 py-1.5"
                       style={{
-                        color: ws.id === workspaceId ? 'var(--color-accent)' : 'var(--fg)',
                         background: ws.id === workspaceId ? 'var(--color-accent-glow)' : undefined,
                       }}
                     >
-                      {ws.name}
-                    </a>
+                      <button
+                        type="button"
+                        onClick={() => router.push(`/w/${ws.id}`)}
+                        className="min-w-0 flex-1 px-1 py-1 text-left text-sm transition-opacity hover:opacity-75"
+                        style={{ color: ws.id === workspaceId ? 'var(--color-accent)' : 'var(--fg)' }}
+                      >
+                        <span className="block truncate font-medium">{ws.name}</span>
+                        {ws.id === workspaceId && (
+                          <span className="block text-[11px]" style={{ color: 'var(--fg-muted)' }}>
+                            {t('workspace.currentWorkspace')}
+                          </span>
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowWsMenu(false);
+                          setWorkspaceActionError(null);
+                          setRenamingWorkspace(ws);
+                        }}
+                        className="rounded p-1 transition-opacity hover:opacity-70"
+                        style={{ color: 'var(--fg-muted)' }}
+                        aria-label={t('workspace.renameWorkspace')}
+                        title={t('workspace.renameWorkspace')}
+                      >
+                        <Pencil size={13} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowWsMenu(false);
+                          setWorkspaceActionError(null);
+                          setDeletingWorkspace(ws);
+                        }}
+                        className="rounded p-1 transition-opacity hover:opacity-70"
+                        style={{ color: 'oklch(65% 0.18 30)' }}
+                        aria-label={t('workspace.deleteWorkspace')}
+                        title={t('workspace.deleteWorkspace')}
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
                   ))}
                   <div className="border-t" style={{ borderColor: 'var(--border)' }} />
                   <a
                     href="/w/create"
-                    className="flex items-center gap-1.5 px-3 py-2 text-sm transition-opacity hover:opacity-70"
-                    style={{ color: 'var(--fg-muted)' }}
+                    className="flex items-center gap-2 px-3 py-2.5 text-sm transition-opacity hover:opacity-75"
+                    style={{ color: 'var(--fg)' }}
                   >
                     <Plus size={13} /> {t('workspace.addWorkspace')}
                   </a>
@@ -353,6 +458,16 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
             <Settings size={16} />
           </Link>
 
+          <button
+            onClick={() => setShowHelp(true)}
+            className="rounded p-1 transition-all duration-100 hover:opacity-70 active:scale-90"
+            style={{ color: 'var(--fg-muted)' }}
+            aria-label={t('help.open')}
+            title={t('help.open')}
+          >
+            <HelpCircle size={16} />
+          </button>
+
           {/* Logout */}
           <button
             onClick={handleSignOut}
@@ -433,6 +548,126 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
           </>
         )}
       </div>
+      <HelpDialog open={showHelp} onClose={() => setShowHelp(false)} />
+      {renamingWorkspace && (
+        <WorkspaceRenameDialog
+          workspace={renamingWorkspace}
+          loading={workspaceActionLoading}
+          error={workspaceActionError}
+          onClose={() => setRenamingWorkspace(null)}
+          onSubmit={(name) => renameWorkspace(renamingWorkspace, name)}
+        />
+      )}
+      {deletingWorkspace && (
+        <WorkspaceDeleteDialog
+          workspace={deletingWorkspace}
+          loading={workspaceActionLoading}
+          error={workspaceActionError}
+          onClose={() => setDeletingWorkspace(null)}
+          onConfirm={() => deleteWorkspace(deletingWorkspace)}
+        />
+      )}
+    </div>
+  );
+}
+
+function WorkspaceRenameDialog({
+  workspace,
+  loading,
+  error,
+  onClose,
+  onSubmit,
+}: {
+  workspace: WorkspaceEntry;
+  loading: boolean;
+  error: string | null;
+  onClose: () => void;
+  onSubmit: (name: string) => void;
+}) {
+  const t = useTranslations();
+  const [name, setName] = useState(workspace.name);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <button className="absolute inset-0 cursor-default" style={{ background: 'oklch(8% 0.01 250 / 0.55)' }} onClick={onClose} />
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSubmit(name);
+        }}
+        className="relative w-full max-w-sm space-y-4 rounded-xl border p-5 shadow-2xl"
+        style={{ background: 'var(--bg)', borderColor: 'var(--border)', color: 'var(--fg)' }}
+      >
+        <h2 className="text-base font-semibold">{t('workspace.renameWorkspace')}</h2>
+        <input
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          maxLength={100}
+          className="w-full rounded-md border px-3 py-2 text-sm outline-none"
+          style={{ background: 'var(--bg-2)', borderColor: 'var(--border)', color: 'var(--fg)' }}
+          autoFocus
+        />
+        {error && <p className="text-xs" style={{ color: 'oklch(65% 0.18 30)' }}>{error}</p>}
+        <div className="flex justify-end gap-2">
+          <button type="button" onClick={onClose} className="rounded-md px-3 py-2 text-sm" style={{ color: 'var(--fg-muted)' }}>
+            {t('common.cancel')}
+          </button>
+          <button
+            type="submit"
+            disabled={loading || !name.trim()}
+            className="rounded-md px-3 py-2 text-sm font-medium disabled:opacity-50"
+            style={{ background: 'var(--color-accent)', color: 'oklch(10% 0.015 250)' }}
+          >
+            {t('common.save')}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function WorkspaceDeleteDialog({
+  workspace,
+  loading,
+  error,
+  onClose,
+  onConfirm,
+}: {
+  workspace: WorkspaceEntry;
+  loading: boolean;
+  error: string | null;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  const t = useTranslations();
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <button className="absolute inset-0 cursor-default" style={{ background: 'oklch(8% 0.01 250 / 0.55)' }} onClick={onClose} />
+      <section
+        className="relative w-full max-w-sm space-y-4 rounded-xl border p-5 shadow-2xl"
+        style={{ background: 'var(--bg)', borderColor: 'var(--border)', color: 'var(--fg)' }}
+      >
+        <h2 className="text-base font-semibold">{t('workspace.deleteWorkspace')}</h2>
+        <p className="text-sm leading-6" style={{ color: 'var(--fg-muted)' }}>
+          {t('workspace.deleteWorkspaceConfirm', { name: workspace.name })}
+        </p>
+        {error && <p className="text-xs" style={{ color: 'oklch(65% 0.18 30)' }}>{error}</p>}
+        <div className="flex justify-end gap-2">
+          <button type="button" onClick={onClose} className="rounded-md px-3 py-2 text-sm" style={{ color: 'var(--fg-muted)' }}>
+            {t('common.cancel')}
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={loading}
+            className="rounded-md px-3 py-2 text-sm font-medium disabled:opacity-50"
+            style={{ background: 'oklch(65% 0.18 30)', color: 'oklch(10% 0.015 30)' }}
+          >
+            {t('common.delete')}
+          </button>
+        </div>
+      </section>
     </div>
   );
 }

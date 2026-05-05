@@ -3,25 +3,41 @@ package com.llmwiki.ui.wiki
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.google.android.gms.auth.api.signin.GoogleSignIn
+import com.google.android.gms.auth.api.signin.GoogleSignInOptions
+import com.llmwiki.BuildConfig
+import com.llmwiki.R
+import com.llmwiki.data.AndroidHttpClient
 import com.llmwiki.data.DriveClient
+import com.llmwiki.data.LlmProfileRepository
+import com.llmwiki.data.LlmProfile
 import com.llmwiki.data.PageRepository
+import com.llmwiki.data.ProfileAuthRequiredException
+import com.llmwiki.data.requireAccessToken
+import com.llmwiki.data.SearchResult
 import com.llmwiki.data.SupabaseClientProvider
 import com.llmwiki.data.WorkspaceRow
+import com.llmwiki.data.buildDriveReconnectUrl
+import com.llmwiki.data.isDriveReconnectError
 import com.llmwiki.data.room.AppDatabase
 import com.llmwiki.data.room.PageEntity
-import io.github.jan.supabase.auth.auth
 import com.llmwiki.sync.SyncWorker
-import io.ktor.client.HttpClient
-import io.ktor.client.engine.android.Android
+import io.github.jan.supabase.auth.auth
+import io.ktor.client.request.delete
+import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.patch
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
+import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsChannel
+import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
 import io.ktor.utils.io.readUTF8Line
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -34,8 +50,11 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 
 data class ChatMessage(
@@ -47,6 +66,8 @@ data class ChatMessage(
 
 data class WikiUiState(
     val workspace: WorkspaceRow? = null,
+    val workspaces: List<WorkspaceRow> = emptyList(),
+    val workspacesLoaded: Boolean = false,
     val activePage: PageEntity? = null,
     val pageContent: String? = null,
     val contentLoading: Boolean = false,
@@ -55,7 +76,17 @@ data class WikiUiState(
     val chatLoading: Boolean = false,
     val synthesisSavedSlug: String? = null,
     val signedOut: Boolean = false,
+    val showSearch: Boolean = false,
+    val searchQuery: String = "",
+    val searchResults: List<SearchResult> = emptyList(),
+    val searchLoading: Boolean = false,
+    val profiles: List<LlmProfile> = emptyList(),
+    val selectedProfileId: String? = null,
+    val driveReconnectUrl: String? = null,
+    val workspaceActionLoading: Boolean = false,
 )
+
+private val apiJson = Json { ignoreUnknownKeys = true }
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class WikiViewModel(application: Application) : AndroidViewModel(application) {
@@ -66,9 +97,11 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
     private var driveClient: DriveClient? = null
     private var accountName: String = ""
     private val repository = PageRepository(db, null)
+    private val profileRepository = LlmProfileRepository(supabase)
 
     private val workspaceId = MutableStateFlow<String?>(null)
     private val accountNameFlow = MutableStateFlow("")
+    private var searchJob: Job? = null
 
     val pages: StateFlow<List<PageEntity>> = combine(workspaceId, accountNameFlow) { id, account -> id to account }
         .flatMapLatest { (id, account) ->
@@ -85,31 +118,167 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
         accountNameFlow.value = accountName
         driveClient = DriveClient(getApplication(), accountName)
 
+        refreshWorkspaces(preferredWorkspaceId = workspaceIdParam, syncSelected = true)
+        loadProfiles()
+    }
+
+    fun refreshAfterForeground() {
+        loadProfiles()
+        refreshWorkspaces(syncSelected = false)
+    }
+
+    fun switchWorkspace(ws: WorkspaceRow) {
+        _uiState.update {
+            it.copy(
+                workspace = ws,
+                activePage = null,
+                pageContent = null,
+                chatMessages = emptyList(),
+                showSearch = false,
+                searchQuery = "",
+                searchResults = emptyList(),
+                driveReconnectUrl = null,
+            )
+        }
+        workspaceId.value = ws.id
         viewModelScope.launch {
-            val workspaces = repository.getWorkspaces()
-            val targetId = workspaceIdParam ?: workspaces.firstOrNull()?.id
-            val workspace = workspaces.firstOrNull { it.id == targetId }
+            syncPagesInternal(ws.id)
+            SyncWorker.schedule(getApplication(), accountName, ws.id)
+        }
+    }
 
-            _uiState.update { it.copy(workspace = workspace) }
-            workspaceId.value = targetId
+    fun renameWorkspace(workspace: WorkspaceRow, newName: String) {
+        val trimmed = newName.trim()
+        if (trimmed.isBlank() || trimmed == workspace.name) return
 
-            if (targetId != null) {
-                syncPages(targetId)
-                SyncWorker.schedule(getApplication(), accountName, targetId)
+        viewModelScope.launch {
+            _uiState.update { it.copy(workspaceActionLoading = true, syncError = null) }
+            try {
+                val bodyJson = buildJsonObject { put("name", trimmed) }.toString()
+                val response = sendAuthorizedRequest { accessToken ->
+                    AndroidHttpClient.instance.patch(webApiUrl("/api/workspaces/${workspace.id}")) {
+                        header("Authorization", "Bearer $accessToken")
+                        contentType(ContentType.Application.Json)
+                        setBody(bodyJson)
+                    }
+                } ?: run {
+                    _uiState.update { it.copy(workspaceActionLoading = false, syncError = unauthorizedMessage()) }
+                    return@launch
+                }
+                val text = response.bodyAsText()
+                if (response.status.value !in 200..299) {
+                    _uiState.update {
+                        it.copy(
+                            workspaceActionLoading = false,
+                            syncError = parseApiError(text, "Failed to rename workspace"),
+                        )
+                    }
+                    return@launch
+                }
+                if (!isJsonObject(text)) {
+                    _uiState.update {
+                        it.copy(
+                            workspaceActionLoading = false,
+                            syncError = nonJsonApiMessage("Failed to rename workspace"),
+                        )
+                    }
+                    return@launch
+                }
+
+                val updated = apiJson.decodeFromString<Map<String, WorkspaceRow>>(text)["workspace"]
+                    ?: workspace.copy(name = trimmed)
+                _uiState.update { state ->
+                    state.copy(
+                        workspace = if (state.workspace?.id == updated.id) updated else state.workspace,
+                        workspaces = state.workspaces.map { if (it.id == updated.id) updated else it },
+                        workspaceActionLoading = false,
+                        syncError = null,
+                    )
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        workspaceActionLoading = false,
+                        syncError = e.toUserFacingMessage("Failed to rename workspace"),
+                    )
+                }
+            }
+        }
+    }
+
+    fun deleteWorkspace(workspace: WorkspaceRow) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(workspaceActionLoading = true, syncError = null) }
+            try {
+                val response = sendAuthorizedRequest { accessToken ->
+                    AndroidHttpClient.instance.delete(webApiUrl("/api/workspaces/${workspace.id}")) {
+                        header("Authorization", "Bearer $accessToken")
+                    }
+                } ?: run {
+                    _uiState.update { it.copy(workspaceActionLoading = false, syncError = unauthorizedMessage()) }
+                    return@launch
+                }
+                val text = response.bodyAsText()
+                if (response.status.value !in 200..299) {
+                    _uiState.update {
+                        it.copy(
+                            workspaceActionLoading = false,
+                            syncError = parseApiError(text, "Failed to delete workspace"),
+                        )
+                    }
+                    return@launch
+                }
+                val deleteSucceeded = if (isJsonObject(text)) {
+                    apiJson.parseToJsonElement(text).jsonObject["ok"]?.jsonPrimitive?.booleanOrNull == true
+                } else {
+                    false
+                }
+                if (!deleteSucceeded) {
+                    _uiState.update {
+                        it.copy(
+                            workspaceActionLoading = false,
+                            syncError = nonJsonApiMessage("Failed to delete workspace"),
+                        )
+                    }
+                    return@launch
+                }
+
+                SyncWorker.cancel(getApplication(), accountName, workspace.id)
+                db.pageDao().deleteByWorkspace(workspace.id, accountName)
+                val remaining = _uiState.value.workspaces.filterNot { it.id == workspace.id }
+                val next = remaining.firstOrNull()
+                _uiState.update {
+                    it.copy(
+                        workspaces = remaining,
+                        workspace = next,
+                        activePage = null,
+                        pageContent = null,
+                        chatMessages = emptyList(),
+                        workspaceActionLoading = false,
+                        syncError = null,
+                    )
+                }
+                workspaceId.value = next?.id
+                next?.let {
+                    syncPagesInternal(it.id)
+                    SyncWorker.schedule(getApplication(), accountName, it.id)
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        workspaceActionLoading = false,
+                        syncError = e.toUserFacingMessage("Failed to delete workspace"),
+                    )
+                }
             }
         }
     }
 
     fun syncPages(wsId: String? = workspaceId.value) {
         val id = wsId ?: return
-        val accName = accountName
         viewModelScope.launch {
-            try {
-                val repo = PageRepository(db, driveClient)
-                repo.syncPages(id, accName)
-            } catch (e: Exception) {
-                _uiState.update { it.copy(syncError = e.message) }
-            }
+            if (accountName.isBlank()) return@launch
+            syncPagesInternal(id)
         }
     }
 
@@ -119,9 +288,36 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                 activePage = page,
                 pageContent = page.content,
                 contentLoading = page.content == null,
+                showSearch = false,
+                searchQuery = "",
+                searchResults = emptyList(),
             )
         }
         if (page.content == null) loadContent(page)
+    }
+
+    fun selectPageBySlug(slug: String) {
+        val page = pages.value.find { it.slug == slug } ?: return
+        selectPage(page)
+    }
+
+    fun selectSearchResult(slug: String) {
+        val existing = pages.value.find { it.slug == slug }
+        if (existing != null) {
+            selectPage(existing)
+            return
+        }
+
+        viewModelScope.launch {
+            val wsId = workspaceId.value ?: return@launch
+            syncPagesInternal(wsId)
+            val page = db.pageDao().getPage(wsId, accountName, slug)
+            if (page != null) {
+                selectPage(page)
+            } else {
+                _uiState.update { it.copy(syncError = "Page not found: $slug") }
+            }
+        }
     }
 
     private fun loadContent(page: PageEntity) {
@@ -130,9 +326,9 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                 val wsId = workspaceId.value ?: return@launch
                 val repo = PageRepository(db, driveClient)
                 val content = repo.loadPageContent(wsId, accountName, page.slug)
-                _uiState.update { it.copy(pageContent = content, contentLoading = false) }
+                _uiState.update { it.copy(pageContent = content, contentLoading = false, syncError = null) }
             } catch (e: Exception) {
-                _uiState.update { it.copy(contentLoading = false, syncError = e.message) }
+                _uiState.update { it.copy(contentLoading = false, syncError = e.toUserFacingMessage("Failed to load page")) }
             }
         }
     }
@@ -140,23 +336,132 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
     fun toggleLock(slug: String, currentLocked: Boolean) {
         viewModelScope.launch {
             val wsId = workspaceId.value ?: return@launch
-            val accessToken = supabase.auth.currentSessionOrNull()?.accessToken ?: return@launch
             try {
-                val client = HttpClient(Android)
-                client.patch(webApiUrl("/api/pages/$wsId/${slug.encodeUrl()}")) {
-                    header("Authorization", "Bearer $accessToken")
-                    contentType(ContentType.Application.Json)
-                    setBody("""{"locked_by_human":${!currentLocked}}""")
+                val response = sendAuthorizedRequest { accessToken ->
+                    AndroidHttpClient.instance.patch(webApiUrl("/api/pages/$wsId/${slug.encodeUrl()}")) {
+                        header("Authorization", "Bearer $accessToken")
+                        contentType(ContentType.Application.Json)
+                        setBody("""{"locked_by_human":${!currentLocked}}""")
+                    }
+                } ?: return@launch
+                val text = response.bodyAsText()
+
+                if (response.status.value !in 200..299) {
+                    _uiState.update {
+                        it.copy(syncError = parseApiError(text, "Failed to update page lock"))
+                    }
+                    return@launch
                 }
-                client.close()
+
                 db.pageDao().updateLock(wsId, accountName, slug, !currentLocked)
                 _uiState.update { state ->
-                    if (state.activePage?.slug == slug)
-                        state.copy(activePage = state.activePage.copy(lockedByHuman = !currentLocked))
-                    else state
+                    if (state.activePage?.slug == slug) {
+                        state.copy(
+                            activePage = state.activePage.copy(lockedByHuman = !currentLocked),
+                            syncError = null,
+                        )
+                    } else {
+                        state.copy(syncError = null)
+                    }
                 }
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                _uiState.update { it.copy(syncError = e.toUserFacingMessage("Failed to update page lock")) }
+            }
         }
+    }
+
+    fun toggleSearch() {
+        _uiState.update { it.copy(showSearch = !it.showSearch, searchQuery = "", searchResults = emptyList()) }
+    }
+
+    fun updateSearchQuery(query: String) {
+        _uiState.update { it.copy(searchQuery = query) }
+        searchJob?.cancel()
+        if (query.length >= 2) {
+            searchJob = viewModelScope.launch {
+                delay(200)
+                doSearch(query)
+            }
+        } else {
+            _uiState.update { it.copy(searchResults = emptyList(), searchLoading = false) }
+        }
+    }
+
+    private suspend fun doSearch(query: String) {
+        val wsId = workspaceId.value ?: return
+        _uiState.update { it.copy(searchLoading = true) }
+        try {
+            val response = sendAuthorizedRequest { accessToken ->
+                AndroidHttpClient.instance.get(webApiUrl("/api/search?workspace_id=$wsId&q=${query.encodeUrl()}")) {
+                    header("Authorization", "Bearer $accessToken")
+                }
+            } ?: return
+            val text = response.bodyAsText()
+
+            if (response.status.value !in 200..299) {
+                _uiState.update {
+                    it.copy(
+                        searchResults = emptyList(),
+                        searchLoading = false,
+                        syncError = parseApiError(text, "Search failed"),
+                    )
+                }
+                return
+            }
+
+            val wrapper = apiJson.decodeFromString<Map<String, List<SearchResult>>>(text)
+            _uiState.update {
+                it.copy(
+                    searchResults = wrapper["pages"] ?: emptyList(),
+                    searchLoading = false,
+                    syncError = null,
+                )
+            }
+        } catch (e: Exception) {
+            _uiState.update { it.copy(searchLoading = false, syncError = e.toUserFacingMessage("Search failed")) }
+        }
+    }
+
+    fun clearSearch() {
+        searchJob?.cancel()
+        _uiState.update {
+            it.copy(showSearch = false, searchQuery = "", searchResults = emptyList(), searchLoading = false)
+        }
+    }
+
+    fun loadProfiles() {
+        viewModelScope.launch {
+            try {
+                val profiles = profileRepository.listProfiles()
+                val selectedId = _uiState.value.selectedProfileId
+                    ?.takeIf { selected -> profiles.any { it.id == selected } }
+                val defaultId = profiles.firstOrNull { it.isDefault }?.id
+
+                _uiState.update {
+                    it.copy(
+                        profiles = profiles,
+                        selectedProfileId = selectedId ?: defaultId ?: profiles.firstOrNull()?.id,
+                    )
+                }
+            } catch (_: ProfileAuthRequiredException) {
+                _uiState.update { it.copy(profiles = emptyList(), selectedProfileId = null) }
+            } catch (_: Exception) {
+                // Ignore profile refresh failures to avoid blocking the main wiki flow.
+            }
+        }
+    }
+
+    fun setSelectedProfile(profileId: String?) {
+        _uiState.update { it.copy(selectedProfileId = profileId) }
+    }
+
+    fun onDriveReconnectCompleted() {
+        _uiState.update { it.copy(driveReconnectUrl = null, syncError = null) }
+        refreshAfterForeground()
+    }
+
+    fun dismissDriveReconnectPrompt() {
+        _uiState.update { it.copy(driveReconnectUrl = null) }
     }
 
     fun sendQuery(userText: String) {
@@ -168,33 +473,59 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
         val newHistory = history + userMsg
         val placeholder = ChatMessage(role = "assistant", content = "", isStreaming = true)
         _uiState.update {
-            it.copy(chatMessages = newHistory + placeholder, chatLoading = true, synthesisSavedSlug = null)
+            it.copy(
+                chatMessages = newHistory + placeholder,
+                chatLoading = true,
+                synthesisSavedSlug = null,
+            )
         }
 
         viewModelScope.launch {
-            val accessToken = supabase.auth.currentSessionOrNull()?.accessToken
-            if (accessToken == null) {
-                _uiState.update { it.copy(chatLoading = false) }
-                return@launch
-            }
             try {
-                val client = HttpClient(Android)
                 val bodyJson = buildJsonObject {
                     put("messages", buildJsonArray {
-                        newHistory.forEach { m ->
+                        newHistory.forEach { message ->
                             add(buildJsonObject {
-                                put("role", m.role)
-                                put("content", m.content)
+                                put("role", message.role)
+                                put("content", message.content)
                             })
                         }
                     })
                     put("workspace_id", wsId)
+                    _uiState.value.selectedProfileId?.let { put("profile_id", it) }
                 }.toString()
 
-                val response = client.post(webApiUrl("/api/query")) {
-                    header("Authorization", "Bearer $accessToken")
-                    contentType(ContentType.Application.Json)
-                    setBody(bodyJson)
+                val response = sendAuthorizedRequest { accessToken ->
+                    AndroidHttpClient.instance.post(webApiUrl("/api/query")) {
+                        header("Authorization", "Bearer $accessToken")
+                        contentType(ContentType.Application.Json)
+                        setBody(bodyJson)
+                    }
+                } ?: run {
+                    _uiState.update { state ->
+                        state.copy(
+                            chatMessages = state.chatMessages.dropLast(1),
+                            chatLoading = false,
+                            syncError = unauthorizedMessage(),
+                        )
+                    }
+                    return@launch
+                }
+
+                if (response.status.value !in 200..299) {
+                    val message = parseApiError(response.bodyAsText(), "Query failed")
+                    if (response.status.value == 403 && isDriveReconnectError(message)) {
+                        requestDriveReconnect("query", message)
+                    } else {
+                        _uiState.update { it.copy(syncError = message) }
+                    }
+                    _uiState.update { state ->
+                        state.copy(
+                            chatMessages = state.chatMessages.dropLast(1),
+                            chatLoading = false,
+                        )
+                    }
+                    return@launch
                 }
 
                 val channel = response.bodyAsChannel()
@@ -204,28 +535,33 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                 while (!channel.isClosedForRead) {
                     val chunk = channel.readUTF8Line() ?: break
                     raw.append(chunk).append("\n")
-                    val displayText = if (raw.contains(citationDelimiter))
+                    val displayText = if (raw.contains(citationDelimiter)) {
                         raw.substring(0, raw.lastIndexOf(citationDelimiter))
-                    else raw.toString()
+                    } else {
+                        raw.toString()
+                    }
                     _uiState.update { state ->
-                        val msgs = state.chatMessages.dropLast(1) +
+                        val messages = state.chatMessages.dropLast(1) +
                             placeholder.copy(content = displayText.trimEnd())
-                        state.copy(chatMessages = msgs)
+                        state.copy(chatMessages = messages)
                     }
                 }
-                client.close()
 
                 val (text, slugs) = parseCitations(raw.toString())
                 _uiState.update { state ->
                     val final = ChatMessage(role = "assistant", content = text.trimEnd(), citedSlugs = slugs)
-                    state.copy(chatMessages = state.chatMessages.dropLast(1) + final, chatLoading = false)
+                    state.copy(
+                        chatMessages = state.chatMessages.dropLast(1) + final,
+                        chatLoading = false,
+                        syncError = null,
+                    )
                 }
             } catch (e: Exception) {
                 _uiState.update { state ->
                     state.copy(
                         chatMessages = state.chatMessages.dropLast(1),
                         chatLoading = false,
-                        syncError = e.message,
+                        syncError = e.toUserFacingMessage("Query failed"),
                     )
                 }
             }
@@ -235,39 +571,59 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
     fun saveSynthesis(question: String, answer: String, citedSlugs: List<String>) {
         val wsId = workspaceId.value ?: return
         viewModelScope.launch {
-            val accessToken = supabase.auth.currentSessionOrNull()?.accessToken ?: return@launch
             try {
-                val client = HttpClient(Android)
                 val bodyJson = buildJsonObject {
                     put("question", question)
                     put("answer", answer)
                     put("cited_slugs", buildJsonArray { citedSlugs.forEach { add(JsonPrimitive(it)) } })
                 }.toString()
-                val response = client.post(webApiUrl("/api/workspaces/$wsId/synthesis")) {
-                    header("Authorization", "Bearer $accessToken")
-                    contentType(ContentType.Application.Json)
-                    setBody(bodyJson)
+                val response = sendAuthorizedRequest { accessToken ->
+                    AndroidHttpClient.instance.post(webApiUrl("/api/workspaces/$wsId/synthesis")) {
+                        header("Authorization", "Bearer $accessToken")
+                        contentType(ContentType.Application.Json)
+                        setBody(bodyJson)
+                    }
+                } ?: return@launch
+                val text = response.bodyAsText()
+
+                if (response.status.value !in 200..299) {
+                    val message = parseApiError(text, "Failed to save synthesis")
+                    if (response.status.value == 403 && isDriveReconnectError(message)) {
+                        requestDriveReconnect("synthesis", message)
+                    } else {
+                        _uiState.update { it.copy(syncError = message) }
+                    }
+                    return@launch
                 }
-                val text = buildString {
-                    val ch = response.bodyAsChannel()
-                    while (!ch.isClosedForRead) append(ch.readUTF8Line() ?: break)
+
+                val slug = apiJson.decodeFromString<Map<String, String>>(text)["slug"]
+                if (slug != null) {
+                    _uiState.update { it.copy(synthesisSavedSlug = slug, syncError = null) }
                 }
-                client.close()
-                val slug = Json.decodeFromString<Map<String, String>>(text)["slug"]
-                if (slug != null) _uiState.update { it.copy(synthesisSavedSlug = slug) }
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                _uiState.update { it.copy(syncError = e.toUserFacingMessage("Failed to save synthesis")) }
+            }
         }
     }
 
-    fun clearSynthesisSlug() = _uiState.update { it.copy(synthesisSavedSlug = null) }
+    fun clearSynthesisSlug() {
+        _uiState.update { it.copy(synthesisSavedSlug = null) }
+    }
 
     fun signOut() {
         viewModelScope.launch {
-            val wsId = workspaceId.value
+            val workspaceIds = _uiState.value.workspaces.map { it.id }
             try {
                 supabase.auth.signOut()
+                GoogleSignIn.getClient(
+                    getApplication(),
+                    GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+                        .requestIdToken(BuildConfig.GOOGLE_CLIENT_ID.trim())
+                        .requestEmail()
+                        .build(),
+                ).signOut()
             } finally {
-                if (wsId != null) SyncWorker.cancel(getApplication(), accountName, wsId)
+                workspaceIds.forEach { SyncWorker.cancel(getApplication(), accountName, it) }
                 db.pageDao().deleteByAccount(accountName)
                 _uiState.update { it.copy(signedOut = true) }
             }
@@ -278,20 +634,25 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val wsId = workspaceId.value ?: return@launch
             try {
-                val accessToken = supabase.auth.currentSessionOrNull()?.accessToken ?: return@launch
-                val client = HttpClient(Android)
-                val response = client.post(webApiUrl("/api/ingest")) {
-                    header("Authorization", "Bearer $accessToken")
-                    contentType(ContentType.Application.Json)
-                    setBody(buildJsonObject {
-                        put("kind", "url")
-                        put("url", url)
-                        put("workspace_id", wsId)
-                    }.toString())
-                }
-                client.close()
-                onDone(response.status.value in 200..299)
-            } catch (_: Exception) { onDone(false) }
+                val requestBody = buildJsonObject {
+                    put("kind", "url")
+                    put("url", url)
+                    put("workspace_id", wsId)
+                    _uiState.value.selectedProfileId?.let { put("profile_id", it) }
+                }.toString()
+                val response = sendAuthorizedRequest { accessToken ->
+                    AndroidHttpClient.instance.post(webApiUrl("/api/ingest")) {
+                        header("Authorization", "Bearer $accessToken")
+                        contentType(ContentType.Application.Json)
+                        setBody(requestBody)
+                    }
+                } ?: return@launch
+                val text = response.bodyAsText()
+                handleIngestResult(response.status.value, text, onDone)
+            } catch (e: Exception) {
+                _uiState.update { it.copy(syncError = e.toUserFacingMessage("Ingest failed")) }
+                onDone(false)
+            }
         }
     }
 
@@ -299,22 +660,135 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val wsId = workspaceId.value ?: return@launch
             try {
-                val accessToken = supabase.auth.currentSessionOrNull()?.accessToken ?: return@launch
-                val client = HttpClient(Android)
-                val response = client.post(webApiUrl("/api/ingest")) {
-                    header("Authorization", "Bearer $accessToken")
-                    contentType(ContentType.Application.Json)
-                    setBody(buildJsonObject {
-                        put("kind", "text")
-                        put("title", title)
-                        put("content", content)
-                        put("workspace_id", wsId)
-                    }.toString())
-                }
-                client.close()
-                onDone(response.status.value in 200..299)
-            } catch (_: Exception) { onDone(false) }
+                val requestBody = buildJsonObject {
+                    put("kind", "text")
+                    put("title", title)
+                    put("content", content)
+                    put("workspace_id", wsId)
+                    _uiState.value.selectedProfileId?.let { put("profile_id", it) }
+                }.toString()
+                val response = sendAuthorizedRequest { accessToken ->
+                    AndroidHttpClient.instance.post(webApiUrl("/api/ingest")) {
+                        header("Authorization", "Bearer $accessToken")
+                        contentType(ContentType.Application.Json)
+                        setBody(requestBody)
+                    }
+                } ?: return@launch
+                val text = response.bodyAsText()
+                handleIngestResult(response.status.value, text, onDone)
+            } catch (e: Exception) {
+                _uiState.update { it.copy(syncError = e.toUserFacingMessage("Ingest failed")) }
+                onDone(false)
+            }
         }
+    }
+
+    private fun handleIngestResult(statusCode: Int, raw: String, onDone: (Boolean) -> Unit) {
+        if (statusCode in 200..299) {
+            _uiState.update { it.copy(syncError = null) }
+            onDone(true)
+            return
+        }
+
+        val message = parseApiError(raw, "Ingest failed")
+        if (statusCode == 403 && isDriveReconnectError(message)) {
+            requestDriveReconnect("ingest", message)
+        } else {
+            _uiState.update { it.copy(syncError = message) }
+        }
+        onDone(false)
+    }
+
+    private fun refreshWorkspaces(
+        preferredWorkspaceId: String? = workspaceId.value,
+        syncSelected: Boolean,
+    ) {
+        viewModelScope.launch {
+            try {
+                val workspaces = repository.getWorkspaces()
+                val previousId = workspaceId.value
+                val targetId = preferredWorkspaceId
+                    ?.takeIf { selected -> workspaces.any { it.id == selected } }
+                    ?: previousId?.takeIf { selected -> workspaces.any { it.id == selected } }
+                    ?: workspaces.firstOrNull()?.id
+                val workspace = workspaces.firstOrNull { it.id == targetId }
+
+                _uiState.update {
+                    it.copy(
+                        workspace = workspace,
+                        workspaces = workspaces,
+                        workspacesLoaded = true,
+                        syncError = null,
+                    )
+                }
+                workspaceId.value = targetId
+
+                if (targetId != null) {
+                    if (syncSelected || targetId != previousId) {
+                        syncPagesInternal(targetId)
+                    }
+                    SyncWorker.schedule(getApplication(), accountName, targetId)
+                }
+            } catch (e: Exception) {
+                _uiState.update { it.copy(syncError = e.toUserFacingMessage("Failed to load workspaces")) }
+            }
+        }
+    }
+
+    private suspend fun syncPagesInternal(wsId: String) {
+        try {
+            val repo = PageRepository(db, driveClient)
+            repo.syncPages(wsId, accountName)
+            _uiState.update { it.copy(syncError = null) }
+        } catch (e: Exception) {
+            _uiState.update { it.copy(syncError = e.toUserFacingMessage("Sync failed")) }
+        }
+    }
+
+    private fun requestDriveReconnect(source: String, message: String) {
+        _uiState.update {
+            it.copy(
+                syncError = message,
+                driveReconnectUrl = buildDriveReconnectUrl(source),
+            )
+        }
+    }
+
+    private fun parseApiError(raw: String, fallback: String): String {
+        if (raw.isBlank()) return fallback
+        if (isHtmlResponse(raw)) return nonJsonApiMessage(fallback)
+        return runCatching {
+            val error = apiJson.decodeFromString<Map<String, String>>(raw)["error"]
+                ?.takeIf { it.isNotBlank() }
+                ?: fallback
+            if (error == "Unauthorized") unauthorizedMessage() else error
+        }.getOrElse {
+            if (raw.trim().equals("Unauthorized", ignoreCase = true)) unauthorizedMessage() else raw
+        }
+    }
+
+    private fun isJsonObject(raw: String): Boolean =
+        raw.trimStart().startsWith("{")
+
+    private fun isHtmlResponse(raw: String): Boolean {
+        val trimmed = raw.trimStart()
+        return trimmed.startsWith("<!DOCTYPE", ignoreCase = true) ||
+            trimmed.startsWith("<html", ignoreCase = true)
+    }
+
+    private fun nonJsonApiMessage(fallback: String): String =
+        "$fallback: ${getApplication<Application>().getString(R.string.error_api_not_json)}"
+
+    private fun unauthorizedMessage(): String =
+        getApplication<Application>().getString(R.string.error_unauthorized)
+
+    private fun Throwable.toUserFacingMessage(fallback: String): String {
+        val detail = message ?: return fallback
+        return if (
+            detail.contains("Unauthorized", ignoreCase = true) ||
+            detail.contains("JWT", ignoreCase = true) ||
+            detail.contains("auth", ignoreCase = true)
+        ) unauthorizedMessage() else detail
     }
 
     private fun webApiUrl(path: String) =
@@ -322,6 +796,18 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun String.encodeUrl() =
         java.net.URLEncoder.encode(this, "UTF-8").replace("+", "%20")
+
+    private suspend fun sendAuthorizedRequest(
+        request: suspend (String) -> HttpResponse,
+    ): HttpResponse? {
+        var accessToken = supabase.requireAccessToken(forceRefresh = true) ?: return null
+        var response = request(accessToken)
+        if (response.status.value == 401) {
+            accessToken = supabase.requireAccessToken(forceRefresh = true) ?: return response
+            response = request(accessToken)
+        }
+        return response
+    }
 }
 
 private fun parseCitations(raw: String): Pair<String, List<String>> {
