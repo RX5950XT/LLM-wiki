@@ -42,6 +42,7 @@ export async function POST(request: NextRequest) {
     const seedPages = Object.entries(pageFileIds).map(([slug, driveFileId]) => ({
       workspace_id: workspaceId,
       slug,
+      title: slug === 'index.md' ? 'Wiki 索引' : '更新日誌',
       kind: slug === 'index.md' ? 'index' : 'log',
       zone: 'wiki',
       drive_file_id: driveFileId,

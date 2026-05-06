@@ -14,6 +14,7 @@ data class PageEntity(
     val version: Long,
     @ColumnInfo(name = "drive_file_id") val driveFileId: String,
     val kind: String,
+    val zone: String = "wiki",
     @ColumnInfo(name = "updated_at") val updatedAt: String,
     @ColumnInfo(name = "updated_by") val updatedBy: String,
     @ColumnInfo(name = "locked_by_human") val lockedByHuman: Boolean = false,

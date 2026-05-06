@@ -4,10 +4,12 @@ import { WorkspaceShell } from './workspace-shell';
 
 interface WorkspacePageProps {
   params: Promise<{ wid: string }>;
+  searchParams: Promise<{ page?: string }>;
 }
 
-export default async function WorkspacePage({ params }: WorkspacePageProps) {
+export default async function WorkspacePage({ params, searchParams }: WorkspacePageProps) {
   const { wid } = await params;
+  const { page: initialPage } = await searchParams;
   const supabase = await createClient();
   const {
     data: { user },
@@ -38,6 +40,7 @@ export default async function WorkspacePage({ params }: WorkspacePageProps) {
       workspaceName={workspace.name}
       workspaces={workspaces ?? []}
       initialPages={pages ?? []}
+      initialPage={initialPage ?? 'index.md'}
     />
   );
 }

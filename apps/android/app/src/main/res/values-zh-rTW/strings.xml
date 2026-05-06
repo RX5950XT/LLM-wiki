@@ -21,8 +21,11 @@
     <string name="workspace_drive_reconnect_body">你的 Google Drive 授權已失效。請在瀏覽器完成重新授權後回到 App。</string>
     <string name="workspace_drive_reconnect_action">重新連線 Google Drive</string>
     <string name="workspace_no_workspaces">目前沒有工作區，建立一個開始使用吧。</string>
-    <string name="wiki_index">索引</string>
-    <string name="wiki_log">日誌</string>
+    <string name="wiki_index">Wiki 索引</string>
+    <string name="wiki_log">更新日誌</string>
+    <string name="wiki_zone_wiki">Wiki</string>
+    <string name="wiki_zone_notes">筆記</string>
+    <string name="wiki_zone_schema">結構</string>
     <string name="ingest_add_source">新增來源</string>
     <string name="ingest_running">整合中…</string>
     <string name="query_placeholder">問問你的 Wiki 任何問題…</string>

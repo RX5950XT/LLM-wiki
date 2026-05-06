@@ -21,8 +21,11 @@
     <string name="workspace_drive_reconnect_body">Your Google Drive authorization expired. Reconnect it in the browser, then return to the app.</string>
     <string name="workspace_drive_reconnect_action">Reconnect Google Drive</string>
     <string name="workspace_no_workspaces">No workspaces yet. Create one to get started.</string>
-    <string name="wiki_index">Index</string>
-    <string name="wiki_log">Log</string>
+    <string name="wiki_index">Wiki Index</string>
+    <string name="wiki_log">Update Log</string>
+    <string name="wiki_zone_wiki">Wiki</string>
+    <string name="wiki_zone_notes">Notes</string>
+    <string name="wiki_zone_schema">Schema</string>
     <string name="ingest_add_source">Add source</string>
     <string name="ingest_running">Ingesting…</string>
     <string name="query_placeholder">Ask your wiki anything…</string>

@@ -58,31 +58,31 @@ export function isValidWikiSlug(slug: string): boolean {
 }
 
 export const INITIAL_INDEX_CONTENT = `---
-title: "Wiki Index"
+title: "Wiki 索引"
 kind: index
 created: ${new Date().toISOString().slice(0, 10)}
 ---
 
-# Wiki Index
+# Wiki 索引
 
-This wiki is empty. Add a source to begin.
+此知識庫尚無內容。請在右側面板新增來源，開始建立你的 Wiki。
 
-## Entities
+## 實體
 
-## Concepts
+## 概念
 
-## Summaries
+## 摘要
 
-## Synthesis
+## 綜合
 `;
 
 export const INITIAL_LOG_CONTENT = `---
-title: "Wiki Log"
+title: "更新日誌"
 kind: log
 created: ${new Date().toISOString().slice(0, 10)}
 ---
 
-# Wiki Log
+# 更新日誌
 
-Chronological record of ingests, queries, and lint passes. Append-only.
+依時間順序記錄每次匯入、對話與健康檢查的結果。僅供追加，不可修改歷史記錄。
 `;

@@ -30,12 +30,13 @@ interface WorkspaceShellProps {
   workspaceName: string;
   workspaces: WorkspaceEntry[];
   initialPages: PageEntry[];
+  initialPage?: string;
 }
 
-export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initialPages }: WorkspaceShellProps) {
+export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initialPages, initialPage = 'index.md' }: WorkspaceShellProps) {
   const t = useTranslations();
   const router = useRouter();
-  const [activePage, setActivePage] = useState<string>('index.md');
+  const [activePage, setActivePage] = useState<string>(initialPage);
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
   const [showGraph, setShowGraph] = useState(false);
@@ -73,12 +74,17 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
       .then((d) => d.pages && setPages(d.pages));
   }, [workspaceId]);
 
+  const selectPage = useCallback((slug: string) => {
+    setActivePage(slug);
+    window.history.replaceState(null, '', `/w/${workspaceId}?page=${encodeURIComponent(slug)}`);
+  }, [workspaceId]);
+
   const handlePageWritten = useCallback(
     (slug: string) => {
-      setActivePage(slug);
+      selectPage(slug);
       refreshPageList();
     },
-    [refreshPageList],
+    [selectPage, refreshPageList],
   );
 
   const handleRealtimeChange = useCallback(
@@ -205,7 +211,7 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
       });
       refreshPageList();
       const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-      setActivePage(`_lint/${today}.md`);
+      selectPage(`_lint/${today}.md`);
     } finally {
       setLintRunning(false);
     }
@@ -417,7 +423,7 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
                       <button
                         key={r.slug}
                         onClick={() => {
-                          setActivePage(r.slug);
+                          selectPage(r.slug);
                           setShowSearch(false);
                           setSearchQuery('');
                         }}
@@ -520,7 +526,7 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
               <PageTree
                 initialPages={pages}
                 activePage={activePage}
-                onSelectPage={setActivePage}
+                onSelectPage={selectPage}
               />
             </div>
             <div
@@ -540,7 +546,7 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
               workspaceId={workspaceId}
               activePage={activePage}
               onNodeClick={(slug) => {
-                setActivePage(slug);
+                selectPage(slug);
                 setShowGraph(false);
               }}
             />
@@ -569,7 +575,7 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
                 workspaceId={workspaceId}
                 onSourceAdded={refreshPageList}
                 onPageWritten={handlePageWritten}
-                onPageClick={setActivePage}
+                onPageClick={selectPage}
               />
             </div>
           </>

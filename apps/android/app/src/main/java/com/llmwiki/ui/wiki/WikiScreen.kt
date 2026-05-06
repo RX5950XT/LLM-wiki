@@ -322,19 +322,68 @@ fun WikiScreen(
                         )
                     }
                 } else {
+                    val pinnedSlugs = setOf("index.md", "log.md")
+                    val pinnedPages = pinnedSlugs.mapNotNull { slug -> pages.firstOrNull { it.slug == slug } }
+                    val otherPages = pages.filter { it.slug !in pinnedSlugs }
+                    val byZone = otherPages.groupBy { it.zone }
+                    val zones = listOf(
+                        "wiki" to stringResource(R.string.wiki_zone_wiki),
+                        "notes" to stringResource(R.string.wiki_zone_notes),
+                        "schema" to stringResource(R.string.wiki_zone_schema),
+                    )
+
                     LazyColumn(Modifier.weight(1f)) {
-                        items(pages, key = { "${it.workspaceId}/${it.accountName}/${it.slug}" }) { page ->
-                            PageListItem(
-                                page = page,
-                                isSelected = uiState.activePage?.slug == page.slug,
-                                onClick = {
-                                    wikiViewModel.selectPage(page)
-                                    scope.launch { drawerState.close() }
-                                },
-                                onToggleLock = {
-                                    wikiViewModel.toggleLock(page.slug, page.lockedByHuman)
-                                },
-                            )
+                        // Pinned pages: index.md + log.md always at top
+                        if (pinnedPages.isNotEmpty()) {
+                            items(pinnedPages, key = { "${it.workspaceId}/${it.accountName}/${it.slug}" }) { page ->
+                                val pinnedLabel = when (page.slug) {
+                                    "index.md" -> stringResource(R.string.wiki_index)
+                                    else -> stringResource(R.string.wiki_log)
+                                }
+                                PageListItem(
+                                    page = page,
+                                    label = pinnedLabel,
+                                    isSelected = uiState.activePage?.slug == page.slug,
+                                    onClick = {
+                                        wikiViewModel.selectPage(page)
+                                        scope.launch { drawerState.close() }
+                                    },
+                                    onToggleLock = {
+                                        wikiViewModel.toggleLock(page.slug, page.lockedByHuman)
+                                    },
+                                )
+                            }
+                            item {
+                                HorizontalDivider(Modifier.padding(horizontal = 12.dp, vertical = 4.dp))
+                            }
+                        }
+
+                        // Zone sections
+                        zones.forEach { (zone, zoneLabel) ->
+                            val zonePages = byZone[zone] ?: emptyList()
+                            if (zonePages.isNotEmpty()) {
+                                item {
+                                    Text(
+                                        text = zoneLabel,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(start = 20.dp, top = 8.dp, bottom = 2.dp),
+                                    )
+                                }
+                                items(zonePages, key = { "${it.workspaceId}/${it.accountName}/${it.slug}" }) { page ->
+                                    PageListItem(
+                                        page = page,
+                                        isSelected = uiState.activePage?.slug == page.slug,
+                                        onClick = {
+                                            wikiViewModel.selectPage(page)
+                                            scope.launch { drawerState.close() }
+                                        },
+                                        onToggleLock = {
+                                            wikiViewModel.toggleLock(page.slug, page.lockedByHuman)
+                                        },
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -923,9 +972,10 @@ private fun PageListItem(
     isSelected: Boolean,
     onClick: () -> Unit,
     onToggleLock: () -> Unit,
+    label: String? = null,
 ) {
     NavigationDrawerItem(
-        label = { Text(page.title ?: page.slug, maxLines = 1) },
+        label = { Text(label ?: page.title ?: page.slug, maxLines = 1) },
         selected = isSelected,
         onClick = onClick,
         modifier = Modifier.padding(horizontal = 8.dp),

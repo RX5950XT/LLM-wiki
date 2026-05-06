@@ -44,8 +44,8 @@
     "lintRunning": "健康檢查執行中…"
   },
   "wiki": {
-    "index": "索引",
-    "log": "日誌",
+    "index": "Wiki 索引",
+    "log": "更新日誌",
     "entities": "實體",
     "concepts": "概念",
     "summaries": "摘要",

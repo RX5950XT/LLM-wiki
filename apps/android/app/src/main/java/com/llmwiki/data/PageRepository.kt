@@ -34,6 +34,7 @@ class PageRepository(
                 version = row.version,
                 driveFileId = row.driveFileId,
                 kind = row.kind,
+                zone = row.zone,
                 updatedAt = row.updatedAt,
                 updatedBy = row.updatedBy,
                 lockedByHuman = row.lockedByHuman,
