@@ -1,4 +1,6 @@
 {
+  "installCommand": "cd ../.. && bun install --frozen-lockfile",
+  "buildCommand": "cd ../.. && bun run build --filter=@llm-wiki/web",
   "crons": [
     {
       "path": "/api/lint/cron",
