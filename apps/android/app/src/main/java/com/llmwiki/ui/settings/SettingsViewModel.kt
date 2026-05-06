@@ -87,7 +87,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                 settingsState.update {
                     it.copy(
                         loading = false,
-                        error = if (e.isAuthFailure()) unauthorizedMessage() else e.message ?: "Failed to load profiles",
+                        error = e.toUserFacingMessage("Failed to load profiles"),
                     )
                 }
             }
@@ -154,7 +154,12 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                 if (ok) loadProfiles()
                 onDone(ok)
             } catch (e: Exception) {
-                settingsState.update { it.copy(createLoading = false, error = e.message ?: "Failed to save profile") }
+                settingsState.update {
+                    it.copy(
+                        createLoading = false,
+                        error = e.toUserFacingMessage("Failed to save profile"),
+                    )
+                }
                 onDone(false)
             }
         }
@@ -182,7 +187,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                     }
                 }
             } catch (e: Exception) {
-                settingsState.update { it.copy(error = e.message ?: "Failed to delete profile") }
+                settingsState.update { it.copy(error = e.toUserFacingMessage("Failed to delete profile")) }
             }
         }
     }
@@ -215,11 +220,24 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     private fun unauthorizedMessage(): String =
         getApplication<Application>().getString(R.string.error_unauthorized)
 
-    private fun Throwable.isAuthFailure(): Boolean {
-        val detail = message ?: return false
-        return detail.contains("Unauthorized", ignoreCase = true) ||
+    private fun Throwable.toUserFacingMessage(fallback: String): String {
+        val detail = message ?: return fallback
+        return if (
+            detail.contains("Unauthorized", ignoreCase = true) ||
             detail.contains("JWT", ignoreCase = true) ||
             detail.contains("auth", ignoreCase = true)
+        ) {
+            unauthorizedMessage()
+        } else if (
+            detail.contains("timeout", ignoreCase = true) ||
+            detail.contains("timed out", ignoreCase = true) ||
+            detail.contains("Unable to resolve host", ignoreCase = true) ||
+            detail.contains("Software caused connection abort", ignoreCase = true)
+        ) {
+            getApplication<Application>().getString(R.string.error_network_timeout)
+        } else {
+            detail
+        }
     }
 
     private fun webApiUrl(path: String) = BuildConfig.WEB_API_BASE_URL.trimEnd('/') + path

@@ -143,6 +143,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
         workspaceId.value = ws.id
         viewModelScope.launch {
             syncPagesInternal(ws.id)
+            selectDefaultPageIfNeeded(ws.id)
             SyncWorker.schedule(getApplication(), accountName, ws.id)
         }
     }
@@ -261,6 +262,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                 workspaceId.value = next?.id
                 next?.let {
                     syncPagesInternal(it.id)
+                    selectDefaultPageIfNeeded(it.id)
                     SyncWorker.schedule(getApplication(), accountName, it.id)
                 }
             } catch (e: Exception) {
@@ -714,10 +716,14 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                 val workspace = workspaces.firstOrNull { it.id == targetId }
 
                 _uiState.update {
+                    val switchedWorkspace = targetId != previousId
                     it.copy(
                         workspace = workspace,
                         workspaces = workspaces,
                         workspacesLoaded = true,
+                        activePage = if (switchedWorkspace) null else it.activePage,
+                        pageContent = if (switchedWorkspace) null else it.pageContent,
+                        chatMessages = if (switchedWorkspace) emptyList() else it.chatMessages,
                         syncError = null,
                     )
                 }
@@ -726,6 +732,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                 if (targetId != null) {
                     if (syncSelected || targetId != previousId) {
                         syncPagesInternal(targetId)
+                        selectDefaultPageIfNeeded(targetId)
                     }
                     SyncWorker.schedule(getApplication(), accountName, targetId)
                 }
@@ -743,6 +750,16 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
         } catch (e: Exception) {
             _uiState.update { it.copy(syncError = e.toUserFacingMessage("Sync failed")) }
         }
+    }
+
+    private suspend fun selectDefaultPageIfNeeded(wsId: String) {
+        val active = _uiState.value.activePage
+        if (active?.workspaceId == wsId) return
+
+        val page = db.pageDao().getPage(wsId, accountName, "index.md")
+            ?: db.pageDao().getPage(wsId, accountName, "log.md")
+            ?: return
+        selectPage(page)
     }
 
     private fun requestDriveReconnect(source: String, message: String) {
@@ -788,7 +805,18 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
             detail.contains("Unauthorized", ignoreCase = true) ||
             detail.contains("JWT", ignoreCase = true) ||
             detail.contains("auth", ignoreCase = true)
-        ) unauthorizedMessage() else detail
+        ) {
+            unauthorizedMessage()
+        } else if (
+            detail.contains("timeout", ignoreCase = true) ||
+            detail.contains("timed out", ignoreCase = true) ||
+            detail.contains("Unable to resolve host", ignoreCase = true) ||
+            detail.contains("Software caused connection abort", ignoreCase = true)
+        ) {
+            getApplication<Application>().getString(R.string.error_network_timeout)
+        } else {
+            detail
+        }
     }
 
     private fun webApiUrl(path: String) =

@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="LLM Wiki">
+  <defs>
+    <linearGradient id="bg" x1="24" y1="20" x2="228" y2="236" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0F766E" />
+      <stop offset="1" stop-color="#1D4ED8" />
+    </linearGradient>
+    <linearGradient id="accent" x1="82" y1="58" x2="174" y2="180" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#67E8F9" />
+      <stop offset="1" stop-color="#BFDBFE" />
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="224" height="224" rx="56" fill="url(#bg)" />
+  <path d="M78 68c19 0 35 5 50 15c15-10 31-15 50-15c12 0 23 2 32 6v114c-9-4-20-6-32-6c-18 0-34 5-50 15c-16-10-32-15-50-15c-12 0-23 2-32 6V74c9-4 20-6 32-6Z" fill="#F8FAFC"/>
+  <path d="M128 83v114" stroke="#0F766E" stroke-width="10" stroke-linecap="round"/>
+  <path d="M86 104c13 0 26 3 38 9M86 132c13 0 26 3 38 9M170 104c-13 0-26 3-38 9M170 132c-13 0-26 3-38 9" stroke="#1D4ED8" stroke-width="8" stroke-linecap="round"/>
+  <circle cx="182" cy="74" r="18" fill="url(#accent)" />
+  <path d="M182 61v26M169 74h26" stroke="#0F172A" stroke-width="8" stroke-linecap="round"/>
+</svg>

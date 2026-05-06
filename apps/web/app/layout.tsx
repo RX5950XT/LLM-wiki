@@ -7,6 +7,11 @@ import '@/app/globals.css';
 export const metadata: Metadata = {
   title: 'LLM Wiki',
   description: 'Personal AI-maintained knowledge base with cross-device sync',
+  icons: {
+    icon: '/icon.svg',
+    shortcut: '/icon.svg',
+    apple: '/icon.svg',
+  },
 };
 
 export default async function RootLayout({

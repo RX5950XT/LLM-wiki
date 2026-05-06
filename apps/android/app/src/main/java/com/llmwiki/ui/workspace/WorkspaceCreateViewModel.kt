@@ -174,7 +174,18 @@ class WorkspaceCreateViewModel(application: Application) : AndroidViewModel(appl
             detail.contains("Unauthorized", ignoreCase = true) ||
             detail.contains("JWT", ignoreCase = true) ||
             detail.contains("auth", ignoreCase = true)
-        ) unauthorizedMessage() else detail
+        ) {
+            unauthorizedMessage()
+        } else if (
+            detail.contains("timeout", ignoreCase = true) ||
+            detail.contains("timed out", ignoreCase = true) ||
+            detail.contains("Unable to resolve host", ignoreCase = true) ||
+            detail.contains("Software caused connection abort", ignoreCase = true)
+        ) {
+            getApplication<Application>().getString(R.string.error_network_timeout)
+        } else {
+            detail
+        }
     }
 
     private fun webApiUrl(path: String) = BuildConfig.WEB_API_BASE_URL.trimEnd('/') + path

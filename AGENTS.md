@@ -178,6 +178,8 @@ Query API 文字串流結尾附加 `\x00CITATIONS\x00["entities/karpathy.md",...
 - `lib/supabase/request.ts` 驗證 Android Bearer token 時需用 admin client `auth.getUser(token)`，再回傳 bearer Supabase client 給 RLS 查詢；只用 anon/bearer client 驗證會造成有效 token 被判定 Unauthorized
 - Workspace 管理需 Web / Android 對齊：`PATCH /api/workspaces/[id]` 更新名稱，`DELETE /api/workspaces/[id]` 刪除 workspace；刪除會嘗試 trash Google Drive folder，但 Drive 清理失敗不阻擋 DB 刪除，僅回傳 warning
 - Android 端 workspace 刪除只有在 API 回 `{ ok: true }` 後才能清本機 Room / UI 狀態；不可 optimistic remove，否則 production route 漏部署時會出現手機消失但 Web/Drive 仍存在
+- Android 共用 `AndroidHttpClient` 必須設定 Ktor timeout（connect 10s / socket 30s / request 60s），避免 API request 無限 loading；timeout / DNS / connection abort 要轉成本地化網路錯誤
+- Android 切換、新建或刪除後切到下一個 workspace 時，`syncPagesInternal()` 後需自動選中 `index.md`（fallback `log.md`），避免停在「從選單選擇一個頁面」
 - Chat 串流：POST `/api/query` → `text/plain` stream → Ktor `bodyAsChannel()` + `readUTF8Line()`
 - 登出：`PageDao.deleteAll()` + `SyncWorker.cancel()` + `navigate("auth") popUpTo(0) inclusive=true`
 - `Icons.AutoMirrored.Filled.List` 取代舊版 `Icons.Default.Menu`
@@ -206,13 +208,13 @@ Query API 文字串流結尾附加 `\x00CITATIONS\x00["entities/karpathy.md",...
 <claude-mem-context>
 # Memory Context
 
-# [LLM-wiki] recent context, 2026-05-06 7:36am GMT+8
+# [LLM-wiki] recent context, 2026-05-06 8:36am GMT+8
 
 Legend: 🎯session 🔴bugfix 🟣feature 🔄refactor ✅change 🔵discovery ⚖️decision 🚨security_alert 🔐security_note
 Format: ID TIME TYPE TITLE
 Fetch details: get_observations([IDs]) | Search: mem-search skill
 
-Stats: 50 obs (9,692t read) | 919,514t work | 99% savings
+Stats: 50 obs (9,903t read) | 924,076t work | 99% savings
 
 ### Apr 28, 2026
 S27 Google Drive 重連按鈕仍無效（第二輪修復）：深入調查環境變數與 token 儲存靜默失敗問題 (Apr 28, 7:49 PM)
@@ -226,8 +228,7 @@ S33 Fix Google Drive OAuth redirect loop in workspace creation and chat flows; r
 S34 Debug `invalid_client` Google OAuth error after redirect loop fix — GCP OAuth client credentials mismatch (May 3, 5:11 PM)
 S35 繼續 LLM-wiki 開發 — 升級 PageViewer 支援 Markdown 渲染並恢復 Realtime 監聽 (May 3, 5:12 PM)
 ### May 4, 2026
-568 7:06p ✅ 部署 page-viewer.tsx pre 標籤版本至 Vercel 生產環境
-569 " 🔵 主 session 瀏覽器分頁全景：跨 Supabase、GCP、Vercel 多服務同步工作
+569 7:06p 🔵 主 session 瀏覽器分頁全景：跨 Supabase、GCP、Vercel 多服務同步工作
 570 7:07p 🔵 生產環境截圖確認新部署已生效（pre 標籤渲染）
 571 7:09p 🔵 workspace-shell.tsx 確認 useRealtimePages 位置與 settings 預取
 ### May 5, 2026
@@ -280,6 +281,7 @@ S37 修復 .env.vercel.tmp gitignore、更新文件、從工作紀錄萃取 Skil
 615 " 🔴 補齊缺失的 gradlew / gradlew.bat 執行腳本
 617 7:34a 🔵 工作區功能缺陷與 UI 問題清單確認
 616 " 🔵 Claude 的瀏覽器為無頭瀏覽器，使用者不可見
+618 7:36a 🔵 Android app still hitting HTML 404 for workspace API routes post-deploy
 
-Access 920k tokens of past work via get_observations([IDs]) or mem-search skill.
+Access 924k tokens of past work via get_observations([IDs]) or mem-search skill.
 </claude-mem-context>

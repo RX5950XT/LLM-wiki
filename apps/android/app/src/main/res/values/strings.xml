@@ -104,4 +104,5 @@
     <string name="action_done">Done</string>
     <string name="error_unauthorized">Session expired. Please sign in again.</string>
     <string name="error_api_not_json">The server returned a web page instead of API JSON. Update the web backend and try again.</string>
+    <string name="error_network_timeout">The network request took too long or was interrupted. Check your connection and try again.</string>
 </resources>
