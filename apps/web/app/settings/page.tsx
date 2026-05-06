@@ -23,6 +23,8 @@ export default async function SettingsPage() {
       .from('workspaces')
       .select('id')
       .eq('owner_id', user.id)
+      .order('sort_order', { ascending: true })
+      .order('created_at', { ascending: true })
       .limit(1),
   ]);
 

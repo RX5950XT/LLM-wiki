@@ -14,6 +14,7 @@ export default async function WorkspacesPage() {
   const { data: workspaces } = await supabase
     .from('workspaces')
     .select('id, name')
+    .order('sort_order', { ascending: true })
     .order('created_at', { ascending: true });
 
   if (workspaces && workspaces.length > 0) {

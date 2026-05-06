@@ -58,6 +58,8 @@ export async function GET(request: NextRequest) {
     .from('workspaces')
     .select('id')
     .eq('owner_id', userId)
+    .order('sort_order', { ascending: true })
+    .order('created_at', { ascending: true })
     .limit(1);
 
   if (workspaces && workspaces.length > 0) {
