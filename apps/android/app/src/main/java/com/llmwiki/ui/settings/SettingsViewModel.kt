@@ -11,6 +11,7 @@ import com.llmwiki.data.AppPreferencesRepository
 import com.llmwiki.data.LlmProfile
 import com.llmwiki.data.LlmProfileRepository
 import com.llmwiki.data.ProfileAuthRequiredException
+import com.llmwiki.data.isSupabaseAuthProblem
 import com.llmwiki.data.requireAccessToken
 import com.llmwiki.data.SupabaseClientProvider
 import com.llmwiki.data.ThemeMode
@@ -115,7 +116,8 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         onDone: (Boolean) -> Unit,
     ) {
         viewModelScope.launch {
-            var accessToken = supabase.requireAccessToken(forceRefresh = true)
+            var accessToken = supabase.requireAccessToken(forceRefresh = false)
+                ?: supabase.requireAccessToken(forceRefresh = true)
                 ?: run {
                     settingsState.update { it.copy(error = unauthorizedMessage()) }
                     onDone(false)
@@ -168,7 +170,9 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun deleteProfile(id: String) {
         viewModelScope.launch {
             try {
-                var accessToken = supabase.requireAccessToken(forceRefresh = true) ?: return@launch
+                var accessToken = supabase.requireAccessToken(forceRefresh = false)
+                    ?: supabase.requireAccessToken(forceRefresh = true)
+                    ?: return@launch
                 var response = AndroidHttpClient.instance.delete(webApiUrl("/api/settings/profiles?id=$id")) {
                     header("Authorization", "Bearer $accessToken")
                 }
@@ -222,11 +226,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     private fun Throwable.toUserFacingMessage(fallback: String): String {
         val detail = message ?: return fallback
-        return if (
-            detail.contains("Unauthorized", ignoreCase = true) ||
-            detail.contains("JWT", ignoreCase = true) ||
-            detail.contains("auth", ignoreCase = true)
-        ) {
+        return if (isSupabaseAuthProblem()) {
             unauthorizedMessage()
         } else if (
             detail.contains("timeout", ignoreCase = true) ||

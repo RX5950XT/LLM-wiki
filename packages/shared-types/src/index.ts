@@ -29,6 +29,7 @@ export interface Workspace {
   description: string | null;
   drive_folder_id: string;
   default_profile_id: Uuid | null;
+  sort_order: number;
   created_at: Iso8601;
 }
 

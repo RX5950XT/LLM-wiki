@@ -13,17 +13,27 @@ class LlmProfileRepository(
 ) {
     suspend fun listProfiles(): List<LlmProfile> {
         supabase.auth.awaitInitialization()
-        val accessToken = supabase.requireAccessToken(forceRefresh = true)
+        val accessToken = supabase.requireAccessToken(forceRefresh = false)
+            ?: supabase.requireAccessToken(forceRefresh = true)
         val userId = supabase.auth.currentSessionOrNull()?.user?.id
         if (accessToken.isNullOrBlank() || userId.isNullOrBlank()) {
             throw ProfileAuthRequiredException()
         }
 
-        return supabase.from("llm_profiles")
+        return runCatching {
+            selectProfiles(userId)
+        }.recoverCatching { error ->
+            if (!error.isSupabaseAuthProblem()) throw error
+            supabase.requireAccessToken(forceRefresh = true) ?: throw error
+            selectProfiles(userId)
+        }.getOrThrow()
+    }
+
+    private suspend fun selectProfiles(userId: String): List<LlmProfile> =
+        supabase.from("llm_profiles")
             .select(columns = Columns.raw("id,name,base_url,model,is_default,created_at")) {
                 filter { eq("owner_id", userId) }
                 order("created_at", order = Order.ASCENDING)
             }
             .decodeList()
-    }
 }

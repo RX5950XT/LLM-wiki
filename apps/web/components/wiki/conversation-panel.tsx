@@ -46,6 +46,16 @@ function extractTitle(text: string, fallbackTitle: string): string {
   return line.replace(/^#+\s*/, '').trim().slice(0, 80);
 }
 
+function parseInternalWikiHref(href: string): string | null {
+  if (href.startsWith('wiki://')) {
+    return decodeURIComponent(href.slice(7).split('#')[0] ?? '');
+  }
+
+  if (/^(https?:|mailto:|tel:|#)/i.test(href)) return null;
+  if (!href.endsWith('.md')) return null;
+  return href.replace(/^\//, '').split('#')[0] ?? null;
+}
+
 export function ConversationPanel({
   workspaceId,
   onSourceAdded,
@@ -534,11 +544,25 @@ export function ConversationPanel({
                   remarkPlugins={[remarkGfm]}
                   components={{
                     img: () => null,
-                    a: ({ children, ...props }) => (
-                      <a {...props} target="_blank" rel="noopener noreferrer">
-                        {children}
-                      </a>
-                    ),
+                    a: ({ children, href, ...props }) => {
+                      const slug = href ? parseInternalWikiHref(href) : null;
+                      if (slug && onPageClick) {
+                        return (
+                          <a
+                            {...props}
+                            href={href}
+                            onClick={(event) => {
+                              event.preventDefault();
+                              onPageClick(slug);
+                            }}
+                          >
+                            {children}
+                          </a>
+                        );
+                      }
+
+                      return <a {...props} href={href}>{children}</a>;
+                    },
                   }}
                 >
                   {m.content}

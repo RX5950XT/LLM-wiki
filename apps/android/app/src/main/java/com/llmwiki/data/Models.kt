@@ -10,6 +10,7 @@ data class WorkspaceRow(
     val description: String? = null,
     @SerialName("drive_folder_id") val driveFolderId: String,
     @SerialName("default_profile_id") val defaultProfileId: String? = null,
+    @SerialName("sort_order") val sortOrder: Int = 0,
     @SerialName("created_at") val createdAt: String,
 )
 

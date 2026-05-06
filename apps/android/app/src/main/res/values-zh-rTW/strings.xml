@@ -23,7 +23,7 @@
     <string name="workspace_no_workspaces">目前沒有工作區，建立一個開始使用吧。</string>
     <string name="wiki_index">Wiki 索引</string>
     <string name="wiki_log">更新日誌</string>
-    <string name="wiki_zone_wiki">Wiki</string>
+    <string name="wiki_zone_wiki">知識頁</string>
     <string name="wiki_zone_notes">筆記</string>
     <string name="wiki_zone_schema">結構</string>
     <string name="ingest_add_source">新增來源</string>
@@ -64,6 +64,9 @@
     <string name="wiki_lint_started">已開始執行 Wiki 健康檢查</string>
     <string name="wiki_select_model">選擇模型</string>
     <string name="wiki_current_workspace">目前工作區</string>
+    <string name="workspace_actions">工作區操作</string>
+    <string name="workspace_move_up">工作區往上移</string>
+    <string name="workspace_move_down">工作區往下移</string>
 
     <!-- 設定畫面 -->
     <string name="settings_title">設定</string>
@@ -93,7 +96,7 @@
     <!-- 使用說明 -->
     <string name="help_title">使用說明</string>
     <string name="help_workspace_title">工作區與頁面</string>
-    <string name="help_workspace_body">用工作區選單切換或建立工作區。從側邊欄選頁面；鎖定的頁面不會被 LLM 覆寫。</string>
+    <string name="help_workspace_body">用工作區選單切換、排序或建立工作區。知識頁由 LLM 維護；筆記是你自己的內容；結構是控制 LLM 的規則檔。</string>
     <string name="help_ingest_title">匯入內容</string>
     <string name="help_ingest_body">用 + 貼上網址、文字或 Markdown。用附加檔案按鈕可從手機匯入文字檔。</string>
     <string name="help_chat_title">對話與綜合頁</string>

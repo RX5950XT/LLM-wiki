@@ -8,6 +8,7 @@ import com.llmwiki.BuildConfig
 import com.llmwiki.data.AndroidHttpClient
 import com.llmwiki.data.buildDriveReconnectUrl
 import com.llmwiki.data.isDriveReconnectError
+import com.llmwiki.data.isSupabaseAuthProblem
 import com.llmwiki.data.requireAccessToken
 import com.llmwiki.data.SupabaseClientProvider
 import io.github.jan.supabase.auth.auth
@@ -50,7 +51,9 @@ class WorkspaceCreateViewModel(application: Application) : AndroidViewModel(appl
         if (current.submitting || current.name.isBlank()) return
 
         viewModelScope.launch {
-            var accessToken = supabase.requireAccessToken(forceRefresh = true) ?: run {
+            var accessToken = supabase.requireAccessToken(forceRefresh = false)
+                ?: supabase.requireAccessToken(forceRefresh = true)
+                ?: run {
                 _uiState.update { it.copy(error = unauthorizedMessage()) }
                 return@launch
             }
@@ -170,11 +173,7 @@ class WorkspaceCreateViewModel(application: Application) : AndroidViewModel(appl
 
     private fun Throwable.toUserFacingMessage(fallback: String): String {
         val detail = message ?: return fallback
-        return if (
-            detail.contains("Unauthorized", ignoreCase = true) ||
-            detail.contains("JWT", ignoreCase = true) ||
-            detail.contains("auth", ignoreCase = true)
-        ) {
+        return if (isSupabaseAuthProblem()) {
             unauthorizedMessage()
         } else if (
             detail.contains("timeout", ignoreCase = true) ||

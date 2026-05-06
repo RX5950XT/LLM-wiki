@@ -3,7 +3,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { PanelLeft, PanelRight, GitFork, FlaskConical, ChevronDown, LogOut, Plus, Settings, Search, Loader2, HelpCircle, Pencil, Trash2 } from 'lucide-react';
+import { PanelLeft, PanelRight, GitFork, FlaskConical, ChevronDown, LogOut, Plus, Settings, Search, Loader2, HelpCircle, Pencil, Trash2, GripVertical } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { PageTree } from '@/components/wiki/page-tree';
 import { PageViewer } from '@/components/wiki/page-viewer';
@@ -23,6 +23,7 @@ interface PageEntry {
 interface WorkspaceEntry {
   id: string;
   name: string;
+  sort_order?: number;
 }
 
 interface WorkspaceShellProps {
@@ -37,6 +38,9 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
   const t = useTranslations();
   const router = useRouter();
   const [activePage, setActivePage] = useState<string>(initialPage);
+  const [activeAnchor, setActiveAnchor] = useState<string | null>(
+    typeof window !== 'undefined' ? decodeURIComponent(window.location.hash.replace(/^#/, '')) || null : null,
+  );
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
   const [showGraph, setShowGraph] = useState(false);
@@ -52,6 +56,7 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
   const [pages, setPages] = useState(initialPages);
   const [leftWidth, setLeftWidth] = useState(240);
   const [rightWidth, setRightWidth] = useState(384);
+  const [draggingWorkspaceId, setDraggingWorkspaceId] = useState<string | null>(null);
   const dragging = useRef<{ side: 'left' | 'right'; startX: number; startWidth: number } | null>(null);
   const dragFrame = useRef<number | null>(null);
   const pendingLeftWidth = useRef<number | null>(null);
@@ -74,9 +79,11 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
       .then((d) => d.pages && setPages(d.pages));
   }, [workspaceId]);
 
-  const selectPage = useCallback((slug: string) => {
+  const selectPage = useCallback((slug: string, anchor?: string) => {
     setActivePage(slug);
-    window.history.replaceState(null, '', `/w/${workspaceId}?page=${encodeURIComponent(slug)}`);
+    setActiveAnchor(anchor ?? null);
+    const hash = anchor ? `#${encodeURIComponent(anchor)}` : '';
+    window.history.replaceState(null, '', `/w/${workspaceId}?page=${encodeURIComponent(slug)}${hash}`);
   }, [workspaceId]);
 
   const handlePageWritten = useCallback(
@@ -106,6 +113,10 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
     setWorkspaceList(workspaces);
     setCurrentWorkspaceName(workspaceName);
   }, [workspaceName, workspaces]);
+
+  useEffect(() => {
+    setPages(initialPages);
+  }, [initialPages]);
 
   useEffect(() => {
     router.prefetch('/settings');
@@ -271,6 +282,37 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
     }
   }, [router, workspaceId, workspaceList]);
 
+  const persistWorkspaceOrder = useCallback(async (ordered: WorkspaceEntry[]) => {
+    setWorkspaceList(ordered);
+    setWorkspaceActionError(null);
+    try {
+      const res = await fetch('/api/workspaces/reorder', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workspace_ids: ordered.map((workspace) => workspace.id) }),
+      });
+      const data = await res.json().catch(() => null) as { error?: string } | null;
+      if (!res.ok) throw new Error(data?.error ?? 'Failed to reorder workspaces');
+    } catch (error) {
+      setWorkspaceList(workspaceList);
+      setWorkspaceActionError(error instanceof Error ? error.message : 'Failed to reorder workspaces');
+    }
+  }, [workspaceList]);
+
+  const moveWorkspace = useCallback((draggedId: string, targetId: string) => {
+    if (draggedId === targetId) return;
+
+    const current = [...workspaceList];
+    const fromIndex = current.findIndex((workspace) => workspace.id === draggedId);
+    const toIndex = current.findIndex((workspace) => workspace.id === targetId);
+    if (fromIndex < 0 || toIndex < 0) return;
+
+    const [moved] = current.splice(fromIndex, 1);
+    if (!moved) return;
+    current.splice(toIndex, 0, moved);
+    void persistWorkspaceOrder(current);
+  }, [persistWorkspaceOrder, workspaceList]);
+
   return (
     <div
       className="flex h-screen flex-col"
@@ -323,10 +365,32 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
                     <div
                       key={ws.id}
                       className="flex items-center gap-1 px-2 py-1.5"
+                      draggable
+                      onDragStart={() => setDraggingWorkspaceId(ws.id)}
+                      onDragOver={(event) => event.preventDefault()}
+                      onDrop={() => {
+                        if (draggingWorkspaceId) moveWorkspace(draggingWorkspaceId, ws.id);
+                        setDraggingWorkspaceId(null);
+                      }}
+                      onDragEnd={() => setDraggingWorkspaceId(null)}
                       style={{
-                        background: ws.id === workspaceId ? 'var(--color-accent-glow)' : undefined,
+                        background:
+                          draggingWorkspaceId === ws.id
+                            ? 'var(--bg)'
+                            : ws.id === workspaceId
+                              ? 'var(--color-accent-glow)'
+                              : undefined,
                       }}
                     >
+                      <button
+                        type="button"
+                        className="cursor-grab rounded p-1 active:cursor-grabbing"
+                        style={{ color: 'var(--fg-muted)' }}
+                        aria-label={t('workspace.reorderWorkspace')}
+                        title={t('workspace.reorderWorkspace')}
+                      >
+                        <GripVertical size={13} />
+                      </button>
                       <button
                         type="button"
                         onClick={() => router.push(`/w/${ws.id}`)}
@@ -554,7 +618,8 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
             <PageViewer
               workspaceId={workspaceId}
               slug={activePage}
-              onWikiLinkClick={setActivePage}
+              anchor={activeAnchor}
+              onWikiLinkClick={selectPage}
               refreshKey={viewerRefreshKey}
             />
           )}

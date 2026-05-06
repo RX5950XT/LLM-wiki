@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { initWorkspaceDrive } from '@/lib/drive/workspace-init';
+import { ensureWorkspaceSystemPages } from '@/lib/drive/system-pages';
 import { getRequestUser } from '@/lib/supabase/request';
 import {
   createDriveClientForUser,
@@ -29,27 +30,26 @@ export async function POST(request: NextRequest) {
     const drive = await createDriveClientForUser(user.id);
     const workspaceId = crypto.randomUUID();
 
-    const { driveFolderId, pageFileIds } = await initWorkspaceDrive(drive, workspaceId);
+    const { driveFolderId } = await initWorkspaceDrive(drive, workspaceId);
+
+    const { data: lastWorkspace } = await admin
+      .from('workspaces')
+      .select('sort_order')
+      .eq('owner_id', user.id)
+      .order('sort_order', { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
     const { error: workspaceError } = await admin.from('workspaces').insert({
       id: workspaceId,
       owner_id: user.id,
       name: parsed.data.name,
       drive_folder_id: driveFolderId,
+      sort_order: (lastWorkspace?.sort_order ?? -1) + 1,
     });
     if (workspaceError) throw new Error(`Failed to create workspace record: ${workspaceError.message}`);
 
-    const seedPages = Object.entries(pageFileIds).map(([slug, driveFileId]) => ({
-      workspace_id: workspaceId,
-      slug,
-      title: slug === 'index.md' ? 'Wiki 索引' : '更新日誌',
-      kind: slug === 'index.md' ? 'index' : 'log',
-      zone: 'wiki',
-      drive_file_id: driveFileId,
-      updated_by: 'llm',
-    }));
-    const { error: pagesError } = await admin.from('pages').insert(seedPages);
-    if (pagesError) throw new Error(`Failed to create seed pages: ${pagesError.message}`);
+    await ensureWorkspaceSystemPages(drive, workspaceId, driveFolderId);
 
     // Auto-bind user's default LLM profile
     const { data: defaultProfile } = await admin
@@ -86,8 +86,9 @@ export async function GET(request: NextRequest) {
 
   const { data: workspaces, error } = await supabase
     .from('workspaces')
-    .select('id, name, description, created_at')
+    .select('id, name, description, created_at, sort_order')
     .eq('owner_id', user.id)
+    .order('sort_order', { ascending: true })
     .order('created_at', { ascending: true });
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

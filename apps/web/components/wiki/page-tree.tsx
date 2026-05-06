@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { FileText, ChevronDown, ChevronRight } from 'lucide-react';
 
@@ -30,7 +30,6 @@ function groupByZone(pages: PageEntry[]) {
 
 export function PageTree({ initialPages, activePage, onSelectPage }: PageTreeProps) {
   const t = useTranslations();
-  const [pages] = useState(initialPages);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({ wiki: true });
 
   const PINNED_LABELS: Record<string, string> = {
@@ -44,6 +43,13 @@ export function PageTree({ initialPages, activePage, onSelectPage }: PageTreePro
     schema: t('wiki.zoneSchema'),
   };
 
+  const ZONE_HINTS: Record<string, string> = {
+    wiki: t('wiki.zoneWikiHint'),
+    notes: t('wiki.zoneNotesHint'),
+    schema: t('wiki.zoneSchemaHint'),
+  };
+
+  const pages = useMemo(() => initialPages, [initialPages]);
   const pinnedPages = PINNED_SLUGS
     .map((s) => pages.find((p) => p.slug === s))
     .filter((p): p is PageEntry => p != null);
@@ -99,13 +105,23 @@ export function PageTree({ initialPages, activePage, onSelectPage }: PageTreePro
           </button>
 
           {expanded[zone] && (
-            <ul>
-              {(grouped[zone] ?? []).map((page) => (
-                <li key={page.slug}>
-                  {renderPageItem(page)}
-                </li>
-              ))}
-            </ul>
+            <>
+              <p className="px-4 pb-1 text-[11px] leading-5" style={{ color: 'var(--fg-muted)' }}>
+                {ZONE_HINTS[zone]}
+              </p>
+              <ul>
+                {(grouped[zone] ?? []).map((page) => (
+                  <li key={page.slug}>
+                    {renderPageItem(page)}
+                  </li>
+                ))}
+              </ul>
+              {(grouped[zone] ?? []).length === 0 && (
+                <p className="px-4 py-2 text-xs" style={{ color: 'var(--fg-muted)' }}>
+                  {t('wiki.zoneEmpty')}
+                </p>
+              )}
+            </>
           )}
         </div>
       ))}

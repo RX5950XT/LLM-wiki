@@ -23,7 +23,7 @@
     <string name="workspace_no_workspaces">No workspaces yet. Create one to get started.</string>
     <string name="wiki_index">Wiki Index</string>
     <string name="wiki_log">Update Log</string>
-    <string name="wiki_zone_wiki">Wiki</string>
+    <string name="wiki_zone_wiki">Knowledge</string>
     <string name="wiki_zone_notes">Notes</string>
     <string name="wiki_zone_schema">Schema</string>
     <string name="ingest_add_source">Add source</string>
@@ -64,6 +64,9 @@
     <string name="wiki_lint_started">Wiki health check started</string>
     <string name="wiki_select_model">Select model</string>
     <string name="wiki_current_workspace">Current workspace</string>
+    <string name="workspace_actions">Workspace actions</string>
+    <string name="workspace_move_up">Move workspace up</string>
+    <string name="workspace_move_down">Move workspace down</string>
 
     <!-- Settings screen -->
     <string name="settings_title">Settings</string>
@@ -93,7 +96,7 @@
     <!-- Help -->
     <string name="help_title">Help</string>
     <string name="help_workspace_title">Workspaces and pages</string>
-    <string name="help_workspace_body">Use the workspace menu to switch or create a workspace. Pick pages from the drawer; locked pages are protected from LLM overwrites.</string>
+    <string name="help_workspace_body">Use the workspace menu to switch, reorder, or create a workspace. Knowledge pages are LLM-maintained, notes are yours, and schema files steer the LLM.</string>
     <string name="help_ingest_title">Import content</string>
     <string name="help_ingest_body">Use + to paste a URL, text, or Markdown. Use the attachment button to import a text file from your phone.</string>
     <string name="help_chat_title">Chat and synthesis</string>

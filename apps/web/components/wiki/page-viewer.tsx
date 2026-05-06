@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, type ReactNode } from 'react';
 import { Pencil, Lock, Unlock, RefreshCw, AlertTriangle } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import ReactMarkdown from 'react-markdown';
@@ -12,15 +12,61 @@ function stripFrontmatterAndWikilinks(content: string): string {
     const end = result.indexOf('\n---', 3);
     if (end !== -1) result = result.slice(end + 4).trimStart();
   }
-  // Convert [[slug]] to markdown links that our custom renderer intercepts
-  result = result.replace(/\[\[([^\]]+)\]\]/g, (_, slug: string) => `[${slug}](wiki://${encodeURIComponent(slug)})`);
+  // Convert [[slug]] and [[slug#anchor]] to markdown links that our custom renderer intercepts.
+  result = result.replace(/\[\[([^\]]+)\]\]/g, (_, target: string) => {
+    const [slug = '', anchor] = target.split('#');
+    const encodedSlug = encodeURIComponent(slug);
+    const encodedAnchor = anchor ? `#${encodeURIComponent(anchor)}` : '';
+    return `[${target}](wiki://${encodedSlug}${encodedAnchor})`;
+  });
   return result;
+}
+
+function slugifyHeading(text: string): string {
+  return text
+    .trim()
+    .toLowerCase()
+    .replace(/[`*_~]/g, '')
+    .replace(/[^\p{L}\p{N}\s-]/gu, '')
+    .replace(/\s+/g, '-');
+}
+
+function getTextContent(children: ReactNode): string {
+  if (typeof children === 'string' || typeof children === 'number') return String(children);
+  if (Array.isArray(children)) return children.map(getTextContent).join('');
+  if (children && typeof children === 'object' && 'props' in children) {
+    return getTextContent((children as { props?: { children?: ReactNode } }).props?.children);
+  }
+  return '';
+}
+
+function parseInternalHref(href: string): { slug: string; anchor?: string } | null {
+  if (href.startsWith('wiki://')) {
+    const withoutScheme = href.slice(7);
+    const [rawSlug = '', rawAnchor] = withoutScheme.split('#');
+    return {
+      slug: decodeURIComponent(rawSlug),
+      anchor: rawAnchor ? decodeURIComponent(rawAnchor) : undefined,
+    };
+  }
+
+  if (href.startsWith('#')) return null;
+
+  if (/^(https?:|mailto:|tel:)/i.test(href)) return null;
+  if (!href.endsWith('.md')) return null;
+
+  const [slug = '', anchor] = href.replace(/^\//, '').split('#');
+  return {
+    slug,
+    anchor: anchor ? decodeURIComponent(anchor) : undefined,
+  };
 }
 
 interface PageViewerProps {
   workspaceId: string;
   slug: string | null;
-  onWikiLinkClick?: (slug: string) => void;
+  anchor?: string | null;
+  onWikiLinkClick?: (slug: string, anchor?: string) => void;
   /** Increment to force re-fetch (e.g. on Realtime update) */
   refreshKey?: number;
 }
@@ -34,7 +80,7 @@ interface PageData {
   version: number;
 }
 
-export function PageViewer({ workspaceId, slug, onWikiLinkClick, refreshKey }: PageViewerProps) {
+export function PageViewer({ workspaceId, slug, anchor, onWikiLinkClick, refreshKey }: PageViewerProps) {
   const t = useTranslations();
   const [page, setPage] = useState<PageData | null>(null);
   const [loading, setLoading] = useState(false);
@@ -72,6 +118,14 @@ export function PageViewer({ workspaceId, slug, onWikiLinkClick, refreshKey }: P
     if (refreshKey === undefined || refreshKey === 0) return;
     setStale(true);
   }, [refreshKey]);
+
+  useEffect(() => {
+    if (!page || !anchor) return;
+    const frame = window.requestAnimationFrame(() => {
+      document.getElementById(anchor)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [anchor, page]);
 
   const toggleLock = useCallback(async () => {
     if (!page) return;
@@ -204,20 +258,67 @@ export function PageViewer({ workspaceId, slug, onWikiLinkClick, refreshKey }: P
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             components={{
+              h1: ({ children }) => {
+                const id = slugifyHeading(getTextContent(children));
+                return <h1 id={id}>{children}</h1>;
+              },
+              h2: ({ children }) => {
+                const id = slugifyHeading(getTextContent(children));
+                return <h2 id={id}>{children}</h2>;
+              },
+              h3: ({ children }) => {
+                const id = slugifyHeading(getTextContent(children));
+                return <h3 id={id}>{children}</h3>;
+              },
+              h4: ({ children }) => {
+                const id = slugifyHeading(getTextContent(children));
+                return <h4 id={id}>{children}</h4>;
+              },
+              h5: ({ children }) => {
+                const id = slugifyHeading(getTextContent(children));
+                return <h5 id={id}>{children}</h5>;
+              },
+              h6: ({ children }) => {
+                const id = slugifyHeading(getTextContent(children));
+                return <h6 id={id}>{children}</h6>;
+              },
               a: ({ href, children }) => {
-                if (href?.startsWith('wiki://') && onWikiLinkClick) {
-                  const slug = decodeURIComponent(href.slice(7));
+                if (!href) return <a>{children}</a>;
+
+                if (href.startsWith('#')) {
                   return (
                     <a
-                      href="#"
-                      onClick={(e) => { e.preventDefault(); onWikiLinkClick(slug); }}
+                      href={href}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        const targetId = decodeURIComponent(href.slice(1));
+                        document.getElementById(targetId)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+                        window.history.replaceState(null, '', `#${encodeURIComponent(targetId)}`);
+                      }}
                       style={{ color: 'var(--color-accent)' }}
                     >
                       {children}
                     </a>
                   );
                 }
-                return <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>;
+
+                const internalTarget = parseInternalHref(href);
+                if (internalTarget && onWikiLinkClick) {
+                  return (
+                    <a
+                      href={href}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        onWikiLinkClick(internalTarget.slug, internalTarget.anchor);
+                      }}
+                      style={{ color: 'var(--color-accent)' }}
+                    >
+                      {children}
+                    </a>
+                  );
+                }
+
+                return <a href={href}>{children}</a>;
               },
             }}
           >

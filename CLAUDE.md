@@ -193,7 +193,7 @@ apps/android/app/src/main/java/com/llmwiki/
 - `AppPreferencesRepository` 必須透過 `preferencesDataStore` 共用單一 DataStore；若在 `MainActivity` / `SettingsViewModel` 各自建立獨立 `PreferenceDataStoreFactory`，設定頁會因同檔案多實例而閃退
 - Android 語言切換要讓 `MainActivity` 使用 `AppCompatActivity`，並在 `setContent` 前先套用已儲存 locale；`AppCompatDelegate.setApplicationLocales()` 也要先比較 `toLanguageTags()`，避免每次啟動都重建 Activity 導致閃黑
 - Android 打 Web API 時不可直接信任舊的 `currentSessionOrNull()?.accessToken`；需先經 `requireAccessToken()`，若目前 token 為空但 session 仍存在也要先 refresh，再在 401 時用 `forceRefresh=true` 重試一次，否則設定頁與模型/設定檔同步容易出現 `Unauthorized`
-- Android 呼叫 Web API 前應使用 `requireAccessToken(forceRefresh = true)`，直接 Supabase PostgREST 查詢（例如 pages/workspaces）也要先 refresh session，避免首頁偶發「登入狀態已失效」紅字
+- Android 呼叫 Web API / Supabase PostgREST 時應先用 `requireAccessToken(forceRefresh = false)` 取現有 token；只有 token 為空或收到 401 才以 `forceRefresh=true` 重試。`refreshCurrentSession()` 必須透過共用 mutex 序列化，避免多個初始化流程同時 refresh 導致 refresh token 競爭並出現「登入狀態已失效」。
 - Android Web API 錯誤解析要處理純文字 `Unauthorized`；部分 route（例如 `/api/query` stream）不一定回 JSON，需轉為本地化錯誤訊息
 - Android 對預期 JSON 的 Web API 回應不可只看 HTTP 2xx；Vercel 對未部署的 method/path 可能回 `200 text/html`，必須確認 body 是 JSON object 才能更新本機狀態
 - Android 讀取 LLM profiles 使用 `LlmProfileRepository` 直接查 Supabase `llm_profiles`（RLS + `owner_id`），不要用 Web API Bearer token 做列表同步；Web API 保留給需要 server-side 加密的 create/delete
@@ -277,6 +277,19 @@ Conversation panel 輸入框左側有模型選擇按鈕（`Bot` icon），從 `/
 - 拖曳檔案到 textarea 觸發批次上傳
 - `uploadQueue` 狀態顯示每個檔案的進度（pending / uploading / done / error）
 - 每個檔案獨立呼叫 `/api/ingest`（`kind: 'text'`），支援 `profile_id` 覆寫
+
+## 筆記／結構區
+
+- 工作區建立與頁面列表讀取時，會自動補齊 `notes/guide.md` 與 `_schema/{ingest,query,lint}.md` 的 metadata，避免「筆記／結構」看起來是空白壞掉
+- `notes/guide.md` 會用繁體中文說明：`notes/` 是使用者自己的筆記區，LLM 只讀不寫；目前需在 Google Drive 直接編輯
+- `_schema/*.md` 會在 UI 顯示為「匯入規則 / 查詢規則 / 健康檢查規則」
+- Web `PageViewer` 與 Android `MarkdownViewer` 都會把 wiki 內部連結留在同一個 App / 視窗內跳轉，不再強制另開新視窗
+
+## 工作區排序
+
+- `workspaces.sort_order`（migration `0005_workspace_sort_order.sql`）提供持久化自訂排序
+- Web 工作區選單支援 drag-and-drop 排序，經 `/api/workspaces/reorder`
+- Android 工作區選單支援上移 / 下移，走同一套排序 API，同步 Web / 手機順序
 
 ## 全文搜尋
 

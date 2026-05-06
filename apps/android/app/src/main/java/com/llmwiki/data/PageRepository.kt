@@ -4,6 +4,9 @@ import com.llmwiki.data.room.AppDatabase
 import com.llmwiki.data.room.PageEntity
 import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.query.Order
+import io.ktor.client.request.header
+import io.ktor.client.request.post
+import io.ktor.client.statement.HttpResponse
 import kotlinx.coroutines.flow.Flow
 
 class PageRepository(
@@ -16,13 +19,15 @@ class PageRepository(
         db.pageDao().observePages(workspaceId, accountName)
 
     suspend fun syncPages(workspaceId: String, accountName: String) {
-        supabase.requireAccessToken(forceRefresh = true)
-        val rows: List<PageRow> = supabase.from("pages")
-            .select {
-                filter { eq("workspace_id", workspaceId) }
-                order("updated_at", order = Order.DESCENDING)
-            }
-            .decodeList()
+        ensureSystemPages(workspaceId)
+        val rows = withSupabaseRetry {
+            supabase.from("pages")
+                .select {
+                    filter { eq("workspace_id", workspaceId) }
+                    order("updated_at", order = Order.DESCENDING)
+                }
+                .decodeList<PageRow>()
+        }
 
         val entities = rows.map { row ->
             PageEntity(
@@ -57,11 +62,66 @@ class PageRepository(
     }
 
     suspend fun getWorkspaces(): List<WorkspaceRow> {
-        supabase.requireAccessToken(forceRefresh = true)
-        return supabase.from("workspaces")
-            .select {
-                order("created_at", order = Order.ASCENDING)
+        return runCatching {
+            withSupabaseRetry {
+                supabase.from("workspaces")
+                    .select {
+                        order("sort_order", order = Order.ASCENDING)
+                        order("created_at", order = Order.ASCENDING)
+                    }
+                    .decodeList<WorkspaceRow>()
             }
-            .decodeList()
+        }.recoverCatching {
+            if (!isMissingSortOrder(it)) throw it
+            withSupabaseRetry {
+                supabase.from("workspaces")
+                    .select {
+                        order("created_at", order = Order.ASCENDING)
+                    }
+                    .decodeList<WorkspaceRow>()
+            }
+        }.getOrThrow()
+    }
+
+    private suspend fun ensureSystemPages(workspaceId: String) {
+        runCatching {
+            var accessToken = supabase.requireAccessToken(forceRefresh = false)
+                ?: supabase.requireAccessToken(forceRefresh = true)
+                ?: return
+
+            var response = postEnsureSystemPages(accessToken, workspaceId)
+            if (response.status.value == 401) {
+                accessToken = supabase.requireAccessToken(forceRefresh = true) ?: return
+                response = postEnsureSystemPages(accessToken, workspaceId)
+            }
+
+            // This endpoint is a compatibility nicety, not a hard requirement.
+            if (response.status.value !in 200..299) return
+        }
+    }
+
+    private suspend fun postEnsureSystemPages(accessToken: String, workspaceId: String): HttpResponse =
+        AndroidHttpClient.instance.post("${com.llmwiki.BuildConfig.WEB_API_BASE_URL.trimEnd('/')}/api/workspaces/$workspaceId/ensure-system-pages") {
+            header("Authorization", "Bearer $accessToken")
+        }
+
+    private suspend fun <T> withSupabaseRetry(block: suspend () -> T): T {
+        supabase.requireAccessToken(forceRefresh = false) ?: supabase.requireAccessToken(forceRefresh = true)
+        return runCatching { block() }
+            .recoverCatching { error ->
+                if (!error.isSupabaseAuthProblem()) throw error
+                supabase.requireAccessToken(forceRefresh = true) ?: throw error
+                block()
+            }
+            .getOrThrow()
+    }
+
+    private fun isMissingSortOrder(error: Throwable): Boolean {
+        val message = error.message.orEmpty()
+        return message.contains("sort_order", ignoreCase = true) &&
+            (
+                message.contains("column", ignoreCase = true) ||
+                    message.contains("schema cache", ignoreCase = true)
+                )
     }
 }

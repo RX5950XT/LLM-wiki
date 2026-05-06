@@ -19,6 +19,7 @@ import com.llmwiki.data.SupabaseClientProvider
 import com.llmwiki.data.WorkspaceRow
 import com.llmwiki.data.buildDriveReconnectUrl
 import com.llmwiki.data.isDriveReconnectError
+import com.llmwiki.data.isSupabaseAuthProblem
 import com.llmwiki.data.room.AppDatabase
 import com.llmwiki.data.room.PageEntity
 import com.llmwiki.sync.SyncWorker
@@ -274,6 +275,14 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
+    }
+
+    fun moveWorkspaceUp(workspace: WorkspaceRow) {
+        reorderWorkspace(workspace, -1)
+    }
+
+    fun moveWorkspaceDown(workspace: WorkspaceRow) {
+        reorderWorkspace(workspace, 1)
     }
 
     fun syncPages(wsId: String? = workspaceId.value) {
@@ -831,11 +840,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun Throwable.toUserFacingMessage(fallback: String): String {
         val detail = message ?: return fallback
-        return if (
-            detail.contains("Unauthorized", ignoreCase = true) ||
-            detail.contains("JWT", ignoreCase = true) ||
-            detail.contains("auth", ignoreCase = true)
-        ) {
+        return if (isSupabaseAuthProblem()) {
             unauthorizedMessage()
         } else if (
             detail.contains("timeout", ignoreCase = true) ||
@@ -858,13 +863,82 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
     private suspend fun sendAuthorizedRequest(
         request: suspend (String) -> HttpResponse,
     ): HttpResponse? {
-        var accessToken = supabase.requireAccessToken(forceRefresh = true) ?: return null
+        var accessToken = supabase.requireAccessToken(forceRefresh = false)
+            ?: supabase.requireAccessToken(forceRefresh = true)
+            ?: return null
         var response = request(accessToken)
         if (response.status.value == 401) {
             accessToken = supabase.requireAccessToken(forceRefresh = true) ?: return response
             response = request(accessToken)
         }
         return response
+    }
+
+    private fun reorderWorkspace(workspace: WorkspaceRow, delta: Int) {
+        val current = _uiState.value.workspaces
+        val fromIndex = current.indexOfFirst { it.id == workspace.id }
+        val toIndex = fromIndex + delta
+        if (fromIndex < 0 || toIndex !in current.indices) return
+
+        val reordered = current.toMutableList().apply {
+            add(toIndex, removeAt(fromIndex))
+        }
+
+        viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    workspaces = reordered,
+                    workspace = reordered.firstOrNull { item -> item.id == _uiState.value.workspace?.id },
+                    workspaceActionLoading = true,
+                    syncError = null,
+                )
+            }
+
+            try {
+                val bodyJson = buildJsonObject {
+                    put("workspace_ids", buildJsonArray {
+                        reordered.forEach { add(JsonPrimitive(it.id)) }
+                    })
+                }.toString()
+                val response = sendAuthorizedRequest { accessToken ->
+                    AndroidHttpClient.instance.patch(webApiUrl("/api/workspaces/reorder")) {
+                        header("Authorization", "Bearer $accessToken")
+                        contentType(ContentType.Application.Json)
+                        setBody(bodyJson)
+                    }
+                } ?: run {
+                    _uiState.update {
+                        it.copy(
+                            workspaces = current,
+                            workspaceActionLoading = false,
+                            syncError = unauthorizedMessage(),
+                        )
+                    }
+                    return@launch
+                }
+                val text = response.bodyAsText()
+                if (response.status.value !in 200..299) {
+                    _uiState.update {
+                        it.copy(
+                            workspaces = current,
+                            workspaceActionLoading = false,
+                            syncError = parseApiError(text, "Failed to reorder workspace"),
+                        )
+                    }
+                    return@launch
+                }
+
+                _uiState.update { it.copy(workspaceActionLoading = false, syncError = null) }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        workspaces = current,
+                        workspaceActionLoading = false,
+                        syncError = e.toUserFacingMessage("Failed to reorder workspace"),
+                    )
+                }
+            }
+        }
     }
 }
 

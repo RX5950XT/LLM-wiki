@@ -142,6 +142,17 @@ Query API 文字串流結尾附加 `\x00CITATIONS\x00["entities/karpathy.md",...
 ### Drive Token 失效處理
 `create-form.tsx` 偵測 403 + "Google Drive" → 顯示「Re-connect Google Drive」按鈕 → `signInWithOAuth({ prompt: 'consent', access_type: 'offline' })` → auth/callback 重新儲存 refresh token。
 
+### 筆記／結構區
+- 工作區建立與頁面列表讀取時，會自動補齊 `notes/guide.md` 與 `_schema/{ingest,query,lint}.md` 的 metadata，避免「筆記／結構」區看起來像空白故障
+- `notes/guide.md` 以繁體中文說明：`notes/` 是使用者筆記區，LLM 只讀不寫；目前需在 Google Drive 直接編輯
+- `_schema/*.md` 在 UI 內顯示為「匯入規則 / 查詢規則 / 健康檢查規則」
+- Web 與 Android 的 markdown 內部連結都應留在同一個 App / 視窗內跳轉，不另開新視窗
+
+### 工作區排序
+- `workspaces.sort_order`（`0005_workspace_sort_order.sql`）保存使用者自訂順序
+- Web 工作區選單支援 drag-and-drop 重排，API 為 `/api/workspaces/reorder`
+- Android 工作區選單支援上移 / 下移，走同一套排序 API
+
 ## 安全注意事項
 
 | 嚴重度 | 位置 | 問題 | 修復 |
@@ -162,7 +173,7 @@ Query API 文字串流結尾附加 `\x00CITATIONS\x00["entities/karpathy.md",...
 - `AppPreferencesRepository` 必須共用同一個 `preferencesDataStore`；不要在 Activity 與 ViewModel 各自用 `PreferenceDataStoreFactory.create()` 開同一個檔案，否則設定頁會直接閃退
 - Android 語言切換需由 `AppCompatActivity` 在 `setContent` 前先套用已儲存 locale，且只在 `toLanguageTags()` 真正變動時呼叫 `AppCompatDelegate.setApplicationLocales()`，否則會造成切換失效或啟動閃黑
 - Android 呼叫 Web API 時要先用 `requireAccessToken()` 取 token；若目前 token 為空但 session 仍在，要先 refresh，再於 401 時再 refresh 重試一次，直接拿舊 access token 容易讓設定頁與 LLM profiles 同步失敗
-- Android 呼叫 Web API 前應使用 `requireAccessToken(forceRefresh = true)`，直接 Supabase PostgREST 查詢（例如 pages/workspaces）也要先 refresh session，避免首頁偶發「登入狀態已失效」紅字
+- Android 呼叫 Web API / Supabase PostgREST 時應先用 `requireAccessToken(forceRefresh = false)` 取現有 token；只有 token 為空或收到 401 才以 `forceRefresh=true` 重試。`refreshCurrentSession()` 必須透過共用 mutex 序列化，避免多個初始化流程同時 refresh 導致 refresh token 競爭並出現「登入狀態已失效」。
 - Android Web API 錯誤解析要處理純文字 `Unauthorized`；部分 route（例如 `/api/query` stream）不一定回 JSON，需轉為本地化錯誤訊息
 - Android 對預期 JSON 的 Web API 回應不可只看 HTTP 2xx；Vercel 對未部署的 method/path 可能回 `200 text/html`，必須確認 body 是 JSON object 才能更新本機狀態
 - Android 讀取 LLM profiles 使用 `LlmProfileRepository` 直接查 Supabase `llm_profiles`（RLS + `owner_id`），不要用 Web API Bearer token 做列表同步；Web API 保留給需要 server-side 加密的 create/delete
@@ -212,13 +223,13 @@ Query API 文字串流結尾附加 `\x00CITATIONS\x00["entities/karpathy.md",...
 <claude-mem-context>
 # Memory Context
 
-# [LLM-wiki] recent context, 2026-05-06 8:36am GMT+8
+# [LLM-wiki] recent context, 2026-05-07 6:42am GMT+8
 
 Legend: 🎯session 🔴bugfix 🟣feature 🔄refactor ✅change 🔵discovery ⚖️decision 🚨security_alert 🔐security_note
 Format: ID TIME TYPE TITLE
 Fetch details: get_observations([IDs]) | Search: mem-search skill
 
-Stats: 50 obs (9,903t read) | 924,076t work | 99% savings
+Stats: 50 obs (9,248t read) | 2,520,088t work | 100% savings
 
 ### Apr 28, 2026
 S27 Google Drive 重連按鈕仍無效（第二輪修復）：深入調查環境變數與 token 儲存靜默失敗問題 (Apr 28, 7:49 PM)
@@ -231,49 +242,14 @@ S33 Fix Google Drive OAuth redirect loop in workspace creation and chat flows; r
 ### May 3, 2026
 S34 Debug `invalid_client` Google OAuth error after redirect loop fix — GCP OAuth client credentials mismatch (May 3, 5:11 PM)
 S35 繼續 LLM-wiki 開發 — 升級 PageViewer 支援 Markdown 渲染並恢復 Realtime 監聽 (May 3, 5:12 PM)
-### May 4, 2026
-569 7:06p 🔵 主 session 瀏覽器分頁全景：跨 Supabase、GCP、Vercel 多服務同步工作
-570 7:07p 🔵 生產環境截圖確認新部署已生效（pre 標籤渲染）
-571 7:09p 🔵 workspace-shell.tsx 確認 useRealtimePages 位置與 settings 預取
 ### May 5, 2026
-572 12:42a 🔵 PageViewer component renders wiki content as plain text, not parsed Markdown
-573 " 🔵 WorkspaceShell is a three-panel layout with Realtime temporarily disabled
-574 " 🔵 react-markdown installed but not used — PageViewer renders plain text instead
-575 12:43a 🟣 PageViewer upgraded from plain-text pre tag to ReactMarkdown with GFM and wiki:// link routing
-576 " 🟣 stripFrontmatterAndWikilinks function added to PageViewer — YAML frontmatter stripped and [[wikilinks]] converted to wiki:// URLs
-577 " 🔴 Supabase Realtime subscription re-enabled in WorkspaceShell
-578 " ✅ TypeScript typecheck passes after PageViewer Markdown upgrade and Realtime re-enable
-579 12:45a ✅ LLM-wiki Markdown rendering feature deployed to Vercel production
 S36 修復 .env.vercel.tmp 未排除問題、更新文件、從工作紀錄萃取可複用 Skills (May 5, 12:45 AM)
-580 1:39a 🔵 .env.vercel.tmp 應排除於版本控制
-581 " ✅ 審查工作紀錄以建立可複用 Skills
-582 " 🔵 LLM-wiki .gitignore 缺少 .env.vercel.tmp 排除規則
-583 " 🔴 補充 .env.vercel.tmp 至 .gitignore
-584 " 🟣 建立兩個新 Claude Code Skills 資料夾
-585 1:40a 🟣 建立 google-oauth-supabase-debug Skill
-586 " 🟣 建立 react-markdown-wiki Skill
-587 " 🔵 LLM-wiki 專案架構與 Citation 串流協定
-588 1:41a ✅ 更新 CLAUDE.md 記錄 Markdown 渲染與 .env.vercel.tmp 規範
-589 1:43a 🔵 Skills 系統存在兩個目錄：~/.claude/skills/ 與 ~/.agents/skills/
-590 1:44a ✅ 新 Skills 複製至 ~/.agents/skills/ 並同步更新 AGENTS.md
 S37 修復 .env.vercel.tmp gitignore、更新文件、從工作紀錄萃取 Skills 並同步至正確目錄 (May 5, 1:44 AM)
 ### May 6, 2026
-591 2:40a 🔵 LLM-wiki Android App 現有檔案結構盤點
-592 " 🔵 CLAUDE.md 確認 Android App 落後網頁版至少 Phase 11 功能
-593 " 🔵 AuthViewModel 使用舊版 GoogleSignIn API 而非 CredentialManager
-594 2:41a 🔵 Android WikiViewModel 缺少模型選擇器與搜尋功能，strings.xml 有設定頁字串但無對應畫面
-595 " 🔵 Explore Agent 完成 Android App 功能完整稽核報告
-596 2:42a 🔵 繁體中文字串資源嚴重不完整，English strings.xml 有 42 條，zh-rTW 僅有 16 條
-597 2:43a 🔵 GET /api/settings/profiles 回傳格式確認，Android 需呼叫此端點取得模型列表
-598 " 🔵 GET /api/search 端點契約確認，Android 搜尋功能需呼叫此端點
-599 2:47a 🟣 新增 LlmProfile 和 SearchResult 資料類別至 Models.kt
-600 2:48a 🟣 WikiViewModel 大規模擴充：新增搜尋、模型選擇器、多工作區切換功能
-601 " 🔵 WikiViewModel.kt 包含 literal null bytes 導致 grep 誤判為 binary file
-602 " 🟣 WikiScreen 重大功能升級：搜尋、工作區切換、LLM Profile 選擇器
+602 2:48a 🟣 WikiScreen 重大功能升級：搜尋、工作區切換、LLM Profile 選擇器
 603 " 🟣 新增 Settings 畫面（SettingsScreen + SettingsViewModel）
 604 " 🟣 NavGraph 新增 Settings 路由並串接 onNavigateToSettings
 605 " ✅ strings.xml（EN + zh-rTW）大幅擴充新功能字串
-606 " 🔵 Android 專案缺少 gradlew / gradlew.bat — gradle-wrapper.jar 從 GitHub raw 下載補齊
 607 2:59a 🔴 WikiScreen 修正 SwapHoriz 未使用 import 並將工作區切換按鈕改為 TextButton
 608 6:51a 🔵 Android App 功能完整稽核報告
 609 " 🔵 後端 API 契約確認：搜尋與 LLM Profile 端點
@@ -286,6 +262,41 @@ S37 修復 .env.vercel.tmp gitignore、更新文件、從工作紀錄萃取 Skil
 617 7:34a 🔵 工作區功能缺陷與 UI 問題清單確認
 616 " 🔵 Claude 的瀏覽器為無頭瀏覽器，使用者不可見
 618 7:36a 🔵 Android app still hitting HTML 404 for workspace API routes post-deploy
+### May 7, 2026
+619 5:08a 🔵 Wiki 介面多項問題彙整（繁中模式）
+620 5:09a 🔵 Wiki 頁面導航依賴 React State 而非 URL 路由
+621 " 🔵 PageTree 定義三個 Zone：wiki、notes、schema
+622 " 🔵 Android WikiScreen 側邊欄缺少 Zone 分組，導致筆記／結構條目不顯示
+623 " 🔵 zh-TW.json：wiki.index 與 wiki.log 已有中文翻譯，但 zoneWiki 仍為英文
+624 " 🔵 PageViewer：[[wikilink]] 轉換為 wiki:// 協定，點擊觸發 setActivePage 而非 URL 跳轉
+625 5:10a 🔵 Wiki Index 與 Log 初始內容硬編碼為英文，儲存於 drive-schema 套件
+626 " 🔵 工作區 Drive 資料夾結構與頁面 Zone 分配
+627 5:11a 🔵 Android PageEntity 缺少 zone 欄位，無法在本地資料庫實作 Zone 分組
+628 " 🔵 Workspace 頁面查詢包含 zone 欄位，頁面依 updated_at 降序排列（最多 200 筆）
+629 5:12a 🔵 Android Room 資料庫版本 3，新增 zone 欄位需要 MIGRATION_3_4
+630 5:13a 🔵 Android PageRow 已有 zone 欄位，但 syncPages() 轉換時丟棄 zone 值
+631 5:14a 🔵 Android strings.xml 為英文預設資源，尚無 zh-TW 翻譯資源目錄
+632 " 🔵 Android values-zh-rTW/strings.xml 已存在且完整，wiki_index/wiki_log 均已翻譯
+633 5:15a ✅ INITIAL_INDEX_CONTENT 與 INITIAL_LOG_CONTENT 改為繁體中文
+634 5:16a ✅ 工作區建立 API 新增 title 欄位，zh-TW 翻譯更新索引與日誌名稱
+635 " 🟣 PageTree 重構：index.md 與 log.md 固定置頂，獨立於 Zone 分組之外
+636 " 🟣 Workspace 頁面新增 ?page= query string 支援，實現 URL 路由初始化
+637 6:03a 🟣 Page navigation syncs URL query param via selectPage
+638 " 🟣 Android Room DB: zone field added to pages table (migration v3→v4)
+639 " 🟣 Android WikiScreen drawer: zone-based page grouping with pinned index/log
+640 " 🟣 Production deployment to Vercel succeeded with all zone/URL routing changes
+641 6:22a 🔵 「筆記」與「結構」Zone 空白問題根因確認
+642 " 🟣 Wiki 工作區 URL 路由支援（?page= query string）
+643 " 🟣 Wiki 初始內容與索引名稱全面繁體中文化
+644 " 🟣 PageTree 重構：Index 與 Log 固定置頂，獨立於 Zone 分組
+645 " 🟣 Android Room DB 遷移 v3→v4：新增 zone 欄位
+646 " 🟣 Vercel 生產環境部署成功（Zone 路由 + URL 路由全功能版）
+647 6:23a 🔵 「筆記」與「結構」Zone 空白的根本原因：初始頁面播種僅覆蓋 wiki Zone
+648 " 🟣 新增 ensureWorkspaceSystemPages：三個 Zone 的冪等系統頁面播種
+649 " 🟣 工作區排序支援：sort_order 欄位 + 拖移排序（Web）+ 上下移動（Android）
+650 " 🟣 PageViewer 全面升級：heading anchors、[[slug#anchor]] 支援、當前視窗導航
+651 " 🟣 PageTree 新增 Zone 使用說明提示與空狀態文字
+652 " 🟣 新增多個後端端點支援系統頁面補齊與工作區排序
 
-Access 924k tokens of past work via get_observations([IDs]) or mem-search skill.
+Access 2520k tokens of past work via get_observations([IDs]) or mem-search skill.
 </claude-mem-context>

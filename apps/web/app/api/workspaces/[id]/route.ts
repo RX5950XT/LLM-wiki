@@ -36,7 +36,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     .update({ name: parsed.data.name.trim(), updated_at: new Date().toISOString() })
     .eq('id', workspaceId.data)
     .eq('owner_id', user.id)
-    .select('id, name, description, drive_folder_id, default_profile_id, created_at')
+    .select('id, name, description, drive_folder_id, default_profile_id, sort_order, created_at')
     .maybeSingle();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

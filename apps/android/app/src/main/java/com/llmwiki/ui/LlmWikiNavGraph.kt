@@ -25,6 +25,8 @@ import com.llmwiki.ExternalEvent
 import com.llmwiki.R
 import com.llmwiki.data.WorkspaceRow
 import com.llmwiki.data.SupabaseClientProvider
+import com.llmwiki.data.isSupabaseAuthProblem
+import com.llmwiki.data.requireAccessToken
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.postgrest.from
 import com.llmwiki.ui.auth.AuthScreen
@@ -126,6 +128,16 @@ private fun LaunchRoute(
         }
 
         val workspaceId = runCatching {
+            supabase.requireAccessToken(forceRefresh = false)
+                ?: supabase.requireAccessToken(forceRefresh = true)
+            supabase.from("workspaces")
+                .select()
+                .decodeList<WorkspaceRow>()
+                .firstOrNull()
+                ?.id
+        }.recoverCatching { error ->
+            if (!error.isSupabaseAuthProblem()) throw error
+            supabase.requireAccessToken(forceRefresh = true)
             supabase.from("workspaces")
                 .select()
                 .decodeList<WorkspaceRow>()

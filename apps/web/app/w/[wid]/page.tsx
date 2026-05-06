@@ -1,4 +1,6 @@
 import { redirect } from 'next/navigation';
+import { createDriveClientForUser, isGoogleDriveAuthError } from '@/lib/google/drive-auth';
+import { ensureWorkspaceSystemPages } from '@/lib/drive/system-pages';
 import { createClient } from '@/lib/supabase/server';
 import { WorkspaceShell } from './workspace-shell';
 
@@ -17,22 +19,40 @@ export default async function WorkspacePage({ params, searchParams }: WorkspaceP
 
   if (!user) redirect('/login');
 
-  const [{ data: workspace }, { data: workspaces }, { data: pages }] = await Promise.all([
+  const [{ data: workspace }, { data: workspaces }] = await Promise.all([
     supabase.from('workspaces').select('id, name').eq('id', wid).single(),
     supabase
       .from('workspaces')
-      .select('id, name')
+      .select('id, name, sort_order')
       .eq('owner_id', user.id)
+      .order('sort_order', { ascending: true })
       .order('created_at', { ascending: true }),
-    supabase
-      .from('pages')
-      .select('slug, title, kind, zone')
-      .eq('workspace_id', wid)
-      .order('updated_at', { ascending: false })
-      .limit(200),
   ]);
 
   if (!workspace) redirect('/w');
+
+  const workspaceRootId = await supabase
+    .from('workspaces')
+    .select('drive_folder_id')
+    .eq('id', wid)
+    .single()
+    .then(({ data }) => data?.drive_folder_id);
+
+  if (workspaceRootId) {
+    try {
+      const drive = await createDriveClientForUser(user.id);
+      await ensureWorkspaceSystemPages(drive, wid, workspaceRootId);
+    } catch (error) {
+      if (!isGoogleDriveAuthError(error)) throw error;
+    }
+  }
+
+  const { data: pages } = await supabase
+    .from('pages')
+    .select('slug, title, kind, zone')
+    .eq('workspace_id', wid)
+    .order('updated_at', { ascending: false })
+    .limit(200);
 
   return (
     <WorkspaceShell

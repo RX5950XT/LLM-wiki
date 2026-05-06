@@ -86,3 +86,37 @@ created: ${new Date().toISOString().slice(0, 10)}
 
 依時間順序記錄每次匯入、對話與健康檢查的結果。僅供追加，不可修改歷史記錄。
 `;
+
+export const INITIAL_NOTES_GUIDE_CONTENT = `---
+title: "筆記使用說明"
+kind: note
+created: ${new Date().toISOString().slice(0, 10)}
+---
+
+# 筆記使用說明
+
+「筆記」區是給你自己寫的內容，LLM 只會讀，不會改。
+
+## 適合放什麼
+
+- 會議紀錄
+- 臨時想法
+- 個人判斷
+- 尚未整理完成的草稿
+
+## 如何編輯
+
+目前 App 內不提供直接編輯筆記。
+
+請到你的 Google Drive：
+
+\`Apps / LLM Wiki / 你的工作區 / notes/\`
+
+用 Google Docs、Obsidian、VS Code 或任何 Markdown 編輯器修改。
+
+## 與 Wiki 的差別
+
+- \`wiki/\`：由 LLM 維護的知識頁
+- \`notes/\`：由你維護的個人筆記
+- \`_schema/\`：控制 LLM 行為的規則與提示詞
+`;
