@@ -159,7 +159,8 @@ fun WikiScreen(
             }
             return@rememberLauncherForActivityResult
         }
-        val fileName = readDisplayName(context, uri) ?: "Imported file"
+        val fileName = readDisplayName(context, uri)
+            ?: context.getString(R.string.wiki_imported_file)
         wikiViewModel.ingestText(fileName, fileContent) { success ->
             scope.launch {
                 snackbarHostState.showSnackbar(
@@ -406,15 +407,15 @@ fun WikiScreen(
                     horizontalArrangement = Arrangement.SpaceEvenly,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    IconButton(
-                        onClick = { wikiViewModel.signOut() },
-                        colors = IconButtonDefaults.iconButtonColors(
-                            contentColor = MaterialTheme.colorScheme.error,
-                        ),
-                    ) {
+                    IconButton(onClick = {
+                        wikiViewModel.runLint()
+                        scope.launch {
+                            snackbarHostState.showSnackbar(context.getString(R.string.wiki_lint_started))
+                        }
+                    }) {
                         Icon(
-                            Icons.AutoMirrored.Filled.Logout,
-                            contentDescription = stringResource(R.string.auth_sign_out),
+                            Icons.Default.Refresh,
+                            contentDescription = stringResource(R.string.wiki_lint),
                         )
                     }
                     IconButton(onClick = { showHelpDialog = true }) {
@@ -430,6 +431,17 @@ fun WikiScreen(
                         Icon(
                             Icons.Default.Settings,
                             contentDescription = stringResource(R.string.settings_title),
+                        )
+                    }
+                    IconButton(
+                        onClick = { wikiViewModel.signOut() },
+                        colors = IconButtonDefaults.iconButtonColors(
+                            contentColor = MaterialTheme.colorScheme.error,
+                        ),
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.Logout,
+                            contentDescription = stringResource(R.string.auth_sign_out),
                         )
                     }
                 }
@@ -609,7 +621,11 @@ fun WikiScreen(
                 if (isUrl(text)) {
                     wikiViewModel.ingestUrl(text, onDone)
                 } else {
-                    wikiViewModel.ingestText(extractTitle(text), text, onDone)
+                    wikiViewModel.ingestText(
+                        extractTitle(text, context.getString(R.string.wiki_untitled)),
+                        text,
+                        onDone,
+                    )
                 }
             },
         )
@@ -1190,19 +1206,34 @@ private fun isUrl(text: String): Boolean = try {
     u.protocol == "http" || u.protocol == "https"
 } catch (_: Exception) { false }
 
-private fun extractTitle(text: String): String =
+private fun extractTitle(text: String, fallbackTitle: String): String =
     text.lines()
         .firstOrNull { it.trim().isNotEmpty() }
         ?.trimStart('#', ' ')
         ?.trim()
         ?.take(80)
-        ?: "Untitled"
+        ?: fallbackTitle
+
+private const val MAX_IMPORT_BYTES = 2 * 1024 * 1024L
 
 private fun readTextFromUri(context: android.content.Context, uri: Uri): String? =
     runCatching {
-        context.contentResolver.openInputStream(uri)?.use { stream ->
-            stream.readBytes().toString(Charsets.UTF_8)
-        }
+        val fileSize = readFileSize(context, uri)
+        if (fileSize != null && fileSize > MAX_IMPORT_BYTES) return null
+
+        context.contentResolver.openInputStream(uri)
+            ?.bufferedReader(Charsets.UTF_8)
+            ?.use { reader -> reader.readText() }
+    }.getOrNull()
+
+private fun readFileSize(context: android.content.Context, uri: Uri): Long? =
+    runCatching {
+        context.contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)
+            ?.use { cursor ->
+                if (!cursor.moveToFirst()) return@use null
+                val index = cursor.getColumnIndex(OpenableColumns.SIZE)
+                if (index >= 0 && !cursor.isNull(index)) cursor.getLong(index) else null
+            }
     }.getOrNull()
 
 private fun readDisplayName(context: android.content.Context, uri: Uri): String? =

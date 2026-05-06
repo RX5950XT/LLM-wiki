@@ -41,8 +41,8 @@ function isUrl(text: string): boolean {
   }
 }
 
-function extractTitle(text: string): string {
-  const line = text.split('\n').find((l) => l.trim().length > 0) ?? 'Untitled';
+function extractTitle(text: string, fallbackTitle: string): string {
+  const line = text.split('\n').find((l) => l.trim().length > 0) ?? fallbackTitle;
   return line.replace(/^#+\s*/, '').trim().slice(0, 80);
 }
 
@@ -78,7 +78,7 @@ export function ConversationPanel({
 
   const startDriveReconnect = useCallback(async () => {
     if (wasReconnected) {
-      const msg = 'Google Drive 重新授權後仍無法連線，請確認帳號已授予 Drive 存取權限後重試。';
+      const msg = t('workspace.driveReconnectFailed');
       setError(new Error(msg));
       setIngestError(msg);
       return;
@@ -87,7 +87,7 @@ export function ConversationPanel({
     try {
       await reconnectGoogleDrive(`/w/${workspaceId}`);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to start Google sign-in';
+      const msg = err instanceof Error ? err.message : t('workspace.startGoogleFailed');
       setDriveReconnectPending(false);
       setError(new Error(msg));
       setIngestError(msg);
@@ -171,7 +171,7 @@ export function ConversationPanel({
           body: JSON.stringify(payload),
         });
         const raw = await res.text();
-        let message = 'Ingest failed';
+        let message = t('ingest.failedGeneric');
         if (raw) {
           try {
             const data = JSON.parse(raw) as { error?: unknown };
@@ -190,7 +190,7 @@ export function ConversationPanel({
 
         return { ok: true };
       } catch {
-        return { ok: false, error: 'Ingest failed' };
+        return { ok: false, error: t('ingest.failedGeneric') };
       }
     },
     [workspaceId, selectedProfileId, startDriveReconnect],
@@ -223,12 +223,12 @@ export function ConversationPanel({
 
         try {
           const text = await file.text();
-          const result = await ingestText(extractTitle(text), text);
+          const result = await ingestText(extractTitle(text, t('common.untitled')), text);
 
           setUploadQueue((prev) =>
             prev.map((item, i) =>
               i === idx
-                ? { ...item, status: result.ok ? 'done' : 'error', error: result.ok ? undefined : result.error ?? 'Ingest failed' }
+                ? { ...item, status: result.ok ? 'done' : 'error', error: result.ok ? undefined : result.error ?? t('ingest.failedGeneric') }
                 : item,
             ),
           );
@@ -237,7 +237,7 @@ export function ConversationPanel({
             onSourceAdded?.();
           }
         } catch {
-          setUploadQueue((prev) => prev.map((item, i) => (i === idx ? { ...item, status: 'error', error: 'Read failed' } : item)));
+          setUploadQueue((prev) => prev.map((item, i) => (i === idx ? { ...item, status: 'error', error: t('ingest.fileReadError') } : item)));
         }
         idx++;
       }
@@ -331,7 +331,7 @@ export function ConversationPanel({
       const trimmed = ingestInput.trim();
       const payload = isUrl(trimmed)
         ? { kind: 'url' as const, url: trimmed, workspace_id: workspaceId, profile_id: selectedProfileId }
-        : { kind: 'text' as const, title: extractTitle(trimmed), content: trimmed, workspace_id: workspaceId, profile_id: selectedProfileId };
+        : { kind: 'text' as const, title: extractTitle(trimmed, t('common.untitled')), content: trimmed, workspace_id: workspaceId, profile_id: selectedProfileId };
 
       const res = await fetch('/api/ingest', {
         method: 'POST',
@@ -341,7 +341,7 @@ export function ConversationPanel({
       const data = await res.json();
 
       if (!res.ok) {
-        const message = data.error ?? 'Ingest failed';
+        const message = data.error ?? t('ingest.failedGeneric');
         setIngestError(message);
         if (res.status === 403 && isDriveReconnectError(message)) {
           await startDriveReconnect();
@@ -352,7 +352,7 @@ export function ConversationPanel({
         onSourceAdded?.();
       }
     } catch {
-      setIngestError('Ingest failed');
+      setIngestError(t('ingest.failedGeneric'));
     } finally {
       setIngesting(false);
     }
@@ -594,7 +594,7 @@ export function ConversationPanel({
         )}
         {driveReconnectPending && (
           <p className="text-xs" style={{ color: 'var(--fg-muted)' }}>
-            Google Drive reconnecting...
+            {t('common.reconnectingDrive')}
           </p>
         )}
         <div ref={bottomRef} />
@@ -620,7 +620,7 @@ export function ConversationPanel({
                   borderColor: 'var(--border)',
                   color: 'var(--fg)',
                 }}
-                title="Select model"
+                title={t('common.selectModel')}
               >
                 <Bot size={13} />
                 <span className="max-w-[80px] truncate">
@@ -639,7 +639,7 @@ export function ConversationPanel({
                   }}
                 >
                   <div className="px-3 py-2 text-xs font-medium" style={{ color: 'var(--fg-muted)' }}>
-                    Select model
+                    {t('common.selectModel')}
                   </div>
                   {profiles.map((p) => {
                     const isSelected = p.id === selectedProfileId;

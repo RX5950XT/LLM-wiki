@@ -48,10 +48,6 @@ fun AuthScreen(
         Unit
     }
 
-    LaunchedEffect(Unit) {
-        authViewModel.restoreSessionIfPossible()
-    }
-
     LaunchedEffect(state) {
         if (state is AuthState.Success) {
             onAuthenticated(state as AuthState.Success)
@@ -83,7 +79,6 @@ fun AuthScreen(
             Spacer(modifier = Modifier.height(40.dp))
 
             when (val s = state) {
-                is AuthState.Restoring -> CircularProgressIndicator()
                 is AuthState.Loading -> CircularProgressIndicator()
                 is AuthState.Error -> {
                     Text(

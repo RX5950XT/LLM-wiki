@@ -4,19 +4,16 @@ import android.content.Intent
 import android.os.Bundle
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AppCompatDelegate
+import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.activity.compose.setContent
-import androidx.activity.enableEdgeToEdge
-import com.llmwiki.data.AppLanguage
 import com.llmwiki.data.AppPreferencesRepository
-import com.llmwiki.data.SupabaseClientProvider
 import com.llmwiki.data.ThemeMode
-import io.github.jan.supabase.auth.auth
 import kotlinx.coroutines.runBlocking
 import com.llmwiki.ui.LlmWikiNavGraph
 import com.llmwiki.ui.theme.LlmWikiTheme
@@ -34,7 +31,6 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         val preferencesRepository = AppPreferencesRepository(applicationContext)
         val initialLanguage = runBlocking { preferencesRepository.getLanguage() }
-        runBlocking { runCatching { SupabaseClientProvider.client.auth.awaitInitialization() } }
         val currentLocales = AppCompatDelegate.getApplicationLocales().toLanguageTags()
         val targetLocales = initialLanguage.toLocaleList().toLanguageTags()
         if (currentLocales != targetLocales) {

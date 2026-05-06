@@ -1,13 +1,15 @@
 package com.llmwiki.ui.auth
 
+import android.app.Application
 import android.content.Context
 import android.content.Intent
-import androidx.lifecycle.ViewModel
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.android.gms.common.api.ApiException
 import com.llmwiki.BuildConfig
+import com.llmwiki.R
 import com.llmwiki.data.requireAccessToken
 import com.llmwiki.data.SupabaseClientProvider
 import io.github.jan.supabase.auth.auth
@@ -20,17 +22,15 @@ import kotlinx.coroutines.launch
 
 sealed interface AuthState {
     data object Idle : AuthState
-    data object Restoring : AuthState
     data object Loading : AuthState
     data class Success(val workspaceId: String?, val accountName: String) : AuthState
     data class Error(val message: String) : AuthState
 }
 
-class AuthViewModel : ViewModel() {
+class AuthViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _state = MutableStateFlow<AuthState>(AuthState.Idle)
     val state: StateFlow<AuthState> = _state
-    private var restoreAttempted = false
 
     private fun buildGoogleSignInOptions(): GoogleSignInOptions {
         val googleClientId = BuildConfig.GOOGLE_CLIENT_ID.trim()
@@ -40,45 +40,12 @@ class AuthViewModel : ViewModel() {
             .build()
     }
 
-    fun restoreSessionIfPossible() {
-        if (restoreAttempted) return
-        restoreAttempted = true
-
-        viewModelScope.launch {
-            _state.value = AuthState.Restoring
-            try {
-                val supabase = SupabaseClientProvider.client
-                supabase.auth.awaitInitialization()
-                val session = supabase.auth.currentSessionOrNull()
-                if (session != null) {
-                    supabase.requireAccessToken(forceRefresh = true)
-                }
-                val refreshedSession = supabase.auth.currentSessionOrNull()
-                val user = refreshedSession?.user
-                if (refreshedSession == null || user?.email.isNullOrBlank()) {
-                    _state.value = AuthState.Idle
-                    return@launch
-                }
-
-                val workspaces = supabase
-                    .from("workspaces")
-                    .select()
-                    .decodeList<com.llmwiki.data.WorkspaceRow>()
-
-                _state.value = AuthState.Success(
-                    workspaceId = workspaces.firstOrNull()?.id,
-                    accountName = user?.email.orEmpty(),
-                )
-            } catch (_: Exception) {
-                _state.value = AuthState.Idle
-            }
-        }
-    }
-
     fun createGoogleSignInIntent(context: Context): Intent? {
         val googleClientId = BuildConfig.GOOGLE_CLIENT_ID.trim()
         if (googleClientId.isBlank()) {
-            _state.value = AuthState.Error("Missing Google Web Client ID. Rebuild the Android app with GOOGLE_CLIENT_ID or GOOGLE_OAUTH_CLIENT_ID configured.")
+            _state.value = AuthState.Error(
+                getApplication<Application>().getString(R.string.auth_missing_google_client_id)
+            )
             return null
         }
 
@@ -99,7 +66,9 @@ class AuthViewModel : ViewModel() {
                     .getResult(ApiException::class.java)
                 val idToken = account.idToken
                 if (idToken.isNullOrBlank()) {
-                    _state.value = AuthState.Error("Google sign-in did not return an ID token. Verify GOOGLE_CLIENT_ID is the Web OAuth client ID.")
+                    _state.value = AuthState.Error(
+                        getApplication<Application>().getString(R.string.auth_missing_id_token)
+                    )
                     return@launch
                 }
 
@@ -120,7 +89,7 @@ class AuthViewModel : ViewModel() {
                 )
             } catch (e: ApiException) {
                 _state.value = AuthState.Error(
-                    "Google sign-in failed (${e.statusCode}). Verify the Android OAuth client package com.llmwiki and this build's SHA-1 in Google Cloud Console."
+                    getApplication<Application>().getString(R.string.auth_google_sign_in_failed, e.statusCode)
                 )
             } catch (e: Exception) {
                 _state.value = AuthState.Error(e.message ?: "Unknown error")

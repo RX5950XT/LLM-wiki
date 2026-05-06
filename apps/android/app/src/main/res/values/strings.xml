@@ -5,6 +5,9 @@
     <string name="auth_description">Your personal AI-maintained knowledge base. Wiki content lives in your own Google Drive.</string>
     <string name="auth_sign_in">Sign in with Google</string>
     <string name="auth_sign_out">Sign out</string>
+    <string name="auth_missing_google_client_id">Missing Google Web Client ID. Rebuild the Android app with GOOGLE_CLIENT_ID configured.</string>
+    <string name="auth_missing_id_token">Google sign-in did not return an ID token. Verify GOOGLE_CLIENT_ID is the Web OAuth client ID.</string>
+    <string name="auth_google_sign_in_failed">Google sign-in failed (%1$d). Verify the Android OAuth client package and SHA-1 in Google Cloud Console.</string>
     <string name="workspace_name">Workspace name</string>
     <string name="workspace_description">Description</string>
     <string name="workspace_create_title">Create workspace</string>
@@ -36,6 +39,8 @@
     <string name="wiki_chat_empty">Ask anything about your wiki</string>
     <string name="wiki_chat_input_hint">Ask about your wiki…</string>
     <string name="wiki_send">Send</string>
+    <string name="wiki_imported_file">Imported file</string>
+    <string name="wiki_untitled">Untitled</string>
     <string name="wiki_locked">Locked</string>
     <string name="wiki_unlocked">Unlocked</string>
     <string name="wiki_ingest_title">Ingest source</string>
@@ -52,6 +57,8 @@
     <string name="wiki_search_placeholder">Search pages…</string>
     <string name="wiki_search_close">Close search</string>
     <string name="wiki_search_empty">No results found</string>
+    <string name="wiki_lint">Run wiki health check</string>
+    <string name="wiki_lint_started">Wiki health check started</string>
     <string name="wiki_select_model">Select model</string>
     <string name="wiki_current_workspace">Current workspace</string>
 
@@ -102,6 +109,7 @@
     <string name="action_back">Back</string>
     <string name="action_refresh">Refresh</string>
     <string name="action_done">Done</string>
+    <string name="common_loading_placeholder">Loading…</string>
     <string name="error_unauthorized">Session expired. Please sign in again.</string>
     <string name="error_api_not_json">The server returned a web page instead of API JSON. Update the web backend and try again.</string>
     <string name="error_network_timeout">The network request took too long or was interrupted. Check your connection and try again.</string>

@@ -5,6 +5,9 @@
     <string name="auth_description">你的個人 AI 知識庫。Wiki 內容儲存在你自己的 Google Drive 中。</string>
     <string name="auth_sign_in">使用 Google 登入</string>
     <string name="auth_sign_out">登出</string>
+    <string name="auth_missing_google_client_id">缺少 Google Web Client ID。請用正確的 GOOGLE_CLIENT_ID 重新建置 Android App。</string>
+    <string name="auth_missing_id_token">Google 登入沒有回傳 ID token。請確認 GOOGLE_CLIENT_ID 使用的是 Web OAuth client ID。</string>
+    <string name="auth_google_sign_in_failed">Google 登入失敗（%1$d）。請確認 Google Cloud Console 內的 Android OAuth client 套件名稱與 SHA-1。</string>
     <string name="workspace_name">工作區名稱</string>
     <string name="workspace_description">描述</string>
     <string name="workspace_create_title">建立工作區</string>
@@ -36,6 +39,8 @@
     <string name="wiki_chat_empty">問問你的 Wiki 任何問題</string>
     <string name="wiki_chat_input_hint">問問你的 Wiki…</string>
     <string name="wiki_send">傳送</string>
+    <string name="wiki_imported_file">匯入檔案</string>
+    <string name="wiki_untitled">未命名</string>
     <string name="wiki_locked">已鎖定</string>
     <string name="wiki_unlocked">未鎖定</string>
     <string name="wiki_ingest_title">匯入來源</string>
@@ -52,6 +57,8 @@
     <string name="wiki_search_placeholder">搜尋頁面…</string>
     <string name="wiki_search_close">關閉搜尋</string>
     <string name="wiki_search_empty">找不到結果</string>
+    <string name="wiki_lint">執行 Wiki 健康檢查</string>
+    <string name="wiki_lint_started">已開始執行 Wiki 健康檢查</string>
     <string name="wiki_select_model">選擇模型</string>
     <string name="wiki_current_workspace">目前工作區</string>
 
@@ -102,6 +109,7 @@
     <string name="action_back">返回</string>
     <string name="action_refresh">重新整理</string>
     <string name="action_done">完成</string>
+    <string name="common_loading_placeholder">載入中…</string>
     <string name="error_unauthorized">登入狀態已失效，請重新登入。</string>
     <string name="error_api_not_json">後端回傳網頁而不是 API JSON。請更新並部署網頁版後再試。</string>
     <string name="error_network_timeout">網路請求等太久或連線中斷，請確認連線後再試一次。</string>

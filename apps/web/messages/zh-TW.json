@@ -8,7 +8,12 @@
     "edit": "編輯",
     "back": "返回",
     "settings": "設定",
-    "view": "查看"
+    "view": "查看",
+    "search": "搜尋",
+    "noResults": "沒有結果",
+    "selectModel": "選擇模型",
+    "reconnectingDrive": "Google Drive 重新連線中...",
+    "untitled": "未命名"
   },
   "auth": {
     "signIn": "使用 Google 登入",
@@ -21,6 +26,9 @@
     "create": "建立工作區",
     "name": "工作區名稱",
     "description": "描述",
+    "createFailed": "建立工作區失敗",
+    "driveReconnectFailed": "Google Drive 重新授權後仍無法連線，請確認帳號已授予 Drive 存取權限後重試。",
+    "startGoogleFailed": "無法啟動 Google 授權流程，請重新整理頁面後再試。",
     "noWorkspaces": "目前沒有工作區，建立一個開始使用吧。",
     "switchWorkspace": "切換工作區",
     "addWorkspace": "新增工作區",
@@ -73,14 +81,16 @@
     "fileLoaded": "已載入：{name}",
     "unsupportedType": "僅支援 .txt 與 .md 格式",
     "fileReadError": "讀取檔案失敗",
-    "fileTooLarge": "檔案需小於 2 MB"
+    "fileTooLarge": "檔案需小於 2 MB",
+    "failedGeneric": "匯入失敗"
   },
   "query": {
     "placeholder": "問問你的 Wiki 任何問題...",
     "fileBack": "存成綜合頁面",
     "sources": "來源",
     "empty": "問問你的 Wiki 任何問題…",
-    "thinking": "思考中…"
+    "thinking": "思考中…",
+    "searchWiki": "搜尋 Wiki..."
   },
   "settings": {
     "title": "設定",

@@ -86,6 +86,7 @@ export async function GET(request: NextRequest) {
   const { data: workspaces, error } = await supabase
     .from('workspaces')
     .select('id, name, description, created_at')
+    .eq('owner_id', user.id)
     .order('created_at', { ascending: true });
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

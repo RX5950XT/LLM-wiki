@@ -197,8 +197,8 @@ apps/android/app/src/main/java/com/llmwiki/
 - Android Web API 錯誤解析要處理純文字 `Unauthorized`；部分 route（例如 `/api/query` stream）不一定回 JSON，需轉為本地化錯誤訊息
 - Android 對預期 JSON 的 Web API 回應不可只看 HTTP 2xx；Vercel 對未部署的 method/path 可能回 `200 text/html`，必須確認 body 是 JSON object 才能更新本機狀態
 - Android 讀取 LLM profiles 使用 `LlmProfileRepository` 直接查 Supabase `llm_profiles`（RLS + `owner_id`），不要用 Web API Bearer token 做列表同步；Web API 保留給需要 server-side 加密的 create/delete
-- `MainActivity` 在 `setContent` 前要先 `awaitInitialization()`，讓已登入使用者啟動時能直接進 wiki，不先閃到登入畫面
-- Android `LlmWikiNavGraph` 若已存在 session，啟動時直接進 `wiki` route，不再先經登入頁轉圈；若工作區載入完成但為空，再轉去 `workspace-create`
+- `MainActivity` 不要在 `onCreate()` 用 `runBlocking` 等待 Supabase Auth 初始化；改由 `LlmWikiNavGraph` 的 launch route 非阻塞判定 session，避免啟動畫面卡住或黑屏
+- Android `LlmWikiNavGraph` 先進 `launch` route，再非阻塞判定導向 `auth` / `wiki` / `workspace-create`，已登入使用者不必先看登入頁轉圈
 - Android 登出與重新登入時，需同時清掉 `GoogleSignIn` 快取，否則再次登入不會跳出 Google 帳號選擇器
 - Android Wiki drawer 已改為工作區下拉選單；「建立工作區」整合進下拉內，檔案匯入除了文字/URL 也支援從手機選取文字檔直接 ingest
 - Android workspace 下拉選單需提供切換、新建、重新命名、刪除；刪除時清掉該 workspace 的 Room cache 並選下一個 workspace 或回建立頁
@@ -207,10 +207,13 @@ apps/android/app/src/main/java/com/llmwiki/
 - Android FAB 要明確設定 `containerColor` / `contentColor`，不要依賴預設 primaryContainer；淺色模式容易出現不自然白色塊
 - Web API 若要同時服務 Web cookie 與 Android Bearer token，route 需經 `lib/supabase/request.ts` 取 user，不能只靠 `lib/supabase/server.ts`
 - `lib/supabase/request.ts` 驗證 Android Bearer token 時需用 admin client `auth.getUser(token)`，再回傳 bearer Supabase client 給 RLS 查詢；只用 anon/bearer client 驗證會造成有效 token 被判定 Unauthorized
-- Workspace 管理需 Web / Android 對齊：`PATCH /api/workspaces/[id]` 更新名稱，`DELETE /api/workspaces/[id]` 刪除 workspace；刪除會嘗試 trash Google Drive folder，但 Drive 清理失敗不阻擋 DB 刪除，僅回傳 warning
+- Workspace 管理需 Web / Android 對齊：`PATCH /api/workspaces/[id]` 更新名稱，`DELETE /api/workspaces/[id]` 刪除 workspace；刪除必須先成功 trash Google Drive folder 才能刪 DB，避免手機/Web/Drive 狀態不一致
 - Android 端 workspace 刪除只有在 API 回 `{ ok: true }` 後才能清本機 Room / UI 狀態；不可 optimistic remove，否則 production route 漏部署時會出現手機消失但 Web/Drive 仍存在
 - Android 共用 `AndroidHttpClient` 必須設定 Ktor timeout（connect 10s / socket 30s / request 60s），避免建立工作區或 API request 卡在 loading；timeout / DNS / connection abort 要轉成本地化網路錯誤
 - Android 切換、新建或刪除後切到下一個 workspace 時，`syncPagesInternal()` 後需自動選中 `index.md`（fallback `log.md`），避免停在「從選單選擇一個頁面」
+- Android 匯入本機文字檔要限制大小（與 Web 同級 2 MB）並以串流文字讀取，不可直接 `readBytes()` 全讀進記憶體，否則大檔容易卡頓
+- Web 三欄拖曳改用 `requestAnimationFrame` 批次套用寬度，避免每個 `mousemove` 都直接觸發整棵 shell 重渲染
+- 共用色票已從 soft violet 改為 teal-blue；若新增顏色請同步 `packages/ui/src/styles.css` 與 Android `ui/theme/Color.kt`
 - `Icons.AutoMirrored.Filled.List` 取代舊版 `Icons.Default.Menu`（Compose Material 3 方向性圖示）
 - `SyncWorker.schedule()` 使用 `ExistingPeriodicWorkPolicy.KEEP`（不重複排程同一個 workspace）
 - `PageRepository.syncPages()` 不再限制 200 筆，且會刪除本機 Room 中伺服器已不存在的頁面，避免 Android 側欄殘留舊頁

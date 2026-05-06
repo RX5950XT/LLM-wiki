@@ -40,16 +40,16 @@ export function CreateWorkspaceForm() {
       }
 
       if (!res.ok) {
-        const msg = typeof data?.error === 'string' ? data.error : 'Failed to create workspace';
+        const msg = typeof data?.error === 'string' ? data.error : t('createFailed');
         if (res.status === 403 && isDriveReconnectError(msg)) {
           if (wasReconnected) {
-            setError('Google Drive 重新授權後仍無法連線，請確認帳號已授予 Drive 存取權限後重試。');
+            setError(t('driveReconnectFailed'));
             return;
           }
           try {
             await reconnectGoogleDrive('/w/create');
           } catch {
-            setError('無法啟動 Google 授權流程，請重新整理頁面後再試。');
+            setError(t('startGoogleFailed'));
           }
           return;
         }
@@ -58,13 +58,13 @@ export function CreateWorkspaceForm() {
       }
 
       if (!data?.id) {
-        setError('Failed to create workspace');
+        setError(t('createFailed'));
         return;
       }
 
       router.push(`/w/${data.id}`);
     } catch {
-      setError('Failed to create workspace');
+      setError(t('createFailed'));
     } finally {
       setSubmitting(false);
     }

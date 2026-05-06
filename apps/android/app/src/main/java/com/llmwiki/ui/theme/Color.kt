@@ -17,13 +17,13 @@ val FgLight = Color(0xFF1C2128)     // oklch(20% 0.015 250)
 val FgMutedLight = Color(0xFF57606A) // oklch(45% 0.015 250)
 val BorderLight = Color(0xFFE6E3DC) // oklch(90% 0.005 90)
 
-// Single accent (both themes) — soft violet
-val Accent = Color(0xFFA78BFA)      // oklch(70% 0.15 295)
-val AccentDark = Color(0xFF8F79EA)
-val AccentContainerDark = Color(0xFF2B2540)
-val AccentContainerLight = Color(0xFFEAE4FF)
-val AccentOnContainerDark = Color(0xFFF0E9FF)
-val AccentOnContainerLight = Color(0xFF231844)
+// Shared accent — teal-blue
+val Accent = Color(0xFF5FD4E2)      // oklch(72% 0.14 205)
+val AccentDark = Color(0xFF2C8CA7)  // stronger action tone
+val AccentContainerDark = Color(0xFF11313C)
+val AccentContainerLight = Color(0xFFDDF6F8)
+val AccentOnContainerDark = Color(0xFFDCF7FB)
+val AccentOnContainerLight = Color(0xFF0F3340)
 val ErrorDark = Color(0xFFFFB4AB)
 val ErrorContainerDark = Color(0xFF5F1B16)
 val ErrorContainerLight = Color(0xFFFFDAD6)

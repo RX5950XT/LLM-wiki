@@ -52,6 +52,9 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
   const [leftWidth, setLeftWidth] = useState(240);
   const [rightWidth, setRightWidth] = useState(384);
   const dragging = useRef<{ side: 'left' | 'right'; startX: number; startWidth: number } | null>(null);
+  const dragFrame = useRef<number | null>(null);
+  const pendingLeftWidth = useRef<number | null>(null);
+  const pendingRightWidth = useRef<number | null>(null);
 
   const [showSearch, setShowSearch] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -134,18 +137,39 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
   }, [searchQuery, showSearch, workspaceId]);
 
   useEffect(() => {
+    const flushDragWidths = () => {
+      dragFrame.current = null;
+      if (pendingLeftWidth.current != null) {
+        setLeftWidth(pendingLeftWidth.current);
+        pendingLeftWidth.current = null;
+      }
+      if (pendingRightWidth.current != null) {
+        setRightWidth(pendingRightWidth.current);
+        pendingRightWidth.current = null;
+      }
+    };
+
     const onMove = (e: MouseEvent) => {
       if (!dragging.current) return;
       const { side, startX, startWidth } = dragging.current;
       const delta = e.clientX - startX;
       if (side === 'left') {
-        setLeftWidth(Math.max(160, Math.min(480, startWidth + delta)));
+        pendingLeftWidth.current = Math.max(160, Math.min(480, startWidth + delta));
       } else {
-        setRightWidth(Math.max(240, Math.min(600, startWidth - delta)));
+        pendingRightWidth.current = Math.max(240, Math.min(600, startWidth - delta));
+      }
+
+      if (dragFrame.current == null) {
+        dragFrame.current = window.requestAnimationFrame(flushDragWidths);
       }
     };
     const onUp = () => {
       if (!dragging.current) return;
+      if (dragFrame.current != null) {
+        window.cancelAnimationFrame(dragFrame.current);
+        dragFrame.current = null;
+      }
+      flushDragWidths();
       dragging.current = null;
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
@@ -153,6 +177,9 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
     return () => {
+      if (dragFrame.current != null) {
+        window.cancelAnimationFrame(dragFrame.current);
+      }
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
     };
@@ -358,8 +385,8 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
               onClick={() => setShowSearch((s) => !s)}
               className="rounded p-1 transition-all duration-100 hover:opacity-70 active:scale-90"
               style={{ color: showSearch ? 'var(--color-accent)' : 'var(--fg-muted)' }}
-              aria-label="Search"
-              title="Search"
+              aria-label={t('common.search')}
+              title={t('common.search')}
             >
               <Search size={16} />
             </button>
@@ -374,7 +401,7 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
                     autoFocus
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Search wiki..."
+                    placeholder={t('query.searchWiki')}
                     className="w-full rounded-md border px-3 py-1.5 text-sm outline-none"
                     style={{ background: 'var(--bg)', borderColor: 'var(--border)', color: 'var(--fg)' }}
                   />
@@ -407,7 +434,7 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
                 )}
                 {!searchLoading && searchQuery.trim().length >= 2 && searchResults.length === 0 && (
                   <div className="px-3 py-2 text-xs" style={{ color: 'var(--fg-muted)' }}>
-                    No results
+                    {t('common.noResults')}
                   </div>
                 )}
               </div>

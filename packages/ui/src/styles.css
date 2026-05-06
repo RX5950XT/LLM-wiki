@@ -1,6 +1,6 @@
 /**
  * LLM Wiki — base design tokens.
- * Linear / Raycast-inspired: dark-first, single accent (soft violet), OKLCH color space.
+ * LLM Wiki base tokens: ink + paper neutrals, teal-blue accent, OKLCH color space.
  *
  * Consumed by apps/web via @import. Tailwind v4 reads @theme blocks here too.
  */
@@ -18,10 +18,11 @@
   --color-fg-light: oklch(20% 0.015 250);
   --color-fg-light-muted: oklch(45% 0.015 250);
 
-  /* Accent (soft violet, applies to both themes) */
-  --color-accent: oklch(70% 0.15 295);
-  --color-accent-muted: oklch(70% 0.15 295 / 0.4);
-  --color-accent-glow: oklch(70% 0.15 295 / 0.18);
+  /* Accent (teal-blue, shared across themes) */
+  --color-accent: oklch(72% 0.14 205);
+  --color-accent-strong: oklch(63% 0.16 245);
+  --color-accent-muted: oklch(72% 0.14 205 / 0.34);
+  --color-accent-glow: oklch(72% 0.14 205 / 0.14);
 
   /* Borders */
   --color-border-dark: oklch(25% 0.01 250);

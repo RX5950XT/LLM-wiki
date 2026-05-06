@@ -66,7 +66,6 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
   if (lookupError) return NextResponse.json({ error: lookupError.message }, { status: 500 });
   if (!workspace) return NextResponse.json({ error: 'Workspace not found' }, { status: 404 });
 
-  let driveWarning: string | null = null;
   try {
     const drive = await createDriveClientForUser(user.id);
     await drive.files.update({
@@ -75,10 +74,14 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
       fields: 'id',
     });
   } catch (error) {
-    driveWarning = error instanceof Error ? error.message : 'Failed to trash Drive folder';
-    if (!isGoogleDriveAuthError(error)) {
-      console.warn('[DELETE /api/workspaces/[id]] Drive cleanup failed:', error);
-    }
+    const message = error instanceof Error ? error.message : 'Failed to trash Drive folder';
+    const status = isGoogleDriveAuthError(error) ? 403 : 409;
+    return NextResponse.json(
+      {
+        error: message,
+      },
+      { status },
+    );
   }
 
   const { error: deleteError } = await admin
@@ -88,5 +91,5 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
     .eq('owner_id', user.id);
 
   if (deleteError) return NextResponse.json({ error: deleteError.message }, { status: 500 });
-  return NextResponse.json({ ok: true, drive_warning: driveWarning });
+  return NextResponse.json({ ok: true });
 }

@@ -8,7 +8,12 @@
     "edit": "Edit",
     "back": "Back",
     "settings": "Settings",
-    "view": "View"
+    "view": "View",
+    "search": "Search",
+    "noResults": "No results",
+    "selectModel": "Select model",
+    "reconnectingDrive": "Google Drive reconnecting...",
+    "untitled": "Untitled"
   },
   "auth": {
     "signIn": "Sign in with Google",
@@ -21,6 +26,9 @@
     "create": "Create workspace",
     "name": "Workspace name",
     "description": "Description",
+    "createFailed": "Failed to create workspace",
+    "driveReconnectFailed": "Google Drive still cannot reconnect after reauthorization. Confirm Drive access is granted and try again.",
+    "startGoogleFailed": "Failed to start Google sign-in. Reload and try again.",
     "noWorkspaces": "No workspaces yet. Create one to get started.",
     "switchWorkspace": "Switch workspace",
     "addWorkspace": "New workspace",
@@ -73,14 +81,16 @@
     "fileLoaded": "Loaded: {name}",
     "unsupportedType": "Only .txt and .md files are supported",
     "fileReadError": "Failed to read file",
-    "fileTooLarge": "File must be under 2 MB"
+    "fileTooLarge": "File must be under 2 MB",
+    "failedGeneric": "Ingest failed"
   },
   "query": {
     "placeholder": "Ask your wiki anything...",
     "fileBack": "Save as synthesis page",
     "sources": "Sources",
     "empty": "Ask your wiki anything…",
-    "thinking": "Thinking…"
+    "thinking": "Thinking…",
+    "searchWiki": "Search wiki..."
   },
   "settings": {
     "title": "Settings",

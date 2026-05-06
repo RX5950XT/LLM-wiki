@@ -612,6 +612,36 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(synthesisSavedSlug = null) }
     }
 
+    fun runLint(onDone: (Boolean) -> Unit = {}) {
+        val wsId = workspaceId.value ?: return
+        viewModelScope.launch {
+            try {
+                val bodyJson = buildJsonObject {
+                    put("workspace_id", wsId)
+                }.toString()
+                val response = sendAuthorizedRequest { accessToken ->
+                    AndroidHttpClient.instance.post(webApiUrl("/api/lint")) {
+                        header("Authorization", "Bearer $accessToken")
+                        contentType(ContentType.Application.Json)
+                        setBody(bodyJson)
+                    }
+                } ?: return@launch
+                val text = response.bodyAsText()
+                if (response.status.value !in 200..299) {
+                    _uiState.update { it.copy(syncError = parseApiError(text, "Lint failed")) }
+                    onDone(false)
+                    return@launch
+                }
+
+                syncPages()
+                onDone(true)
+            } catch (e: Exception) {
+                _uiState.update { it.copy(syncError = e.toUserFacingMessage("Lint failed")) }
+                onDone(false)
+            }
+        }
+    }
+
     fun signOut() {
         viewModelScope.launch {
             val workspaceIds = _uiState.value.workspaces.map { it.id }
