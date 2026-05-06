@@ -7,6 +7,7 @@ import { ProfileList } from '@/components/settings/profile-list';
 import { ProfileForm } from '@/components/settings/profile-form';
 import { LocaleSwitcher } from '@/components/settings/locale-switcher';
 import { ThemeSwitcher } from '@/components/settings/theme-switcher';
+import { fetchOrderedWorkspaces } from '@/lib/workspaces/queries';
 
 export default async function SettingsPage() {
   const supabase = await createClient();
@@ -19,13 +20,11 @@ export default async function SettingsPage() {
       .select('id, name, base_url, model, is_default, created_at')
       .eq('owner_id', user.id)
       .order('created_at', { ascending: true }),
-    supabase
-      .from('workspaces')
-      .select('id')
-      .eq('owner_id', user.id)
-      .order('sort_order', { ascending: true })
-      .order('created_at', { ascending: true })
-      .limit(1),
+    fetchOrderedWorkspaces(supabase, {
+      select: 'id, sort_order, created_at',
+      ownerId: user.id,
+      limit: 1,
+    }),
   ]);
 
   const backHref = workspaces && workspaces.length > 0 ? `/w/${workspaces[0]!.id}` : '/w';

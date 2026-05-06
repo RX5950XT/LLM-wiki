@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { createClient } from '@/lib/supabase/server';
+import { fetchOrderedWorkspaces } from '@/lib/workspaces/queries';
 
 export default async function WorkspacesPage() {
   const supabase = await createClient();
@@ -11,11 +12,9 @@ export default async function WorkspacesPage() {
 
   if (!user) redirect('/login');
 
-  const { data: workspaces } = await supabase
-    .from('workspaces')
-    .select('id, name')
-    .order('sort_order', { ascending: true })
-    .order('created_at', { ascending: true });
+  const { data: workspaces } = await fetchOrderedWorkspaces(supabase, {
+    select: 'id, name, sort_order, created_at',
+  });
 
   if (workspaces && workspaces.length > 0) {
     redirect(`/w/${workspaces[0]?.id ?? ''}`);

@@ -6,6 +6,7 @@ import {
   createDriveClientForUser,
   isGoogleDriveAuthError,
 } from '@/lib/google/drive-auth';
+import { isMissingSortOrderError } from '@/lib/workspaces/queries';
 
 const UpdateWorkspaceSchema = z.object({
   name: z.string().min(1).max(100),
@@ -13,6 +14,16 @@ const UpdateWorkspaceSchema = z.object({
 
 type RouteContext = {
   params: Promise<{ id: string }>;
+};
+
+type WorkspaceUpdateRow = {
+  id: string;
+  name: string;
+  description: string | null;
+  drive_folder_id: string;
+  default_profile_id: string | null;
+  sort_order?: number | null;
+  created_at: string;
 };
 
 export async function PATCH(request: NextRequest, context: RouteContext) {
@@ -31,13 +42,27 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
 
-  const { data: workspace, error } = await supabase
+  const updated = await supabase
     .from('workspaces')
     .update({ name: parsed.data.name.trim(), updated_at: new Date().toISOString() })
     .eq('id', workspaceId.data)
     .eq('owner_id', user.id)
     .select('id, name, description, drive_folder_id, default_profile_id, sort_order, created_at')
     .maybeSingle();
+  let workspace = updated.data as WorkspaceUpdateRow | null;
+  let error = updated.error;
+
+  if (isMissingSortOrderError(error)) {
+    const retry = await supabase
+      .from('workspaces')
+      .update({ name: parsed.data.name.trim(), updated_at: new Date().toISOString() })
+      .eq('id', workspaceId.data)
+      .eq('owner_id', user.id)
+      .select('id, name, description, drive_folder_id, default_profile_id, created_at')
+      .maybeSingle();
+    workspace = retry.data as WorkspaceUpdateRow | null;
+    error = retry.error;
+  }
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   if (!workspace) return NextResponse.json({ error: 'Workspace not found' }, { status: 404 });

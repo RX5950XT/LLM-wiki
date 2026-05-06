@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import { createDriveClientForUser, isGoogleDriveAuthError } from '@/lib/google/drive-auth';
 import { ensureWorkspaceSystemPages } from '@/lib/drive/system-pages';
 import { createClient } from '@/lib/supabase/server';
+import { fetchOrderedWorkspaces } from '@/lib/workspaces/queries';
 import { WorkspaceShell } from './workspace-shell';
 
 interface WorkspacePageProps {
@@ -21,12 +22,10 @@ export default async function WorkspacePage({ params, searchParams }: WorkspaceP
 
   const [{ data: workspace }, { data: workspaces }] = await Promise.all([
     supabase.from('workspaces').select('id, name').eq('id', wid).single(),
-    supabase
-      .from('workspaces')
-      .select('id, name, sort_order')
-      .eq('owner_id', user.id)
-      .order('sort_order', { ascending: true })
-      .order('created_at', { ascending: true }),
+    fetchOrderedWorkspaces(supabase, {
+      select: 'id, name, sort_order, created_at',
+      ownerId: user.id,
+    }),
   ]);
 
   if (!workspace) redirect('/w');
@@ -54,11 +53,17 @@ export default async function WorkspacePage({ params, searchParams }: WorkspaceP
     .order('updated_at', { ascending: false })
     .limit(200);
 
+  const workspaceEntries = (workspaces ?? []).map((item) => ({
+    id: item.id,
+    name: item.name ?? 'Untitled',
+    sort_order: item.sort_order ?? undefined,
+  }));
+
   return (
     <WorkspaceShell
       workspaceId={workspace.id}
       workspaceName={workspace.name}
-      workspaces={workspaces ?? []}
+      workspaces={workspaceEntries}
       initialPages={pages ?? []}
       initialPage={initialPage ?? 'index.md'}
     />

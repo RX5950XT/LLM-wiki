@@ -152,6 +152,7 @@ Query API 文字串流結尾附加 `\x00CITATIONS\x00["entities/karpathy.md",...
 - `workspaces.sort_order`（`0005_workspace_sort_order.sql`）保存使用者自訂順序
 - Web 工作區選單支援 drag-and-drop 重排，API 為 `/api/workspaces/reorder`
 - Android 工作區選單支援上移 / 下移，走同一套排序 API
+- Web 首頁導頁、登入回跳與工作區列表查詢若遇到 production 尚未套用 `sort_order` 或 schema cache 未刷新，必須 fallback 至 `created_at`，不可誤判為沒有工作區
 
 ## 安全注意事項
 

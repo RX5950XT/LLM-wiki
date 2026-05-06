@@ -4,6 +4,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { createDriveClient } from '@/lib/drive/client';
 import { initWorkspaceDrive } from '@/lib/drive/workspace-init';
 import { getGoogleRefreshToken, saveGoogleRefreshToken } from '@/lib/google/oauth-token';
+import { fetchOrderedWorkspaces } from '@/lib/workspaces/queries';
 
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = new URL(request.url);
@@ -54,13 +55,11 @@ export async function GET(request: NextRequest) {
   }
 
   // Check if user already has a workspace
-  const { data: workspaces } = await admin
-    .from('workspaces')
-    .select('id')
-    .eq('owner_id', userId)
-    .order('sort_order', { ascending: true })
-    .order('created_at', { ascending: true })
-    .limit(1);
+  const { data: workspaces } = await fetchOrderedWorkspaces(admin, {
+    select: 'id, sort_order, created_at',
+    ownerId: userId,
+    limit: 1,
+  });
 
   if (workspaces && workspaces.length > 0) {
     const redirectTarget = isAppReconnect

@@ -290,6 +290,7 @@ Conversation panel 輸入框左側有模型選擇按鈕（`Bot` icon），從 `/
 - `workspaces.sort_order`（migration `0005_workspace_sort_order.sql`）提供持久化自訂排序
 - Web 工作區選單支援 drag-and-drop 排序，經 `/api/workspaces/reorder`
 - Android 工作區選單支援上移 / 下移，走同一套排序 API，同步 Web / 手機順序
+- Web 端任何首頁導頁、登入回跳或工作區列表查詢，若遇到 production 尚未套用 `sort_order` / schema cache 未刷新，必須 fallback 至 `created_at`，不可誤顯示「建立工作區」
 
 ## 全文搜尋
 

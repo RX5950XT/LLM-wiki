@@ -9,6 +9,11 @@ import {
   GOOGLE_DRIVE_REAUTH_MESSAGE,
   isGoogleDriveAuthError,
 } from '@/lib/google/drive-auth';
+import {
+  fetchOrderedWorkspaces,
+  getNextWorkspaceSortOrder,
+  isMissingSortOrderError,
+} from '@/lib/workspaces/queries';
 
 const CreateWorkspaceSchema = z.object({
   name: z.string().min(1).max(100),
@@ -32,21 +37,24 @@ export async function POST(request: NextRequest) {
 
     const { driveFolderId } = await initWorkspaceDrive(drive, workspaceId);
 
-    const { data: lastWorkspace } = await admin
-      .from('workspaces')
-      .select('sort_order')
-      .eq('owner_id', user.id)
-      .order('sort_order', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    const nextSortOrder = await getNextWorkspaceSortOrder(admin, user.id);
 
-    const { error: workspaceError } = await admin.from('workspaces').insert({
+    const workspaceRecord = {
       id: workspaceId,
       owner_id: user.id,
       name: parsed.data.name,
       drive_folder_id: driveFolderId,
-      sort_order: (lastWorkspace?.sort_order ?? -1) + 1,
-    });
+      ...(nextSortOrder == null ? {} : { sort_order: nextSortOrder }),
+    };
+
+    let { error: workspaceError } = await admin.from('workspaces').insert(workspaceRecord);
+    if (isMissingSortOrderError(workspaceError)) {
+      const { sort_order: _sortOrder, ...legacyWorkspaceRecord } = workspaceRecord as typeof workspaceRecord & {
+        sort_order?: number;
+      };
+      const retry = await admin.from('workspaces').insert(legacyWorkspaceRecord);
+      workspaceError = retry.error;
+    }
     if (workspaceError) throw new Error(`Failed to create workspace record: ${workspaceError.message}`);
 
     await ensureWorkspaceSystemPages(drive, workspaceId, driveFolderId);
@@ -84,12 +92,10 @@ export async function GET(request: NextRequest) {
   const { supabase, user } = await getRequestUser(request);
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const { data: workspaces, error } = await supabase
-    .from('workspaces')
-    .select('id, name, description, created_at, sort_order')
-    .eq('owner_id', user.id)
-    .order('sort_order', { ascending: true })
-    .order('created_at', { ascending: true });
+  const { data: workspaces, error } = await fetchOrderedWorkspaces(supabase, {
+    select: 'id, name, description, created_at, sort_order',
+    ownerId: user.id,
+  });
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ workspaces });
