@@ -12,6 +12,20 @@ import io.noties.markwon.Markwon
 import io.noties.markwon.ext.strikethrough.StrikethroughPlugin
 import io.noties.markwon.ext.tables.TablePlugin
 
+private fun stripFrontmatterAndWikilinks(content: String): String {
+    var result = content
+    if (result.startsWith("---")) {
+        val end = result.indexOf("\n---", startIndex = 3)
+        if (end != -1) {
+            result = result.substring(end + 4).trimStart()
+        }
+    }
+    return result.replace(Regex("""\[\[([^\]]+)]]""")) { match ->
+        val slug = match.groupValues[1]
+        "[$slug](wiki://$slug)"
+    }
+}
+
 @Composable
 fun MarkdownViewer(
     markdown: String,
@@ -41,7 +55,7 @@ fun MarkdownViewer(
         update = { view ->
             view.setTextColor(textColor)
             view.setLinkTextColor(linkColor)
-            markwon.setMarkdown(view, markdown)
+            markwon.setMarkdown(view, stripFrontmatterAndWikilinks(markdown))
         },
     )
 }
