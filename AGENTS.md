@@ -171,6 +171,7 @@ Query API 文字串流結尾附加 `\x00CITATIONS\x00["entities/karpathy.md",...
 - Android 登出時要同步清除 `GoogleSignIn` 快取，否則下次登入不會再出現 Google 帳號選擇器
 - Android Wiki drawer 使用工作區下拉選單；建立工作區整合在下拉內，並支援從手機附加文字檔直接 ingest
 - Android workspace 下拉選單需提供切換、新建、重新命名、刪除；刪除時清掉該 workspace 的 Room cache 並選下一個 workspace 或回建立頁
+- Android workspace 下拉選單的切換區與 rename/delete action 區必須分離，且 action hit target 至少 44dp；否則容易誤觸成切換 workspace
 - Android Chat 模型選擇用模型/聊天語意 icon（例如 `SmartToy`），不要用設定齒輪；頁面鎖定狀態需以 `Lock` / `LockOpen` 區分，因為鎖頭本身可點擊切換
 - Android `MarkdownViewer` 用 Markwon + `TextView` 時必須在 Compose update 內同步 `MaterialTheme` 的文字與連結顏色，否則深色模式會出現黑底黑字
 - Android FAB 要明確設定 `containerColor` / `contentColor`，不要依賴預設 primaryContainer；淺色模式容易出現不自然白色塊

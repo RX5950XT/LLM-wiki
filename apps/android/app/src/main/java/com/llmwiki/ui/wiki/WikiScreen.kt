@@ -279,90 +279,30 @@ fun WikiScreen(
                     ) {
                         uiState.workspaces.forEach { workspace ->
                             val selected = workspace.id == uiState.workspace?.id
-                            DropdownMenuItem(
-                                text = {
-                                    Column {
-                                        Text(
-                                            workspace.name,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
-                                        if (selected) {
-                                            Text(
-                                                stringResource(R.string.wiki_current_workspace),
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.primary,
-                                            )
-                                        }
-                                    }
-                                },
-                                onClick = {
+                            WorkspaceMenuRow(
+                                workspaceName = workspace.name,
+                                selected = selected,
+                                onSelect = {
                                     showWorkspaceMenu = false
                                     wikiViewModel.switchWorkspace(workspace)
                                     scope.launch { drawerState.close() }
                                 },
-                                trailingIcon = {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        if (selected) {
-                                            Icon(
-                                                Icons.Default.Check,
-                                                contentDescription = null,
-                                                tint = MaterialTheme.colorScheme.primary,
-                                                modifier = Modifier.size(18.dp),
-                                            )
-                                        }
-                                        IconButton(
-                                            onClick = {
-                                                showWorkspaceMenu = false
-                                                renameWorkspace = workspace
-                                            },
-                                            modifier = Modifier.size(36.dp),
-                                        ) {
-                                            Icon(
-                                                Icons.Default.Edit,
-                                                contentDescription = stringResource(R.string.workspace_rename_title),
-                                                modifier = Modifier.size(18.dp),
-                                            )
-                                        }
-                                        IconButton(
-                                            onClick = {
-                                                showWorkspaceMenu = false
-                                                deleteWorkspace = workspace
-                                            },
-                                            modifier = Modifier.size(36.dp),
-                                            colors = IconButtonDefaults.iconButtonColors(
-                                                contentColor = MaterialTheme.colorScheme.error,
-                                            ),
-                                        ) {
-                                            Icon(
-                                                Icons.Default.Delete,
-                                                contentDescription = stringResource(R.string.workspace_delete_title),
-                                                modifier = Modifier.size(18.dp),
-                                            )
-                                        }
-                                    }
+                                onRename = {
+                                    showWorkspaceMenu = false
+                                    renameWorkspace = workspace
+                                },
+                                onDelete = {
+                                    showWorkspaceMenu = false
+                                    deleteWorkspace = workspace
                                 },
                             )
                         }
                         HorizontalDivider(Modifier.padding(vertical = 4.dp))
-                        DropdownMenuItem(
-                            text = {
-                                Column {
-                                    Text(stringResource(R.string.workspace_create_action))
-                                    Text(
-                                        stringResource(R.string.workspace_create_menu_hint),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                            },
+                        WorkspaceCreateMenuRow(
                             onClick = {
                                 showWorkspaceMenu = false
                                 scope.launch { drawerState.close() }
                                 onNavigateToCreateWorkspace()
-                            },
-                            leadingIcon = {
-                                Icon(Icons.Default.Add, contentDescription = null)
                             },
                         )
                     }
@@ -695,6 +635,107 @@ fun WikiScreen(
                 deleteWorkspace = null
             },
         )
+    }
+}
+
+@Composable
+private fun WorkspaceMenuRow(
+    workspaceName: String,
+    selected: Boolean,
+    onSelect: () -> Unit,
+    onRename: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 72.dp)
+            .padding(horizontal = 16.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .clickable(onClick = onSelect)
+                .padding(vertical = 12.dp),
+        ) {
+            Text(
+                text = workspaceName,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (selected) {
+                Text(
+                    stringResource(R.string.wiki_current_workspace),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+        }
+        Spacer(Modifier.width(12.dp))
+        Row(
+            modifier = Modifier.widthIn(min = 108.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.End,
+        ) {
+            if (selected) {
+                Icon(
+                    Icons.Default.Check,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(10.dp))
+            }
+            IconButton(
+                onClick = onRename,
+                modifier = Modifier.size(44.dp),
+            ) {
+                Icon(
+                    Icons.Default.Edit,
+                    contentDescription = stringResource(R.string.workspace_rename_title),
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+            IconButton(
+                onClick = onDelete,
+                modifier = Modifier.size(44.dp),
+                colors = IconButtonDefaults.iconButtonColors(
+                    contentColor = MaterialTheme.colorScheme.error,
+                ),
+            ) {
+                Icon(
+                    Icons.Default.Delete,
+                    contentDescription = stringResource(R.string.workspace_delete_title),
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun WorkspaceCreateMenuRow(
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 72.dp)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 20.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Default.Add, contentDescription = null)
+        Spacer(Modifier.width(16.dp))
+        Column {
+            Text(stringResource(R.string.workspace_create_action))
+            Text(
+                stringResource(R.string.workspace_create_menu_hint),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 

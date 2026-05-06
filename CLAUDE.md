@@ -202,6 +202,7 @@ apps/android/app/src/main/java/com/llmwiki/
 - Android 登出與重新登入時，需同時清掉 `GoogleSignIn` 快取，否則再次登入不會跳出 Google 帳號選擇器
 - Android Wiki drawer 已改為工作區下拉選單；「建立工作區」整合進下拉內，檔案匯入除了文字/URL 也支援從手機選取文字檔直接 ingest
 - Android workspace 下拉選單需提供切換、新建、重新命名、刪除；刪除時清掉該 workspace 的 Room cache 並選下一個 workspace 或回建立頁
+- Android workspace 下拉選單的切換區與 rename/delete action 區必須分離，且 action hit target 至少 44dp；否則容易誤觸成切換 workspace
 - Android Chat 模型選擇用模型/聊天語意 icon（例如 `SmartToy`），不要用設定齒輪；頁面鎖定狀態需以 `Lock` / `LockOpen` 區分，因為鎖頭本身可點擊切換
 - Android `MarkdownViewer` 用 Markwon + `TextView` 時必須在 Compose update 內同步 `MaterialTheme` 的文字與連結顏色，否則深色模式會出現黑底黑字
 - Android FAB 要明確設定 `containerColor` / `contentColor`，不要依賴預設 primaryContainer；淺色模式容易出現不自然白色塊
