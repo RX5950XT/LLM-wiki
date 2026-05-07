@@ -18,8 +18,8 @@ class PageRepository(
     fun observePages(workspaceId: String, accountName: String): Flow<List<PageEntity>> =
         db.pageDao().observePages(workspaceId, accountName)
 
-    suspend fun syncPages(workspaceId: String, accountName: String) {
-        ensureSystemPages(workspaceId)
+    suspend fun syncPages(workspaceId: String, accountName: String, locale: String) {
+        ensureSystemPages(workspaceId, locale)
         val rows = withSupabaseRetry {
             supabase.from("pages")
                 .select {
@@ -30,12 +30,13 @@ class PageRepository(
         }
 
         val entities = rows.map { row ->
+            val existing = db.pageDao().getPage(row.workspaceId, accountName, row.slug)
             PageEntity(
                 workspaceId = row.workspaceId,
                 accountName = accountName,
                 slug = row.slug,
                 title = row.title,
-                content = db.pageDao().getPage(row.workspaceId, accountName, row.slug)?.content,
+                content = existing?.content?.takeIf { existing.version == row.version },
                 version = row.version,
                 driveFileId = row.driveFileId,
                 kind = row.kind,
@@ -83,16 +84,16 @@ class PageRepository(
         }.getOrThrow()
     }
 
-    private suspend fun ensureSystemPages(workspaceId: String) {
+    private suspend fun ensureSystemPages(workspaceId: String, locale: String) {
         runCatching {
             var accessToken = supabase.requireAccessToken(forceRefresh = false)
                 ?: supabase.requireAccessToken(forceRefresh = true)
                 ?: return
 
-            var response = postEnsureSystemPages(accessToken, workspaceId)
+            var response = postEnsureSystemPages(accessToken, workspaceId, locale)
             if (response.status.value == 401) {
                 accessToken = supabase.requireAccessToken(forceRefresh = true) ?: return
-                response = postEnsureSystemPages(accessToken, workspaceId)
+                response = postEnsureSystemPages(accessToken, workspaceId, locale)
             }
 
             // This endpoint is a compatibility nicety, not a hard requirement.
@@ -100,9 +101,10 @@ class PageRepository(
         }
     }
 
-    private suspend fun postEnsureSystemPages(accessToken: String, workspaceId: String): HttpResponse =
+    private suspend fun postEnsureSystemPages(accessToken: String, workspaceId: String, locale: String): HttpResponse =
         AndroidHttpClient.instance.post("${com.llmwiki.BuildConfig.WEB_API_BASE_URL.trimEnd('/')}/api/workspaces/$workspaceId/ensure-system-pages") {
             header("Authorization", "Bearer $accessToken")
+            header("x-llm-wiki-locale", locale)
         }
 
     private suspend fun <T> withSupabaseRetry(block: suspend () -> T): T {

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { createDriveClientForUser, isGoogleDriveAuthError } from '@/lib/google/drive-auth';
 import { ensureWorkspaceSystemPages } from '@/lib/drive/system-pages';
+import { resolveUiLocaleFromRequest } from '@/lib/i18n/ui-locale';
 
 export async function GET(
   _request: NextRequest,
@@ -23,7 +24,12 @@ export async function GET(
 
   try {
     const drive = await createDriveClientForUser(user.id);
-    await ensureWorkspaceSystemPages(drive, id, workspace.drive_folder_id);
+    await ensureWorkspaceSystemPages(
+      drive,
+      id,
+      workspace.drive_folder_id,
+      resolveUiLocaleFromRequest(_request),
+    );
   } catch (error) {
     if (!isGoogleDriveAuthError(error)) throw error;
   }
@@ -32,8 +38,7 @@ export async function GET(
     .from('pages')
     .select('slug, title, kind, zone, updated_at')
     .eq('workspace_id', id)
-    .order('updated_at', { ascending: false })
-    .limit(200);
+    .order('updated_at', { ascending: false });
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ pages });

@@ -23,6 +23,10 @@
     <string name="workspace_no_workspaces">目前沒有工作區，建立一個開始使用吧。</string>
     <string name="wiki_index">Wiki 索引</string>
     <string name="wiki_log">更新日誌</string>
+    <string name="wiki_notes_guide">筆記使用說明</string>
+    <string name="wiki_schema_ingest">匯入規則</string>
+    <string name="wiki_schema_query">查詢規則</string>
+    <string name="wiki_schema_lint">健康檢查規則</string>
     <string name="wiki_zone_wiki">知識頁</string>
     <string name="wiki_zone_notes">筆記</string>
     <string name="wiki_zone_schema">結構</string>
@@ -111,11 +115,13 @@
     <string name="action_cancel">取消</string>
     <string name="action_dismiss">關閉</string>
     <string name="action_delete">刪除</string>
+    <string name="action_edit">編輯</string>
     <string name="action_save">儲存</string>
     <string name="action_back">返回</string>
     <string name="action_refresh">重新整理</string>
     <string name="action_done">完成</string>
     <string name="common_loading_placeholder">載入中…</string>
+    <string name="wiki_page_saved">已儲存頁面</string>
     <string name="error_unauthorized">登入狀態已失效，請重新登入。</string>
     <string name="error_api_not_json">後端回傳網頁而不是 API JSON。請更新並部署網頁版後再試。</string>
     <string name="error_network_timeout">網路請求等太久或連線中斷，請確認連線後再試一次。</string>

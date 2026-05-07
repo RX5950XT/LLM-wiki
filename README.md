@@ -83,7 +83,7 @@ bun run dev
 4. **查詢 Wiki** — 在對話欄輸入問題，回答底部顯示引用頁面，可一鍵存成 Synthesis 頁面
 5. **瀏覽 Wiki** — 左側頁面樹瀏覽所有頁面，鎖定圖示可防止 LLM 覆寫特定頁面
 6. **理解三個區域** — `wiki/` 是 LLM 維護的知識頁；`notes/` 是你自己寫的筆記；`_schema/` 是控制 ingest / query / lint 的規則檔
-7. **編輯筆記與結構** — 目前 App 內不直接編輯 `notes/` 與 `_schema/`，請到 Google Drive 的 `Apps/LLM Wiki/你的工作區/` 底下修改 Markdown
+7. **編輯筆記與結構** — Web 與 Android 都可直接編輯 `notes/` 與 `_schema/` 的 Markdown；若頁面仍是預設模板，切換語言時也會跟著本地化
 8. **調整工作區順序** — Web 可直接拖移排序，Android 可在工作區選單調整上下順序
 9. **Graph View** — 頂列 GitFork 按鈕，查看頁面間的 wikilink 關係圖
 

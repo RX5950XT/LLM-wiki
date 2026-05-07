@@ -4,7 +4,7 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { PanelLeft, PanelRight, GitFork, FlaskConical, ChevronDown, LogOut, Plus, Settings, Search, Loader2, HelpCircle, Pencil, Trash2, GripVertical } from 'lucide-react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { PageTree } from '@/components/wiki/page-tree';
 import { PageViewer } from '@/components/wiki/page-viewer';
 import { ConversationPanel } from '@/components/wiki/conversation-panel';
@@ -36,6 +36,7 @@ interface WorkspaceShellProps {
 
 export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initialPages, initialPage = 'index.md' }: WorkspaceShellProps) {
   const t = useTranslations();
+  const locale = useLocale();
   const router = useRouter();
   const [activePage, setActivePage] = useState<string>(initialPage);
   const [activeAnchor, setActiveAnchor] = useState<string | null>(
@@ -74,10 +75,12 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
   const [viewerRefreshKey, setViewerRefreshKey] = useState(0);
 
   const refreshPageList = useCallback(() => {
-    fetch(`/api/workspaces/${workspaceId}/pages`)
+    fetch(`/api/workspaces/${workspaceId}/pages`, {
+      headers: { 'x-llm-wiki-locale': locale },
+    })
       .then((r) => r.json())
       .then((d) => d.pages && setPages(d.pages));
-  }, [workspaceId]);
+  }, [locale, workspaceId]);
 
   const selectPage = useCallback((slug: string, anchor?: string) => {
     setActivePage(slug);
@@ -217,7 +220,10 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
     try {
       await fetch('/api/lint', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-llm-wiki-locale': locale,
+        },
         body: JSON.stringify({ workspace_id: workspaceId }),
       });
       refreshPageList();
@@ -226,7 +232,7 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
     } finally {
       setLintRunning(false);
     }
-  }, [workspaceId, refreshPageList]);
+  }, [locale, workspaceId, refreshPageList]);
 
   const handleSignOut = useCallback(async () => {
     const supabase = createClient();
@@ -620,6 +626,7 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
               slug={activePage}
               anchor={activeAnchor}
               onWikiLinkClick={selectPage}
+              onPageSaved={refreshPageList}
               refreshKey={viewerRefreshKey}
             />
           )}

@@ -23,6 +23,10 @@
     <string name="workspace_no_workspaces">No workspaces yet. Create one to get started.</string>
     <string name="wiki_index">Wiki Index</string>
     <string name="wiki_log">Update Log</string>
+    <string name="wiki_notes_guide">Notes Guide</string>
+    <string name="wiki_schema_ingest">Ingest Rules</string>
+    <string name="wiki_schema_query">Query Rules</string>
+    <string name="wiki_schema_lint">Lint Rules</string>
     <string name="wiki_zone_wiki">Knowledge</string>
     <string name="wiki_zone_notes">Notes</string>
     <string name="wiki_zone_schema">Schema</string>
@@ -111,11 +115,13 @@
     <string name="action_cancel">Cancel</string>
     <string name="action_dismiss">Dismiss</string>
     <string name="action_delete">Delete</string>
+    <string name="action_edit">Edit</string>
     <string name="action_save">Save</string>
     <string name="action_back">Back</string>
     <string name="action_refresh">Refresh</string>
     <string name="action_done">Done</string>
     <string name="common_loading_placeholder">Loading…</string>
+    <string name="wiki_page_saved">Page saved</string>
     <string name="error_unauthorized">Session expired. Please sign in again.</string>
     <string name="error_api_not_json">The server returned a web page instead of API JSON. Update the web backend and try again.</string>
     <string name="error_network_timeout">The network request took too long or was interrupted. Check your connection and try again.</string>

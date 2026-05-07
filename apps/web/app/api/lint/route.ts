@@ -13,11 +13,13 @@ export const maxDuration = 300;
 import { findFile, readDriveFile } from '@/lib/drive/client';
 import { createLLMClient } from '@/lib/ai/client';
 import { buildWikiTools } from '@/lib/ai/tools';
-import { DEFAULT_PROMPTS } from '@llm-wiki/prompts';
+import { resolveUiLocaleFromRequest } from '@/lib/i18n/ui-locale';
+import { getDefaultPrompt } from '@llm-wiki/prompts';
 
 const PostSchema = z.object({ workspace_id: z.string().uuid() });
 
 export async function POST(request: NextRequest) {
+  const locale = resolveUiLocaleFromRequest(request);
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -27,7 +29,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Missing or invalid workspace_id' }, { status: 400 });
   }
 
-  return runLint(parsed.data.workspace_id, user.id);
+  return runLint(parsed.data.workspace_id, user.id, locale);
 }
 
 /** Called by the weekly cron. Iterates all workspaces. */
@@ -55,7 +57,7 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({ ran: workspaces.length });
 }
 
-async function runLint(workspaceId: string, userId: string) {
+async function runLint(workspaceId: string, userId: string, locale: string = 'zh-TW') {
   const admin = createAdminClient();
 
   // Verify the workspace belongs to the requesting user before using admin client
@@ -100,7 +102,7 @@ async function runLint(workspaceId: string, userId: string) {
   const schemaFolderId = await findFile(
     drive, '_schema', workspace.drive_folder_id, 'application/vnd.google-apps.folder',
   );
-  let systemPrompt = DEFAULT_PROMPTS.lint;
+  let systemPrompt = getDefaultPrompt('lint', locale);
   if (schemaFolderId) {
     const lintFileId = await findFile(drive, 'lint.md', schemaFolderId);
     if (lintFileId) systemPrompt = await readDriveFile(drive, lintFileId);

@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation';
+import { getLocale } from 'next-intl/server';
 import { createDriveClientForUser, isGoogleDriveAuthError } from '@/lib/google/drive-auth';
 import { ensureWorkspaceSystemPages } from '@/lib/drive/system-pages';
 import { createClient } from '@/lib/supabase/server';
@@ -13,6 +14,7 @@ interface WorkspacePageProps {
 export default async function WorkspacePage({ params, searchParams }: WorkspacePageProps) {
   const { wid } = await params;
   const { page: initialPage } = await searchParams;
+  const locale = await getLocale();
   const supabase = await createClient();
   const {
     data: { user },
@@ -40,7 +42,7 @@ export default async function WorkspacePage({ params, searchParams }: WorkspaceP
   if (workspaceRootId) {
     try {
       const drive = await createDriveClientForUser(user.id);
-      await ensureWorkspaceSystemPages(drive, wid, workspaceRootId);
+      await ensureWorkspaceSystemPages(drive, wid, workspaceRootId, locale);
     } catch (error) {
       if (!isGoogleDriveAuthError(error)) throw error;
     }
@@ -50,8 +52,7 @@ export default async function WorkspacePage({ params, searchParams }: WorkspaceP
     .from('pages')
     .select('slug, title, kind, zone')
     .eq('workspace_id', wid)
-    .order('updated_at', { ascending: false })
-    .limit(200);
+    .order('updated_at', { ascending: false });
 
   const workspaceEntries = (workspaces ?? []).map((item) => ({
     id: item.id,

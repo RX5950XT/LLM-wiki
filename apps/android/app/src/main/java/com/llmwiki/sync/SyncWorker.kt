@@ -26,7 +26,11 @@ class SyncWorker(
             val db = AppDatabase.getInstance(applicationContext)
             val drive = DriveClient(applicationContext, accountName)
             val repo = PageRepository(db, drive)
-            repo.syncPages(workspaceId, accountName)
+            val primary = applicationContext.resources.configuration.locales[0]
+                ?.toLanguageTag()
+                .orEmpty()
+            val locale = if (primary.startsWith("en", ignoreCase = true)) "en" else "zh-TW"
+            repo.syncPages(workspaceId, accountName, locale)
             Result.success()
         } catch (e: Exception) {
             // Retry on transient failures; the WorkManager back-off policy handles timing

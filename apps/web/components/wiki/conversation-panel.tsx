@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Send, Bookmark, Loader2, CheckCircle, ChevronRight, Plus, Bot } from 'lucide-react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { parseCitations } from '@/lib/ai/citation-parser';
 import { isDriveReconnectError, reconnectGoogleDrive } from '@/lib/google/drive-reconnect';
 
@@ -63,6 +63,7 @@ export function ConversationPanel({
   onPageClick,
 }: ConversationPanelProps) {
   const t = useTranslations();
+  const locale = useLocale();
   const [ingestInput, setIngestInput] = useState('');
   const [ingesting, setIngesting] = useState(false);
   const [ingestError, setIngestError] = useState<string | null>(null);
@@ -177,7 +178,10 @@ export function ConversationPanel({
         };
         const res = await fetch('/api/ingest', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'x-llm-wiki-locale': locale,
+          },
           body: JSON.stringify(payload),
         });
         const raw = await res.text();
@@ -203,7 +207,7 @@ export function ConversationPanel({
         return { ok: false, error: t('ingest.failedGeneric') };
       }
     },
-    [workspaceId, selectedProfileId, startDriveReconnect],
+    [locale, workspaceId, selectedProfileId, startDriveReconnect, t],
   );
 
   const handleBatchIngest = useCallback(
@@ -275,7 +279,10 @@ export function ConversationPanel({
       try {
         const res = await fetch('/api/query', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'x-llm-wiki-locale': locale,
+          },
           body: JSON.stringify({
             messages: allMessages.map((m) => ({ role: m.role, content: m.content })),
             workspace_id: workspaceId,
@@ -327,7 +334,7 @@ export function ConversationPanel({
         setIsLoading(false);
       }
     },
-    [input, isLoading, messages, workspaceId, selectedProfileId, startDriveReconnect],
+    [input, isLoading, locale, messages, workspaceId, selectedProfileId, startDriveReconnect],
   );
 
   const handleIngest = async (e: React.FormEvent) => {
@@ -345,7 +352,10 @@ export function ConversationPanel({
 
       const res = await fetch('/api/ingest', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-llm-wiki-locale': locale,
+        },
         body: JSON.stringify(payload),
       });
       const data = await res.json();
@@ -480,15 +490,24 @@ export function ConversationPanel({
             {ingestResult}
           </p>
         )}
+        {ingesting && (
+          <div
+            className="mt-2 flex items-center gap-2 rounded-md px-2.5 py-2 text-xs"
+            style={{ background: 'var(--color-accent-glow)', color: 'var(--color-accent)' }}
+          >
+            <Loader2 size={12} className="animate-spin" />
+            <span>{t('ingest.running')}</span>
+          </div>
+        )}
         {uploadQueue.length > 0 && (
           <div className="mt-2 space-y-1">
             {uploadQueue.map((item, idx) => (
               <div key={idx} className="flex items-center gap-2 text-xs">
                 <span className="truncate" style={{ color: 'var(--fg-muted)' }}>{item.name}</span>
-                {item.status === 'pending' && <span style={{ color: 'var(--fg-muted)' }}>等待中</span>}
+                {item.status === 'pending' && <span style={{ color: 'var(--fg-muted)' }}>{t('ingest.queuePending')}</span>}
                 {item.status === 'uploading' && <Loader2 size={10} className="animate-spin" style={{ color: 'var(--color-accent)' }} />}
                 {item.status === 'done' && <CheckCircle size={10} style={{ color: 'oklch(65% 0.22 145)' }} />}
-                {item.status === 'error' && <span style={{ color: 'oklch(65% 0.18 30)' }}>{item.error ?? '失敗'}</span>}
+                {item.status === 'error' && <span style={{ color: 'oklch(65% 0.18 30)' }}>{item.error ?? t('ingest.failed')}</span>}
               </div>
             ))}
           </div>
@@ -647,9 +666,6 @@ export function ConversationPanel({
                 title={t('common.selectModel')}
               >
                 <Bot size={13} />
-                <span className="max-w-[80px] truncate">
-                  {profiles.find((p) => p.id === selectedProfileId)?.name ?? 'Model'}
-                </span>
               </button>
 
               {showProfileMenu && (

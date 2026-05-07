@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback, type ReactNode } from 'react';
-import { Pencil, Lock, Unlock, RefreshCw, AlertTriangle } from 'lucide-react';
+import { Pencil, Lock, Unlock, RefreshCw, AlertTriangle, Check, X } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -67,6 +67,7 @@ interface PageViewerProps {
   slug: string | null;
   anchor?: string | null;
   onWikiLinkClick?: (slug: string, anchor?: string) => void;
+  onPageSaved?: () => void;
   /** Increment to force re-fetch (e.g. on Realtime update) */
   refreshKey?: number;
 }
@@ -75,18 +76,30 @@ interface PageData {
   slug: string;
   title: string | null;
   content: string;
+  kind: string;
+  zone: string;
   updated_by: 'llm' | 'human';
   locked_by_human: boolean;
   version: number;
 }
 
-export function PageViewer({ workspaceId, slug, anchor, onWikiLinkClick, refreshKey }: PageViewerProps) {
+export function PageViewer({
+  workspaceId,
+  slug,
+  anchor,
+  onWikiLinkClick,
+  onPageSaved,
+  refreshKey,
+}: PageViewerProps) {
   const t = useTranslations();
   const [page, setPage] = useState<PageData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [stale, setStale] = useState(false);
   const [lockPending, setLockPending] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [savePending, setSavePending] = useState(false);
 
   const fetchPage = useCallback(
     (forceSlug?: string) => {
@@ -98,7 +111,11 @@ export function PageViewer({ workspaceId, slug, anchor, onWikiLinkClick, refresh
 
       fetch(`/api/pages/${workspaceId}/${encodeURIComponent(target)}`)
         .then((r) => (r.ok ? r.json() : Promise.reject(r.statusText)))
-        .then((data: PageData) => setPage(data))
+        .then((data: PageData) => {
+          setPage(data);
+          setDraft(data.content);
+          setEditing(false);
+        })
         .catch((e) => setError(String(e)))
         .finally(() => setLoading(false));
     },
@@ -127,6 +144,8 @@ export function PageViewer({ workspaceId, slug, anchor, onWikiLinkClick, refresh
     return () => window.cancelAnimationFrame(frame);
   }, [anchor, page]);
 
+  const isEditable = page?.zone === 'notes' || page?.zone === 'schema';
+
   const toggleLock = useCallback(async () => {
     if (!page) return;
     setLockPending(true);
@@ -146,6 +165,32 @@ export function PageViewer({ workspaceId, slug, anchor, onWikiLinkClick, refresh
       setLockPending(false);
     }
   }, [page, workspaceId]);
+
+  const savePage = useCallback(async () => {
+    if (!page) return;
+    setSavePending(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/pages/${workspaceId}/${encodeURIComponent(page.slug)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: draft }),
+      });
+      const data = await res.json().catch(() => null) as PageData & { error?: string } | null;
+      if (!res.ok || !data) {
+        throw new Error(data?.error ?? 'Failed to save page');
+      }
+      setPage(data);
+      setDraft(data.content);
+      setEditing(false);
+      setStale(false);
+      onPageSaved?.();
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : 'Failed to save page');
+    } finally {
+      setSavePending(false);
+    }
+  }, [draft, onPageSaved, page, workspaceId]);
 
   if (!slug) {
     return (
@@ -246,6 +291,46 @@ export function PageViewer({ workspaceId, slug, anchor, onWikiLinkClick, refresh
           >
             {page.locked_by_human ? <Lock size={12} /> : <Unlock size={12} />}
           </button>
+
+          {isEditable && (
+            editing ? (
+              <>
+                <button
+                  onClick={savePage}
+                  disabled={savePending}
+                  className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs transition-opacity hover:opacity-70 disabled:opacity-40"
+                  style={{ color: 'var(--color-accent)' }}
+                  title={t('common.save')}
+                >
+                  {savePending ? <RefreshCw size={12} className="animate-spin" /> : <Check size={12} />}
+                  {t('common.save')}
+                </button>
+                <button
+                  onClick={() => {
+                    setDraft(page.content);
+                    setEditing(false);
+                  }}
+                  disabled={savePending}
+                  className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs transition-opacity hover:opacity-70 disabled:opacity-40"
+                  style={{ color: 'var(--fg-muted)' }}
+                  title={t('common.cancel')}
+                >
+                  <X size={12} />
+                  {t('common.cancel')}
+                </button>
+              </>
+            ) : (
+              <button
+                onClick={() => setEditing(true)}
+                className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs transition-opacity hover:opacity-70"
+                style={{ color: 'var(--fg-muted)' }}
+                title={t('common.edit')}
+              >
+                <Pencil size={12} />
+                {t('common.edit')}
+              </button>
+            )
+          )}
         </div>
         <span className="text-xs" style={{ color: 'var(--fg-muted)' }}>
           v{page.version} · {page.slug}
@@ -254,77 +339,90 @@ export function PageViewer({ workspaceId, slug, anchor, onWikiLinkClick, refresh
 
       {/* Markdown content */}
       <div className="flex-1 overflow-y-auto px-8 py-6">
-        <article className="wiki-prose max-w-none">
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
-            components={{
-              h1: ({ children }) => {
-                const id = slugifyHeading(getTextContent(children));
-                return <h1 id={id}>{children}</h1>;
-              },
-              h2: ({ children }) => {
-                const id = slugifyHeading(getTextContent(children));
-                return <h2 id={id}>{children}</h2>;
-              },
-              h3: ({ children }) => {
-                const id = slugifyHeading(getTextContent(children));
-                return <h3 id={id}>{children}</h3>;
-              },
-              h4: ({ children }) => {
-                const id = slugifyHeading(getTextContent(children));
-                return <h4 id={id}>{children}</h4>;
-              },
-              h5: ({ children }) => {
-                const id = slugifyHeading(getTextContent(children));
-                return <h5 id={id}>{children}</h5>;
-              },
-              h6: ({ children }) => {
-                const id = slugifyHeading(getTextContent(children));
-                return <h6 id={id}>{children}</h6>;
-              },
-              a: ({ href, children }) => {
-                if (!href) return <a>{children}</a>;
-
-                if (href.startsWith('#')) {
-                  return (
-                    <a
-                      href={href}
-                      onClick={(e) => {
-                        e.preventDefault();
-                        const targetId = decodeURIComponent(href.slice(1));
-                        document.getElementById(targetId)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
-                        window.history.replaceState(null, '', `#${encodeURIComponent(targetId)}`);
-                      }}
-                      style={{ color: 'var(--color-accent)' }}
-                    >
-                      {children}
-                    </a>
-                  );
-                }
-
-                const internalTarget = parseInternalHref(href);
-                if (internalTarget && onWikiLinkClick) {
-                  return (
-                    <a
-                      href={href}
-                      onClick={(e) => {
-                        e.preventDefault();
-                        onWikiLinkClick(internalTarget.slug, internalTarget.anchor);
-                      }}
-                      style={{ color: 'var(--color-accent)' }}
-                    >
-                      {children}
-                    </a>
-                  );
-                }
-
-                return <a href={href}>{children}</a>;
-              },
+        {editing ? (
+          <textarea
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            className="min-h-[60vh] w-full rounded-xl border px-4 py-3 font-mono text-sm outline-none"
+            style={{
+              background: 'var(--bg-2)',
+              borderColor: 'var(--border)',
+              color: 'var(--fg)',
             }}
-          >
-            {stripFrontmatterAndWikilinks(page.content)}
-          </ReactMarkdown>
-        </article>
+          />
+        ) : (
+          <article className="wiki-prose max-w-none">
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              components={{
+                h1: ({ children }) => {
+                  const id = slugifyHeading(getTextContent(children));
+                  return <h1 id={id}>{children}</h1>;
+                },
+                h2: ({ children }) => {
+                  const id = slugifyHeading(getTextContent(children));
+                  return <h2 id={id}>{children}</h2>;
+                },
+                h3: ({ children }) => {
+                  const id = slugifyHeading(getTextContent(children));
+                  return <h3 id={id}>{children}</h3>;
+                },
+                h4: ({ children }) => {
+                  const id = slugifyHeading(getTextContent(children));
+                  return <h4 id={id}>{children}</h4>;
+                },
+                h5: ({ children }) => {
+                  const id = slugifyHeading(getTextContent(children));
+                  return <h5 id={id}>{children}</h5>;
+                },
+                h6: ({ children }) => {
+                  const id = slugifyHeading(getTextContent(children));
+                  return <h6 id={id}>{children}</h6>;
+                },
+                a: ({ href, children }) => {
+                  if (!href) return <a>{children}</a>;
+
+                  if (href.startsWith('#')) {
+                    return (
+                      <a
+                        href={href}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          const targetId = decodeURIComponent(href.slice(1));
+                          document.getElementById(targetId)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+                          window.history.replaceState(null, '', `#${encodeURIComponent(targetId)}`);
+                        }}
+                        style={{ color: 'var(--color-accent)' }}
+                      >
+                        {children}
+                      </a>
+                    );
+                  }
+
+                  const internalTarget = parseInternalHref(href);
+                  if (internalTarget && onWikiLinkClick) {
+                    return (
+                      <a
+                        href={href}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          onWikiLinkClick(internalTarget.slug, internalTarget.anchor);
+                        }}
+                        style={{ color: 'var(--color-accent)' }}
+                      >
+                        {children}
+                      </a>
+                    );
+                  }
+
+                  return <a href={href}>{children}</a>;
+                },
+              }}
+            >
+              {stripFrontmatterAndWikilinks(page.content)}
+            </ReactMarkdown>
+          </article>
+        )}
       </div>
     </div>
   );

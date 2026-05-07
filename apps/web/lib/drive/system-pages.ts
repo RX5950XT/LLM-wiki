@@ -1,93 +1,93 @@
 import {
-  INITIAL_INDEX_CONTENT,
-  INITIAL_LOG_CONTENT,
-  INITIAL_NOTES_GUIDE_CONTENT,
   SCHEMA_FILES,
+  getInitialIndexContent,
+  getInitialLogContent,
+  getInitialNotesGuideContent,
+  getSystemPageTitle,
+  normalizeUiLocale,
+  parseCreatedDate,
+  type UiLocale,
 } from '@llm-wiki/drive-schema';
-import { DEFAULT_PROMPTS } from '@llm-wiki/prompts';
+import { getDefaultPrompt, type PromptKind } from '@llm-wiki/prompts';
 import type { drive_v3 } from 'googleapis';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { ensureFolder, findFile, readDriveFile, writeDriveFile } from './client';
 
 type PageSeed = {
+  key: 'index' | 'log' | 'notes-guide' | 'schema-ingest' | 'schema-query' | 'schema-lint';
   slug: string;
-  title: string;
   kind: 'index' | 'log' | 'note' | 'schema';
   zone: 'wiki' | 'notes' | 'schema';
   folderName: 'wiki' | 'notes' | '_schema';
   fileName: string;
-  content?: string;
-  promptKey?: keyof typeof DEFAULT_PROMPTS;
   updatedBy: 'llm' | 'human';
   lockedByHuman: boolean;
+  promptKind?: PromptKind;
 };
 
 const SYSTEM_PAGE_SEEDS: PageSeed[] = [
   {
+    key: 'index',
     slug: 'index.md',
-    title: 'Wiki 索引',
     kind: 'index',
     zone: 'wiki',
     folderName: 'wiki',
     fileName: 'index.md',
-    content: INITIAL_INDEX_CONTENT,
     updatedBy: 'llm',
     lockedByHuman: false,
   },
   {
+    key: 'log',
     slug: 'log.md',
-    title: '更新日誌',
     kind: 'log',
     zone: 'wiki',
     folderName: 'wiki',
     fileName: 'log.md',
-    content: INITIAL_LOG_CONTENT,
     updatedBy: 'llm',
     lockedByHuman: false,
   },
   {
+    key: 'notes-guide',
     slug: 'notes/guide.md',
-    title: '筆記使用說明',
     kind: 'note',
     zone: 'notes',
     folderName: 'notes',
     fileName: 'guide.md',
-    content: INITIAL_NOTES_GUIDE_CONTENT,
     updatedBy: 'human',
     lockedByHuman: true,
   },
   {
+    key: 'schema-ingest',
     slug: '_schema/ingest.md',
-    title: '匯入規則',
     kind: 'schema',
     zone: 'schema',
     folderName: '_schema',
     fileName: SCHEMA_FILES.ingest,
-    promptKey: 'ingest',
     updatedBy: 'human',
     lockedByHuman: true,
+    promptKind: 'ingest',
   },
   {
+    key: 'schema-query',
     slug: '_schema/query.md',
-    title: '查詢規則',
     kind: 'schema',
     zone: 'schema',
     folderName: '_schema',
     fileName: SCHEMA_FILES.query,
-    promptKey: 'query',
     updatedBy: 'human',
     lockedByHuman: true,
+    promptKind: 'query',
   },
   {
+    key: 'schema-lint',
     slug: '_schema/lint.md',
-    title: '健康檢查規則',
     kind: 'schema',
     zone: 'schema',
     folderName: '_schema',
     fileName: SCHEMA_FILES.lint,
-    promptKey: 'lint',
     updatedBy: 'human',
     lockedByHuman: true,
+    promptKind: 'lint',
   },
 ];
 
@@ -96,30 +96,79 @@ const LEGACY_DEFAULT_CONTENT: Record<string, string[]> = {
   'log.md': ['# Change Log', '# Log', 'Chronological record'],
 };
 
-async function maybeNormalizeLegacySystemPage(
+function buildSeedContent(seed: PageSeed, locale: UiLocale, createdAt?: string): string {
+  switch (seed.key) {
+    case 'index':
+      return getInitialIndexContent(locale, createdAt);
+    case 'log':
+      return getInitialLogContent(locale, createdAt);
+    case 'notes-guide':
+      return getInitialNotesGuideContent(locale, createdAt);
+    case 'schema-ingest':
+    case 'schema-query':
+    case 'schema-lint':
+      return getDefaultPrompt(seed.promptKind!, locale);
+  }
+}
+
+function buildSeedTitle(seed: PageSeed, locale: UiLocale): string {
+  return getSystemPageTitle(seed.key, locale);
+}
+
+function getCandidateContents(seed: PageSeed, currentContent: string): string[] {
+  const createdAt = parseCreatedDate(currentContent) ?? undefined;
+  const localized = ['zh-TW', 'en'].map((locale) =>
+    buildSeedContent(seed, locale as UiLocale, createdAt).trim(),
+  );
+  return localized;
+}
+
+function isKnownDefaultContent(seed: PageSeed, currentContent: string): boolean {
+  const trimmed = currentContent.trim();
+  if (getCandidateContents(seed, currentContent).includes(trimmed)) return true;
+  return (LEGACY_DEFAULT_CONTENT[seed.slug] ?? []).some((marker) => currentContent.includes(marker));
+}
+
+function isKnownDefaultTitle(seed: PageSeed, currentTitle?: string | null): boolean {
+  if (!currentTitle) return true;
+  const titles = ['zh-TW', 'en'].map((locale) => buildSeedTitle(seed, locale as UiLocale));
+  return titles.includes(currentTitle);
+}
+
+async function maybeLocalizeSystemPage(
   drive: drive_v3.Drive,
+  seed: PageSeed,
   fileId: string,
-  slug: string,
-  content: string,
+  locale: UiLocale,
 ) {
-  const legacyMarkers = LEGACY_DEFAULT_CONTENT[slug];
-  if (!legacyMarkers) return;
-
   const current = await readDriveFile(drive, fileId);
-  if (!legacyMarkers.some((marker) => current.includes(marker))) return;
+  if (!isKnownDefaultContent(seed, current)) return false;
 
-  await writeDriveFile(drive, content, {
+  const localized = buildSeedContent(seed, locale, parseCreatedDate(current) ?? undefined);
+  if (current.trim() === localized.trim()) return false;
+
+  await writeDriveFile(drive, localized, {
     fileId,
-    name: slug.split('/').at(-1) ?? slug,
+    name: seed.fileName,
     parentId: '',
   });
+  return true;
 }
+
+type ExistingPageRow = {
+  id: string;
+  slug: string;
+  drive_file_id: string;
+  title: string | null;
+};
 
 export async function ensureWorkspaceSystemPages(
   drive: drive_v3.Drive,
   workspaceId: string,
   workspaceRootId: string,
+  locale?: string | null,
 ) {
+  const normalizedLocale = normalizeUiLocale(locale);
   const admin = createAdminClient();
   const folderIds = {
     wiki: await ensureFolder(drive, 'wiki', workspaceRootId),
@@ -129,14 +178,14 @@ export async function ensureWorkspaceSystemPages(
 
   const { data: existingPages, error } = await admin
     .from('pages')
-    .select('slug, drive_file_id')
+    .select('id, slug, drive_file_id, title')
     .eq('workspace_id', workspaceId);
   if (error) {
     throw new Error(`Failed to load existing system pages: ${error.message}`);
   }
 
   const existingMap = new Map(
-    (existingPages ?? []).map((page) => [page.slug, page.drive_file_id]),
+    (existingPages ?? []).map((page) => [page.slug, page as ExistingPageRow]),
   );
 
   const rowsToInsert: Array<{
@@ -152,34 +201,45 @@ export async function ensureWorkspaceSystemPages(
 
   for (const seed of SYSTEM_PAGE_SEEDS) {
     const folderId = folderIds[seed.folderName];
-    const existingFileId =
-      existingMap.get(seed.slug) ??
-      await findFile(drive, seed.fileName, folderId);
-
-    const content = seed.content ?? DEFAULT_PROMPTS[seed.promptKey!];
+    const existing = existingMap.get(seed.slug);
     const driveFileId =
-      existingFileId ??
-      await writeDriveFile(drive, content, {
+      existing?.drive_file_id ??
+      await findFile(drive, seed.fileName, folderId) ??
+      await writeDriveFile(drive, buildSeedContent(seed, normalizedLocale), {
         name: seed.fileName,
         parentId: folderId,
       });
 
-    if (seed.content && existingFileId) {
-      await maybeNormalizeLegacySystemPage(drive, driveFileId, seed.slug, content);
+    const localizedTitle = buildSeedTitle(seed, normalizedLocale);
+
+    if (existing) {
+      const localizedContentChanged = await maybeLocalizeSystemPage(
+        drive,
+        seed,
+        driveFileId,
+        normalizedLocale,
+      );
+
+      if (localizedContentChanged || isKnownDefaultTitle(seed, existing.title)) {
+        await admin
+          .from('pages')
+          .update({ title: localizedTitle })
+          .eq('id', existing.id);
+      }
+
+      continue;
     }
 
-    if (!existingMap.has(seed.slug)) {
-      rowsToInsert.push({
-        workspace_id: workspaceId,
-        slug: seed.slug,
-        title: seed.title,
-        kind: seed.kind,
-        zone: seed.zone,
-        drive_file_id: driveFileId,
-        updated_by: seed.updatedBy,
-        locked_by_human: seed.lockedByHuman,
-      });
-    }
+    rowsToInsert.push({
+      workspace_id: workspaceId,
+      slug: seed.slug,
+      title: localizedTitle,
+      kind: seed.kind,
+      zone: seed.zone,
+      drive_file_id: driveFileId,
+      updated_by: seed.updatedBy,
+      locked_by_human: seed.lockedByHuman,
+    });
   }
 
   if (rowsToInsert.length > 0) {

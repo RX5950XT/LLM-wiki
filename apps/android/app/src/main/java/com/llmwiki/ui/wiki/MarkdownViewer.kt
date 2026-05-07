@@ -49,7 +49,7 @@ fun MarkdownViewer(
     val colorScheme = MaterialTheme.colorScheme
     val textColor = colorScheme.onBackground.toArgb()
     val linkColor = colorScheme.primary.toArgb()
-    val markwon = remember(context) {
+    val markwon = remember(context, onWikiLinkClick) {
         Markwon.builder(context)
             .usePlugin(StrikethroughPlugin.create())
             .usePlugin(TablePlugin.create(context))

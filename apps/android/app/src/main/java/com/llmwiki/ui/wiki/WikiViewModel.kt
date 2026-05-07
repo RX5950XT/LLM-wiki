@@ -35,6 +35,7 @@ import io.ktor.client.statement.bodyAsChannel
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
+import io.ktor.http.HttpHeaders
 import io.ktor.utils.io.readUTF8Line
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -85,6 +86,8 @@ data class WikiUiState(
     val selectedProfileId: String? = null,
     val driveReconnectUrl: String? = null,
     val workspaceActionLoading: Boolean = false,
+    val ingestLoading: Boolean = false,
+    val pageSaveLoading: Boolean = false,
 )
 
 private val apiJson = Json { ignoreUnknownKeys = true }
@@ -509,6 +512,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                 val response = sendAuthorizedRequest { accessToken ->
                     AndroidHttpClient.instance.post(webApiUrl("/api/query")) {
                         header("Authorization", "Bearer $accessToken")
+                        header("x-llm-wiki-locale", currentUiLocale())
                         contentType(ContentType.Application.Json)
                         setBody(bodyJson)
                     }
@@ -621,6 +625,63 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(synthesisSavedSlug = null) }
     }
 
+    fun savePageContent(slug: String, content: String, onDone: (Boolean) -> Unit = {}) {
+        viewModelScope.launch {
+            val wsId = workspaceId.value ?: return@launch
+            _uiState.update { it.copy(pageSaveLoading = true) }
+            try {
+                val bodyJson = buildJsonObject {
+                    put("content", content)
+                }.toString()
+                val response = sendAuthorizedRequest { accessToken ->
+                    AndroidHttpClient.instance.patch(webApiUrl("/api/pages/$wsId/${slug.encodeUrl()}")) {
+                        header("Authorization", "Bearer $accessToken")
+                        contentType(ContentType.Application.Json)
+                        setBody(bodyJson)
+                    }
+                } ?: run {
+                    _uiState.update {
+                        it.copy(pageSaveLoading = false, syncError = unauthorizedMessage())
+                    }
+                    onDone(false)
+                    return@launch
+                }
+                val text = response.bodyAsText()
+                if (response.status.value !in 200..299) {
+                    _uiState.update {
+                        it.copy(
+                            pageSaveLoading = false,
+                            syncError = parseApiError(text, "Failed to save page"),
+                        )
+                    }
+                    onDone(false)
+                    return@launch
+                }
+
+                syncPagesInternal(wsId)
+                db.pageDao().updateContent(wsId, accountName, slug, content)
+                val updatedPage = db.pageDao().getPage(wsId, accountName, slug)
+                _uiState.update {
+                    it.copy(
+                        activePage = updatedPage ?: it.activePage,
+                        pageContent = content,
+                        pageSaveLoading = false,
+                        syncError = null,
+                    )
+                }
+                onDone(true)
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        pageSaveLoading = false,
+                        syncError = e.toUserFacingMessage("Failed to save page"),
+                    )
+                }
+                onDone(false)
+            }
+        }
+    }
+
     fun runLint(onDone: (Boolean) -> Unit = {}) {
         val wsId = workspaceId.value ?: return
         viewModelScope.launch {
@@ -631,6 +692,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                 val response = sendAuthorizedRequest { accessToken ->
                     AndroidHttpClient.instance.post(webApiUrl("/api/lint")) {
                         header("Authorization", "Bearer $accessToken")
+                        header("x-llm-wiki-locale", currentUiLocale())
                         contentType(ContentType.Application.Json)
                         setBody(bodyJson)
                     }
@@ -674,6 +736,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
     fun ingestUrl(url: String, onDone: (Boolean) -> Unit) {
         viewModelScope.launch {
             val wsId = workspaceId.value ?: return@launch
+            _uiState.update { it.copy(ingestLoading = true) }
             try {
                 val requestBody = buildJsonObject {
                     put("kind", "url")
@@ -684,15 +747,18 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                 val response = sendAuthorizedRequest { accessToken ->
                     AndroidHttpClient.instance.post(webApiUrl("/api/ingest")) {
                         header("Authorization", "Bearer $accessToken")
+                        header("x-llm-wiki-locale", currentUiLocale())
                         contentType(ContentType.Application.Json)
                         setBody(requestBody)
                     }
                 } ?: return@launch
                 val text = response.bodyAsText()
-                handleIngestResult(response.status.value, text, onDone)
+                handleIngestResult(wsId, response.status.value, text, onDone)
             } catch (e: Exception) {
                 _uiState.update { it.copy(syncError = e.toUserFacingMessage("Ingest failed")) }
                 onDone(false)
+            } finally {
+                _uiState.update { it.copy(ingestLoading = false) }
             }
         }
     }
@@ -700,6 +766,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
     fun ingestText(title: String, content: String, onDone: (Boolean) -> Unit) {
         viewModelScope.launch {
             val wsId = workspaceId.value ?: return@launch
+            _uiState.update { it.copy(ingestLoading = true) }
             try {
                 val requestBody = buildJsonObject {
                     put("kind", "text")
@@ -711,22 +778,32 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                 val response = sendAuthorizedRequest { accessToken ->
                     AndroidHttpClient.instance.post(webApiUrl("/api/ingest")) {
                         header("Authorization", "Bearer $accessToken")
+                        header("x-llm-wiki-locale", currentUiLocale())
                         contentType(ContentType.Application.Json)
                         setBody(requestBody)
                     }
                 } ?: return@launch
                 val text = response.bodyAsText()
-                handleIngestResult(response.status.value, text, onDone)
+                handleIngestResult(wsId, response.status.value, text, onDone)
             } catch (e: Exception) {
                 _uiState.update { it.copy(syncError = e.toUserFacingMessage("Ingest failed")) }
                 onDone(false)
+            } finally {
+                _uiState.update { it.copy(ingestLoading = false) }
             }
         }
     }
 
-    private fun handleIngestResult(statusCode: Int, raw: String, onDone: (Boolean) -> Unit) {
+    private suspend fun handleIngestResult(
+        wsId: String,
+        statusCode: Int,
+        raw: String,
+        onDone: (Boolean) -> Unit,
+    ) {
         if (statusCode in 200..299) {
             _uiState.update { it.copy(syncError = null) }
+            syncPagesInternal(wsId)
+            selectDefaultPageIfNeeded(wsId)
             onDone(true)
             return
         }
@@ -784,8 +861,26 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
     private suspend fun syncPagesInternal(wsId: String) {
         try {
             val repo = PageRepository(db, driveClient)
-            repo.syncPages(wsId, accountName)
-            _uiState.update { it.copy(syncError = null) }
+            repo.syncPages(wsId, accountName, currentUiLocale())
+            val activeSlug = _uiState.value.activePage?.slug
+            if (activeSlug != null) {
+                val updatedPage = db.pageDao().getPage(wsId, accountName, activeSlug)
+                if (updatedPage != null) {
+                    _uiState.update { state ->
+                        state.copy(
+                            activePage = updatedPage,
+                            pageContent = if (state.activePage?.version == updatedPage.version) state.pageContent else updatedPage.content,
+                            contentLoading = state.activePage?.version != updatedPage.version && updatedPage.content == null,
+                            syncError = null,
+                        )
+                    }
+                    if (updatedPage.content == null) {
+                        loadContent(updatedPage)
+                    }
+                }
+            } else {
+                _uiState.update { it.copy(syncError = null) }
+            }
         } catch (e: Exception) {
             _uiState.update { it.copy(syncError = e.toUserFacingMessage("Sync failed")) }
         }
@@ -859,6 +954,13 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun String.encodeUrl() =
         java.net.URLEncoder.encode(this, "UTF-8").replace("+", "%20")
+
+    private fun currentUiLocale(): String {
+        val primary = getApplication<Application>().resources.configuration.locales[0]
+            ?.toLanguageTag()
+            .orEmpty()
+        return if (primary.startsWith("en", ignoreCase = true)) "en" else "zh-TW"
+    }
 
     private suspend fun sendAuthorizedRequest(
         request: suspend (String) -> HttpResponse,

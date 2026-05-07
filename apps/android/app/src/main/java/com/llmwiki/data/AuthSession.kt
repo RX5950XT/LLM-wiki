@@ -28,10 +28,14 @@ suspend fun SupabaseClient.requireAccessToken(forceRefresh: Boolean = false): St
 }
 
 fun Throwable.isSupabaseAuthProblem(): Boolean {
-    val detail = message.orEmpty()
-    return detail.contains("Unauthorized", ignoreCase = true) ||
-        detail.contains("JWT", ignoreCase = true) ||
-        detail.contains("auth", ignoreCase = true)
+    val detail = message.orEmpty().lowercase()
+    return detail.contains("unauthorized") ||
+        detail.contains("jwt") ||
+        detail.contains("invalid refresh token") ||
+        detail.contains("refresh token") ||
+        detail.contains("session missing") ||
+        detail.contains("session not found") ||
+        detail.contains("not authenticated")
 }
 
 private fun SupabaseClient.currentAccessToken(): String? =

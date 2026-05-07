@@ -37,6 +37,13 @@ export function PageTree({ initialPages, activePage, onSelectPage }: PageTreePro
     'log.md': t('wiki.log'),
   };
 
+  const SYSTEM_LABELS: Record<string, string> = {
+    'notes/guide.md': t('wiki.notesGuide'),
+    '_schema/ingest.md': t('wiki.schemaIngest'),
+    '_schema/query.md': t('wiki.schemaQuery'),
+    '_schema/lint.md': t('wiki.schemaLint'),
+  };
+
   const ZONE_LABELS: Record<string, string> = {
     wiki: t('wiki.zoneWiki'),
     notes: t('wiki.zoneNotes'),
@@ -72,7 +79,7 @@ export function PageTree({ initialPages, activePage, onSelectPage }: PageTreePro
       }}
     >
       <FileText size={13} style={{ opacity: 0.6 }} />
-      <span className="truncate">{label ?? page.title ?? page.slug}</span>
+      <span className="truncate">{label ?? SYSTEM_LABELS[page.slug] ?? page.title ?? page.slug}</span>
     </button>
   );
 

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createDriveClientForUser } from '@/lib/google/drive-auth';
 import { ensureWorkspaceSystemPages } from '@/lib/drive/system-pages';
+import { resolveUiLocaleFromRequest } from '@/lib/i18n/ui-locale';
 import { getRequestUser } from '@/lib/supabase/request';
 
 export async function POST(
@@ -22,6 +23,11 @@ export async function POST(
   if (!workspace) return NextResponse.json({ error: 'Workspace not found' }, { status: 404 });
 
   const drive = await createDriveClientForUser(user.id);
-  await ensureWorkspaceSystemPages(drive, id, workspace.drive_folder_id);
+  await ensureWorkspaceSystemPages(
+    drive,
+    id,
+    workspace.drive_folder_id,
+    resolveUiLocaleFromRequest(_request),
+  );
   return NextResponse.json({ ok: true });
 }

@@ -103,7 +103,7 @@ apps/web/
 │   ├── workspaces/[id]/synthesis/  ← POST: 儲存 Q&A 為 synthesis page
 │   └── pages/[wid]/[...slug]/lock/ ← PATCH: 切換 locked_by_human
 ├── components/wiki/
-│   ├── conversation-panel.tsx  ← 含 citation chips + file-back 通知 + 模型選擇器 + 批次上傳佇列
+│   ├── conversation-panel.tsx  ← 含 citation chips + file-back 通知 + icon-only 模型選擇器 + 批次上傳佇列
 │   └── page-viewer.tsx         ← 含 staleness banner + lock toggle + ReactMarkdown（GFM、frontmatter strip、[[wikilink]] 路由）
 └── lib/ai/
     ├── tools.ts                  ← AI wiki 工具（read/write/search/list/delete/move）
@@ -281,7 +281,8 @@ Conversation panel 輸入框左側有模型選擇按鈕（`Bot` icon），從 `/
 ## 筆記／結構區
 
 - 工作區建立與頁面列表讀取時，會自動補齊 `notes/guide.md` 與 `_schema/{ingest,query,lint}.md` 的 metadata，避免「筆記／結構」看起來是空白壞掉
-- `notes/guide.md` 會用繁體中文說明：`notes/` 是使用者自己的筆記區，LLM 只讀不寫；目前需在 Google Drive 直接編輯
+- `notes/guide.md`、`_schema/*.md` 會依目前 UI 語系自動本地化預設內容；若內容仍是預設模板，切換語言時會同步轉成對應語言
+- Web 與 Android 現在都可直接編輯 `notes/` 與 `_schema/` 內的 Markdown；LLM 仍只讀 `notes/`、不會主動改寫
 - `_schema/*.md` 會在 UI 顯示為「匯入規則 / 查詢規則 / 健康檢查規則」
 - Web `PageViewer` 與 Android `MarkdownViewer` 都會把 wiki 內部連結留在同一個 App / 視窗內跳轉，不再強制另開新視窗
 

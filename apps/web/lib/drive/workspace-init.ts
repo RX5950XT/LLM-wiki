@@ -3,10 +3,10 @@ import {
   WIKI_SUBDIRS,
   SPECIAL_PAGES,
   SCHEMA_FILES,
-  INITIAL_INDEX_CONTENT,
-  INITIAL_LOG_CONTENT,
+  getInitialIndexContent,
+  getInitialLogContent,
 } from '@llm-wiki/drive-schema';
-import { DEFAULT_PROMPTS } from '@llm-wiki/prompts';
+import { getDefaultPrompt } from '@llm-wiki/prompts';
 import type { drive_v3 } from 'googleapis';
 import { writeDriveFile } from './client';
 
@@ -64,6 +64,7 @@ async function findOrCreateRootFolder(
 export async function initWorkspaceDrive(
   drive: drive_v3.Drive,
   workspaceId: string,
+  locale?: string | null,
 ): Promise<InitResult> {
   // drive.file scope forbids accessing 'root'; create top-level folder without a parent
   // so Drive places it in My Drive automatically.
@@ -85,19 +86,19 @@ export async function initWorkspaceDrive(
   // Seed wiki/index.md and wiki/log.md
   const pageFileIds: Record<string, string> = {};
 
-  pageFileIds[SPECIAL_PAGES.index] = await writeDriveFile(drive, INITIAL_INDEX_CONTENT, {
+  pageFileIds[SPECIAL_PAGES.index] = await writeDriveFile(drive, getInitialIndexContent(locale), {
     name: SPECIAL_PAGES.index,
     parentId: wikiId,
   });
 
-  pageFileIds[SPECIAL_PAGES.log] = await writeDriveFile(drive, INITIAL_LOG_CONTENT, {
+  pageFileIds[SPECIAL_PAGES.log] = await writeDriveFile(drive, getInitialLogContent(locale), {
     name: SPECIAL_PAGES.log,
     parentId: wikiId,
   });
 
   // Seed _schema prompts (user-editable)
   for (const [kind, filename] of Object.entries(SCHEMA_FILES)) {
-    const content = DEFAULT_PROMPTS[kind as keyof typeof DEFAULT_PROMPTS];
+    const content = getDefaultPrompt(kind as keyof typeof SCHEMA_FILES, locale);
     await writeDriveFile(drive, content, { name: filename, parentId: schemaId });
   }
 

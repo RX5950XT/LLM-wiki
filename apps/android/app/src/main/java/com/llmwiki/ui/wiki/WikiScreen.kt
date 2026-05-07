@@ -139,6 +139,7 @@ fun WikiScreen(
     var showChatSheet by remember { mutableStateOf(false) }
     var showWorkspaceMenu by remember { mutableStateOf(false) }
     var showHelpDialog by remember { mutableStateOf(false) }
+    var showPageEditDialog by remember { mutableStateOf(false) }
     var renameWorkspace by remember { mutableStateOf<WorkspaceRow?>(null) }
     var deleteWorkspace by remember { mutableStateOf<WorkspaceRow?>(null) }
     val workspaceArrowRotation by animateFloatAsState(
@@ -383,6 +384,7 @@ fun WikiScreen(
                                     items(zonePages, key = { "${it.workspaceId}/${it.accountName}/${it.slug}" }) { page ->
                                         PageListItem(
                                             page = page,
+                                            label = localizedSystemPageLabel(page.slug),
                                             isSelected = uiState.activePage?.slug == page.slug,
                                             onClick = {
                                                 wikiViewModel.selectPage(page)
@@ -475,7 +477,11 @@ fun WikiScreen(
                                 keyboardActions = KeyboardActions(onSearch = {}),
                             )
                         } else {
-                            Text(uiState.activePage?.title ?: uiState.workspace?.name ?: stringResource(R.string.app_name))
+                            Text(
+                                uiState.activePage?.let { localizedSystemPageLabel(it.slug) ?: it.title }
+                                    ?: uiState.workspace?.name
+                                    ?: stringResource(R.string.app_name)
+                            )
                         }
                     },
                     navigationIcon = {
@@ -494,8 +500,14 @@ fun WikiScreen(
                                 Icon(Icons.Default.Close, contentDescription = stringResource(R.string.wiki_search_close))
                             }
                         } else {
+                            val editablePage = uiState.activePage?.takeIf { isHumanEditablePage(it) && uiState.pageContent != null }
                             IconButton(onClick = { wikiViewModel.toggleSearch() }) {
                                 Icon(Icons.Default.Search, contentDescription = stringResource(R.string.wiki_search))
+                            }
+                            if (editablePage != null) {
+                                IconButton(onClick = { showPageEditDialog = true }) {
+                                    Icon(Icons.Default.Edit, contentDescription = stringResource(R.string.action_edit))
+                                }
                             }
                             if (uiState.contentLoading) {
                                 CircularProgressIndicator(
@@ -551,6 +563,27 @@ fun WikiScreen(
                             style = MaterialTheme.typography.bodySmall,
                             modifier = Modifier.fillMaxWidth().padding(12.dp),
                         )
+                    }
+                }
+
+                if (uiState.ingestLoading) {
+                    Surface(color = MaterialTheme.colorScheme.secondaryContainer) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                            )
+                            Text(
+                                text = stringResource(R.string.ingest_running),
+                                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
                     }
                 }
 
@@ -641,6 +674,10 @@ fun WikiScreen(
             selectedProfileId = uiState.selectedProfileId,
             onProfileSelected = { wikiViewModel.setSelectedProfile(it) },
             onSend = { wikiViewModel.sendQuery(it) },
+            onPageClick = { slug ->
+                wikiViewModel.selectPageBySlug(slug)
+                showChatSheet = false
+            },
             onSaveSynthesis = { q, a, slugs -> wikiViewModel.saveSynthesis(q, a, slugs) },
             onClearSynthesis = { wikiViewModel.clearSynthesisSlug() },
             onDismiss = { showChatSheet = false },
@@ -672,6 +709,33 @@ fun WikiScreen(
 
     if (showHelpDialog) {
         WikiHelpDialog(onDismiss = { showHelpDialog = false })
+    }
+
+    if (showPageEditDialog) {
+        val activePage = uiState.activePage
+        val content = uiState.pageContent
+        if (activePage != null && content != null && isHumanEditablePage(activePage)) {
+            PageEditDialog(
+                title = localizedSystemPageLabel(activePage.slug) ?: activePage.title ?: activePage.slug,
+                initialContent = content,
+                isLoading = uiState.pageSaveLoading,
+                onDismiss = { showPageEditDialog = false },
+                onConfirm = { updated ->
+                    wikiViewModel.savePageContent(activePage.slug, updated) { success ->
+                        if (success) {
+                            showPageEditDialog = false
+                            scope.launch {
+                                snackbarHostState.showSnackbar(
+                                    context.getString(R.string.wiki_page_saved)
+                                )
+                            }
+                        }
+                    }
+                },
+            )
+        } else {
+            showPageEditDialog = false
+        }
     }
 
     renameWorkspace?.let { workspace ->
@@ -1045,6 +1109,18 @@ private fun PageListItem(
     )
 }
 
+@Composable
+private fun localizedSystemPageLabel(slug: String): String? = when (slug) {
+    "notes/guide.md" -> stringResource(R.string.wiki_notes_guide)
+    "_schema/ingest.md" -> stringResource(R.string.wiki_schema_ingest)
+    "_schema/query.md" -> stringResource(R.string.wiki_schema_query)
+    "_schema/lint.md" -> stringResource(R.string.wiki_schema_lint)
+    else -> null
+}
+
+private fun isHumanEditablePage(page: PageEntity): Boolean =
+    page.zone == "notes" || page.zone == "schema"
+
 // ── Chat bottom sheet ──────────────────────────────────────────────────────
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -1057,6 +1133,7 @@ private fun ChatBottomSheet(
     selectedProfileId: String?,
     onProfileSelected: (String?) -> Unit,
     onSend: (String) -> Unit,
+    onPageClick: (String) -> Unit,
     onSaveSynthesis: (question: String, answer: String, slugs: List<String>) -> Unit,
     onClearSynthesis: () -> Unit,
     onDismiss: () -> Unit,
@@ -1111,6 +1188,7 @@ private fun ChatBottomSheet(
                         ChatBubble(
                             message = msg,
                             allMessages = messages,
+                            onPageClick = onPageClick,
                             onSaveSynthesis = onSaveSynthesis,
                         )
                     }
@@ -1242,6 +1320,7 @@ private fun ChatBottomSheet(
 private fun ChatBubble(
     message: ChatMessage,
     allMessages: List<ChatMessage>,
+    onPageClick: (String) -> Unit,
     onSaveSynthesis: (question: String, answer: String, slugs: List<String>) -> Unit,
 ) {
     val isUser = message.role == "user"
@@ -1265,12 +1344,22 @@ private fun ChatBubble(
             ),
             modifier = Modifier.fillMaxWidth(if (isUser) 0.85f else 1f),
         ) {
-            Text(
-                text = message.content,
-                style = MaterialTheme.typography.bodyMedium,
-                color = textColor,
-                modifier = Modifier.padding(12.dp),
-            )
+            if (isUser) {
+                Text(
+                    text = message.content,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = textColor,
+                    modifier = Modifier.padding(12.dp),
+                )
+            } else {
+                MarkdownViewer(
+                    markdown = message.content,
+                    onWikiLinkClick = onPageClick,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                )
+            }
         }
         if (message.citedSlugs.isNotEmpty()) {
             Text(
@@ -1333,6 +1422,53 @@ private fun IngestInputDialog(
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
+        },
+    )
+}
+
+@Composable
+private fun PageEditDialog(
+    title: String,
+    initialContent: String,
+    isLoading: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit,
+) {
+    var text by remember(initialContent) { mutableStateOf(initialContent) }
+
+    AlertDialog(
+        onDismissRequest = {
+            if (!isLoading) onDismiss()
+        },
+        title = { Text(title) },
+        text = {
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                modifier = Modifier.fillMaxWidth().heightIn(min = 280.dp),
+                maxLines = 18,
+            )
+        },
+        confirmButton = {
+            Button(
+                onClick = { onConfirm(text) },
+                enabled = !isLoading,
+            ) {
+                if (isLoading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onPrimary,
+                    )
+                } else {
+                    Text(stringResource(R.string.action_save))
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !isLoading) {
+                Text(stringResource(R.string.action_cancel))
+            }
         },
     )
 }

@@ -10,11 +10,13 @@ import {
 } from '@/lib/google/drive-auth';
 import { createLLMClient } from '@/lib/ai/client';
 import { buildWikiTools } from '@/lib/ai/tools';
-import { DEFAULT_PROMPTS } from '@llm-wiki/prompts';
+import { resolveUiLocaleFromRequest } from '@/lib/i18n/ui-locale';
+import { getDefaultPrompt } from '@llm-wiki/prompts';
 
 export const maxDuration = 120;
 
 export async function POST(request: NextRequest) {
+  const locale = resolveUiLocaleFromRequest(request);
   const { supabase, user } = await getRequestUser(request);
   if (!user) return new Response('Unauthorized', { status: 401 });
 
@@ -91,7 +93,7 @@ export async function POST(request: NextRequest) {
     workspace.drive_folder_id,
     'application/vnd.google-apps.folder',
   );
-  let systemPrompt = DEFAULT_PROMPTS.query;
+  let systemPrompt = getDefaultPrompt('query', locale);
   if (schemaFolderId) {
     const queryFileId = await findFile(drive, 'query.md', schemaFolderId);
     if (queryFileId) systemPrompt = await readDriveFile(drive, queryFileId);

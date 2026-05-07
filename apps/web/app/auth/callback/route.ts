@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { createDriveClient } from '@/lib/drive/client';
 import { initWorkspaceDrive } from '@/lib/drive/workspace-init';
+import { resolveUiLocaleFromRequest } from '@/lib/i18n/ui-locale';
 import { getGoogleRefreshToken, saveGoogleRefreshToken } from '@/lib/google/oauth-token';
 import { fetchOrderedWorkspaces } from '@/lib/workspaces/queries';
 
@@ -80,8 +81,9 @@ export async function GET(request: NextRequest) {
   try {
     const drive = createDriveClient(session.provider_token);
     const workspaceId = crypto.randomUUID();
+    const locale = resolveUiLocaleFromRequest(request);
 
-    const { driveFolderId, pageFileIds } = await initWorkspaceDrive(drive, workspaceId);
+    const { driveFolderId, pageFileIds } = await initWorkspaceDrive(drive, workspaceId, locale);
 
     // Insert workspace
     const { error: workspaceError } = await admin.from('workspaces').insert({

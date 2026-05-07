@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { initWorkspaceDrive } from '@/lib/drive/workspace-init';
 import { ensureWorkspaceSystemPages } from '@/lib/drive/system-pages';
+import { resolveUiLocaleFromRequest } from '@/lib/i18n/ui-locale';
 import { getRequestUser } from '@/lib/supabase/request';
 import {
   createDriveClientForUser,
@@ -34,8 +35,9 @@ export async function POST(request: NextRequest) {
   try {
     const drive = await createDriveClientForUser(user.id);
     const workspaceId = crypto.randomUUID();
+    const locale = resolveUiLocaleFromRequest(request);
 
-    const { driveFolderId } = await initWorkspaceDrive(drive, workspaceId);
+    const { driveFolderId } = await initWorkspaceDrive(drive, workspaceId, locale);
 
     const nextSortOrder = await getNextWorkspaceSortOrder(admin, user.id);
 
@@ -57,7 +59,7 @@ export async function POST(request: NextRequest) {
     }
     if (workspaceError) throw new Error(`Failed to create workspace record: ${workspaceError.message}`);
 
-    await ensureWorkspaceSystemPages(drive, workspaceId, driveFolderId);
+    await ensureWorkspaceSystemPages(drive, workspaceId, driveFolderId, locale);
 
     // Auto-bind user's default LLM profile
     const { data: defaultProfile } = await admin

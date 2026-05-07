@@ -36,7 +36,7 @@ apps/web/
 │   └── settings/       LLM profile 管理
 ├── components/
 │   ├── wiki/
-│   │   ├── conversation-panel.tsx  ← 聊天 + 模型選擇器 + 批次上傳佇列 + citations
+│   │   ├── conversation-panel.tsx  ← 聊天 + icon-only 模型選擇器 + 批次上傳佇列 + citations
 │   │   ├── page-viewer.tsx         ← staleness banner + lock toggle + ReactMarkdown（GFM、frontmatter strip、[[wikilink]] 路由）
 │   │   ├── page-tree.tsx           ← 左側導航樹
 │   │   └── graph-view.tsx          ← react-force-graph-2d（動態 import）
@@ -144,7 +144,8 @@ Query API 文字串流結尾附加 `\x00CITATIONS\x00["entities/karpathy.md",...
 
 ### 筆記／結構區
 - 工作區建立與頁面列表讀取時，會自動補齊 `notes/guide.md` 與 `_schema/{ingest,query,lint}.md` 的 metadata，避免「筆記／結構」區看起來像空白故障
-- `notes/guide.md` 以繁體中文說明：`notes/` 是使用者筆記區，LLM 只讀不寫；目前需在 Google Drive 直接編輯
+- `notes/guide.md` 與 `_schema/*.md` 的預設內容會跟著目前 UI 語系切換；若頁面仍是預設模板，切語言時會同步改成對應語言
+- Web 與 Android 都可直接編輯 `notes/` 與 `_schema/` 內的 Markdown；LLM 仍只讀 `notes/`，不會主動改寫
 - `_schema/*.md` 在 UI 內顯示為「匯入規則 / 查詢規則 / 健康檢查規則」
 - Web 與 Android 的 markdown 內部連結都應留在同一個 App / 視窗內跳轉，不另開新視窗
 
@@ -224,13 +225,13 @@ Query API 文字串流結尾附加 `\x00CITATIONS\x00["entities/karpathy.md",...
 <claude-mem-context>
 # Memory Context
 
-# [LLM-wiki] recent context, 2026-05-07 6:42am GMT+8
+# [LLM-wiki] recent context, 2026-05-08 12:10am GMT+8
 
 Legend: 🎯session 🔴bugfix 🟣feature 🔄refactor ✅change 🔵discovery ⚖️decision 🚨security_alert 🔐security_note
 Format: ID TIME TYPE TITLE
 Fetch details: get_observations([IDs]) | Search: mem-search skill
 
-Stats: 50 obs (9,248t read) | 2,520,088t work | 100% savings
+Stats: 50 obs (10,929t read) | 3,732,959t work | 100% savings
 
 ### Apr 28, 2026
 S27 Google Drive 重連按鈕仍無效（第二輪修復）：深入調查環境變數與 token 儲存靜默失敗問題 (Apr 28, 7:49 PM)
@@ -247,19 +248,8 @@ S35 繼續 LLM-wiki 開發 — 升級 PageViewer 支援 Markdown 渲染並恢復
 S36 修復 .env.vercel.tmp 未排除問題、更新文件、從工作紀錄萃取可複用 Skills (May 5, 12:45 AM)
 S37 修復 .env.vercel.tmp gitignore、更新文件、從工作紀錄萃取 Skills 並同步至正確目錄 (May 5, 1:44 AM)
 ### May 6, 2026
-602 2:48a 🟣 WikiScreen 重大功能升級：搜尋、工作區切換、LLM Profile 選擇器
-603 " 🟣 新增 Settings 畫面（SettingsScreen + SettingsViewModel）
-604 " 🟣 NavGraph 新增 Settings 路由並串接 onNavigateToSettings
-605 " ✅ strings.xml（EN + zh-rTW）大幅擴充新功能字串
-607 2:59a 🔴 WikiScreen 修正 SwapHoriz 未使用 import 並將工作區切換按鈕改為 TextButton
 608 6:51a 🔵 Android App 功能完整稽核報告
 609 " 🔵 後端 API 契約確認：搜尋與 LLM Profile 端點
-610 " 🟣 新增 LlmProfile 與 SearchResult 資料類別
-611 " 🟣 WikiViewModel 大規模擴充：搜尋、模型選擇器、多工作區切換
-612 " 🟣 WikiScreen 重大 UI 升級：搜尋、工作區切換、LLM Profile 選擇器
-613 " 🟣 新增 Settings 畫面（SettingsScreen + SettingsViewModel）
-614 " ✅ strings.xml 大幅擴充新功能字串（EN + zh-rTW）
-615 " 🔴 補齊缺失的 gradlew / gradlew.bat 執行腳本
 617 7:34a 🔵 工作區功能缺陷與 UI 問題清單確認
 616 " 🔵 Claude 的瀏覽器為無頭瀏覽器，使用者不可見
 618 7:36a 🔵 Android app still hitting HTML 404 for workspace API routes post-deploy
@@ -298,6 +288,17 @@ S37 修復 .env.vercel.tmp gitignore、更新文件、從工作紀錄萃取 Skil
 650 " 🟣 PageViewer 全面升級：heading anchors、[[slug#anchor]] 支援、當前視窗導航
 651 " 🟣 PageTree 新增 Zone 使用說明提示與空狀態文字
 652 " 🟣 新增多個後端端點支援系統頁面補齊與工作區排序
+653 6:42a 🔴 Android Sidebar Layout Regression
+654 6:44a 🟣 Android Markdown Viewer — Internal Wiki Link Routing
+655 " 🔴 Web — Google Drive Auth Error No Longer Crashes Workspace Load
+656 " 🔴 Web TypeScript — Nullable Slug Destructuring Fixed in page-viewer.tsx
+657 " 🔴 Web workspace-shell.tsx — Null Guard on splice Result in moveWorkspace
+658 " 🔴 Android Build Fix — Missing Ktor post/header Imports in PageRepository
+659 " 🟣 Android — Workspace Sort Order Support with Move Up/Down UI
+660 " 🔴 Android PageRepository — Robust Token Refresh and ensureSystemPages Error Isolation
+661 " 🔵 Live Device — "Session Expired" Error Confirmed via UI Tree Dump
+662 " 🔵 Development Environment — adb Not in PATH; Full Path Required Each Session
+663 " ✅ Documentation — CLAUDE.md, AGENTS.md, README.md Updated for Phase 12 Features
 
-Access 2520k tokens of past work via get_observations([IDs]) or mem-search skill.
+Access 3733k tokens of past work via get_observations([IDs]) or mem-search skill.
 </claude-mem-context>

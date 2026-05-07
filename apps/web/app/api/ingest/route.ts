@@ -11,7 +11,8 @@ import {
 export const maxDuration = 300;
 import { urlToMarkdown } from '@/lib/fetch/url-to-markdown';
 import { runIngestPipeline } from '@/lib/ai/ingest-pipeline';
-import { DEFAULT_PROMPTS } from '@llm-wiki/prompts';
+import { getDefaultPrompt } from '@llm-wiki/prompts';
+import { resolveUiLocaleFromRequest } from '@/lib/i18n/ui-locale';
 
 const IngestSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('url'), url: z.string().url(), workspace_id: z.string().uuid() }),
@@ -24,6 +25,7 @@ const IngestSchema = z.discriminatedUnion('kind', [
 ]);
 
 export async function POST(request: NextRequest) {
+  const locale = resolveUiLocaleFromRequest(request);
   const { supabase, user } = await getRequestUser(request);
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
@@ -172,7 +174,7 @@ export async function POST(request: NextRequest) {
     'application/vnd.google-apps.folder',
   );
 
-  let systemPrompt = DEFAULT_PROMPTS.ingest;
+  let systemPrompt = getDefaultPrompt('ingest', locale);
   if (schemaFolderId) {
     const ingestFileId = await findFile(drive, 'ingest.md', schemaFolderId);
     if (ingestFileId) {
