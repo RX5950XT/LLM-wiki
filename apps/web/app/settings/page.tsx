@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, FileText } from 'lucide-react';
 import { createClient } from '@/lib/supabase/server';
 import { ProfileList } from '@/components/settings/profile-list';
 import { ProfileForm } from '@/components/settings/profile-form';
@@ -28,6 +28,15 @@ export default async function SettingsPage() {
   ]);
 
   const backHref = workspaces && workspaces.length > 0 ? `/w/${workspaces[0]!.id}` : '/w';
+  const workspaceId = workspaces?.[0]?.id;
+  const { data: rulePages } = workspaceId
+    ? await supabase
+        .from('pages')
+        .select('slug, title')
+        .eq('workspace_id', workspaceId)
+        .eq('zone', 'schema')
+        .order('slug', { ascending: true })
+    : { data: [] };
   const t = await getTranslations();
 
   return (
@@ -102,6 +111,27 @@ export default async function SettingsPage() {
           </h2>
           <LocaleSwitcher />
         </section>
+
+        {workspaceId && (
+          <section className="space-y-4">
+            <h2 className="text-sm font-medium uppercase tracking-wider" style={{ color: 'var(--fg-muted)' }}>
+              {t('settings.rules')}
+            </h2>
+            <div className="overflow-hidden rounded-xl border" style={{ borderColor: 'var(--border)' }}>
+              {(rulePages ?? []).map((page) => (
+                <Link
+                  key={page.slug}
+                  href={`/w/${workspaceId}?page=${encodeURIComponent(page.slug)}`}
+                  className="flex items-center gap-3 border-b px-4 py-3 text-sm transition-opacity last:border-b-0 hover:opacity-75"
+                  style={{ borderColor: 'var(--border)', color: 'var(--fg)' }}
+                >
+                  <FileText size={15} style={{ color: 'var(--fg-muted)' }} />
+                  <span>{page.title ?? page.slug}</span>
+                </Link>
+              ))}
+            </div>
+          </section>
+        )}
       </div>
     </div>
   );

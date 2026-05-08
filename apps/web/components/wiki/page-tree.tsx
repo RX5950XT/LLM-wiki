@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { FileText, ChevronDown, ChevronRight, PlusSquare } from 'lucide-react';
+import { FileText, ChevronDown, ChevronRight, PlusSquare, Pencil, Trash2 } from 'lucide-react';
 
 interface PageEntry {
   slug: string;
@@ -16,6 +16,8 @@ interface PageTreeProps {
   activePage: string | null;
   onSelectPage: (slug: string) => void;
   onCreateNote?: () => void;
+  onRenameNote?: (page: PageEntry) => void;
+  onDeleteNote?: (page: PageEntry) => void;
 }
 
 const PINNED_SLUGS = ['index.md', 'log.md'];
@@ -29,7 +31,14 @@ function groupByZone(pages: PageEntry[]) {
   return groups;
 }
 
-export function PageTree({ initialPages, activePage, onSelectPage, onCreateNote }: PageTreeProps) {
+export function PageTree({
+  initialPages,
+  activePage,
+  onSelectPage,
+  onCreateNote,
+  onRenameNote,
+  onDeleteNote,
+}: PageTreeProps) {
   const t = useTranslations();
   const [expanded, setExpanded] = useState<Record<string, boolean>>({ wiki: true });
 
@@ -48,7 +57,6 @@ export function PageTree({ initialPages, activePage, onSelectPage, onCreateNote 
   const ZONE_LABELS: Record<string, string> = {
     wiki: t('wiki.zoneWiki'),
     notes: t('wiki.zoneNotes'),
-    schema: t('wiki.zoneSchema'),
   };
 
   const pages = useMemo(() => initialPages, [initialPages]);
@@ -56,26 +64,54 @@ export function PageTree({ initialPages, activePage, onSelectPage, onCreateNote 
     .map((s) => pages.find((p) => p.slug === s))
     .filter((p): p is PageEntry => p != null);
 
-  const otherPages = pages.filter((p) => !PINNED_SLUGS.includes(p.slug));
+  const otherPages = pages.filter((p) => !PINNED_SLUGS.includes(p.slug) && p.zone !== 'schema');
   const grouped = groupByZone(otherPages);
 
   const toggleZone = (zone: string) =>
     setExpanded((s) => ({ ...s, [zone]: !s[zone] }));
 
   const renderPageItem = (page: PageEntry, label?: string) => (
-    <button
+    <div
       key={page.slug}
-      onClick={() => onSelectPage(page.slug)}
-      className="flex w-full items-center gap-2 px-4 py-1.5 text-sm transition-colors"
       style={{
         background: activePage === page.slug ? 'var(--color-accent-glow)' : undefined,
         color: activePage === page.slug ? 'var(--color-accent)' : 'var(--fg)',
         borderLeft: activePage === page.slug ? '2px solid var(--color-accent)' : '2px solid transparent',
       }}
+      className="flex items-center gap-1 pr-2"
     >
-      <FileText size={13} style={{ opacity: 0.6 }} />
-      <span className="truncate">{label ?? SYSTEM_LABELS[page.slug] ?? page.title ?? page.slug}</span>
-    </button>
+      <button
+        onClick={() => onSelectPage(page.slug)}
+        className="flex min-w-0 flex-1 items-center gap-2 px-4 py-1.5 text-left text-sm transition-colors"
+      >
+        <FileText size={13} style={{ opacity: 0.6 }} />
+        <span className="truncate">{label ?? SYSTEM_LABELS[page.slug] ?? page.title ?? page.slug}</span>
+      </button>
+      {page.zone === 'notes' && page.slug !== 'notes/guide.md' && (
+        <>
+          <button
+            type="button"
+            onClick={() => onRenameNote?.(page)}
+            className="rounded p-1 transition-opacity hover:opacity-70"
+            style={{ color: 'var(--fg-muted)' }}
+            aria-label={t('wiki.renameNote')}
+            title={t('wiki.renameNote')}
+          >
+            <Pencil size={12} />
+          </button>
+          <button
+            type="button"
+            onClick={() => onDeleteNote?.(page)}
+            className="rounded p-1 transition-opacity hover:opacity-70"
+            style={{ color: 'oklch(65% 0.18 30)' }}
+            aria-label={t('wiki.deleteNote')}
+            title={t('wiki.deleteNote')}
+          >
+            <Trash2 size={12} />
+          </button>
+        </>
+      )}
+    </div>
   );
 
   return (

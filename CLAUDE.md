@@ -280,13 +280,14 @@ Conversation panel 輸入框左側有模型選擇按鈕（`Bot` icon），從 `/
 - `uploadQueue` 狀態顯示每個檔案的進度（pending / uploading / done / error）
 - 每個檔案獨立呼叫 `/api/ingest`（`kind: 'text'`），支援 `profile_id` 覆寫
 
-## 筆記／結構區
+## 筆記／規則
 
-- 工作區建立與頁面列表讀取時，會自動補齊 `notes/guide.md` 與 `_schema/{ingest,query,lint}.md` 的 metadata，避免「筆記／結構」看起來是空白壞掉
-- `notes/guide.md`、`_schema/*.md` 會依目前 UI 語系自動本地化預設內容；若內容仍是預設模板，切換語言時會同步轉成對應語言
-- Web 與 Android 現在都可直接建立新的 `notes/*.md` 頁面，且筆記／規則頁都用內建 Markdown 工具列編輯；LLM 仍只讀 `notes/`、不會主動改寫
-- `_schema/*.md` 會在 UI 顯示為「匯入規則 / 查詢規則 / 健康檢查規則」，Zone 名稱統一顯示為「規則 / Rules」
+- 工作區建立與頁面列表讀取時，會自動補齊 `notes/guide.md` 與 `_schema/{ingest,query,lint}.md` 的 metadata，避免「筆記／規則」看起來是空白壞掉
+- `notes/guide.md`、`_schema/*.md` 會依目前 UI 語系自動本地化預設內容；內容變更時需同步 bump `version`，讓 Android Room cache 重新載入
+- Web 與 Android 現在都可新增、重新命名、刪除 `notes/*.md` 頁面，且筆記／規則頁都用內建 Markdown 工具列編輯；LLM 仍只讀 `notes/`、不會主動改寫
+- `_schema/*.md` 入口搬到設定頁，仍顯示為「匯入規則 / 查詢規則 / 健康檢查規則」；不要再把規則當成一般 Wiki 側欄區塊
 - Web `PageViewer` 與 Android `MarkdownViewer` 都會把 wiki 內部連結留在同一個 App / 視窗內跳轉，不再強制另開新視窗
+- Android 頁面內容讀取優先走 Web `/api/pages/{workspaceId}/{slug}`，避免手機端 Google Drive `drive.file` scope 與 Web 匯入檔案歸屬不同造成空內容
 
 ## 工作區排序
 

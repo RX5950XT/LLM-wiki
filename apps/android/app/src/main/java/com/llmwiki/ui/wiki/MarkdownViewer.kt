@@ -2,6 +2,7 @@ package com.llmwiki.ui.wiki
 
 import android.content.Intent
 import android.net.Uri
+import android.text.method.LinkMovementMethod
 import android.widget.TextView
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -80,7 +81,9 @@ fun MarkdownViewer(
         factory = { ctx ->
             TextView(ctx).apply {
                 textSize = 15f
-                setTextIsSelectable(true)
+                linksClickable = true
+                movementMethod = LinkMovementMethod.getInstance()
+                setTextIsSelectable(false)
                 setTextColor(textColor)
                 setLinkTextColor(linkColor)
             }
@@ -89,6 +92,7 @@ fun MarkdownViewer(
             view.setTextColor(textColor)
             view.setLinkTextColor(linkColor)
             markwon.setMarkdown(view, stripFrontmatterAndWikilinks(markdown))
+            view.movementMethod = LinkMovementMethod.getInstance()
         },
     )
 }

@@ -10,6 +10,7 @@ import {
 
 const LockSchema = z.object({ locked_by_human: z.boolean() });
 const ContentSchema = z.object({ content: z.string() });
+const RenameSchema = z.object({ title: z.string().min(1).max(120) });
 
 export async function GET(
   request: NextRequest,
@@ -60,7 +61,8 @@ export async function PATCH(
   const body = await request.json().catch(() => null);
   const parsedLock = LockSchema.safeParse(body);
   const parsedContent = ContentSchema.safeParse(body);
-  if (!parsedLock.success && !parsedContent.success) {
+  const parsedRename = RenameSchema.safeParse(body);
+  if (!parsedLock.success && !parsedContent.success && !parsedRename.success) {
     return NextResponse.json({ error: 'Bad request' }, { status: 400 });
   }
 
@@ -90,6 +92,62 @@ export async function PATCH(
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
     return NextResponse.json({ ok: true });
+  }
+
+  if (parsedRename.success) {
+    if (page.zone !== 'notes' || page.slug === 'notes/guide.md') {
+      return NextResponse.json({ error: 'Only user notes can be renamed' }, { status: 403 });
+    }
+
+    let drive: Awaited<ReturnType<typeof createDriveClientForUser>>;
+    try {
+      drive = await createDriveClientForUser(user.id);
+    } catch (error) {
+      if (isGoogleDriveAuthError(error)) {
+        return NextResponse.json(
+          { error: error.message || GOOGLE_DRIVE_REAUTH_MESSAGE },
+          { status: 403 },
+        );
+      }
+      throw error;
+    }
+
+    const title = parsedRename.data.title.trim();
+    const currentContent = await readDriveFile(drive, page.drive_file_id);
+    const content = renameNoteContent(currentContent, title);
+    await writeDriveFile(drive, content, {
+      fileId: page.drive_file_id,
+      name: `${slugify(title)}.md`,
+      parentId: '',
+    });
+    await drive.files.update({
+      fileId: page.drive_file_id,
+      requestBody: { name: `${slugify(title)}.md` },
+      fields: 'id',
+    });
+
+    const { error: updateError } = await supabase
+      .from('pages')
+      .update({
+        title,
+        content_hash: await hashContent(content),
+        version: page.version + 1,
+        updated_by: 'human',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', page.id);
+    if (updateError) return NextResponse.json({ error: updateError.message }, { status: 500 });
+
+    return NextResponse.json({
+      slug: page.slug,
+      title,
+      kind: page.kind,
+      zone: page.zone,
+      updated_by: 'human',
+      locked_by_human: page.locked_by_human,
+      version: page.version + 1,
+      content,
+    });
   }
 
   if (page.zone === 'wiki') {
@@ -143,6 +201,75 @@ export async function PATCH(
   });
 }
 
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ workspaceId: string; slug: string[] }> },
+) {
+  const { workspaceId, slug: slugParts } = await params;
+  const slug = slugParts.join('/');
+
+  const { supabase, user } = await getRequestUser(request);
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const { data: ws } = await supabase
+    .from('workspaces')
+    .select('id')
+    .eq('id', workspaceId)
+    .eq('owner_id', user.id)
+    .single();
+  if (!ws) return NextResponse.json({ error: 'Workspace not found' }, { status: 404 });
+
+  const { data: page } = await supabase
+    .from('pages')
+    .select('id, slug, zone, drive_file_id')
+    .eq('workspace_id', workspaceId)
+    .eq('slug', slug)
+    .single();
+  if (!page) return NextResponse.json({ error: 'Page not found' }, { status: 404 });
+
+  if (page.zone !== 'notes' || page.slug === 'notes/guide.md') {
+    return NextResponse.json({ error: 'Only user notes can be deleted' }, { status: 403 });
+  }
+
+  let drive: Awaited<ReturnType<typeof createDriveClientForUser>>;
+  try {
+    drive = await createDriveClientForUser(user.id);
+  } catch (error) {
+    if (isGoogleDriveAuthError(error)) {
+      return NextResponse.json(
+        { error: error.message || GOOGLE_DRIVE_REAUTH_MESSAGE },
+        { status: 403 },
+      );
+    }
+    throw error;
+  }
+
+  await drive.files.update({
+    fileId: page.drive_file_id,
+    requestBody: { trashed: true },
+    fields: 'id',
+  });
+
+  const { error: outgoingLinksError } = await supabase
+    .from('page_links')
+    .delete()
+    .eq('workspace_id', workspaceId)
+    .eq('from_slug', page.slug);
+  if (outgoingLinksError) return NextResponse.json({ error: outgoingLinksError.message }, { status: 500 });
+
+  const { error: incomingLinksError } = await supabase
+    .from('page_links')
+    .delete()
+    .eq('workspace_id', workspaceId)
+    .eq('to_slug', page.slug);
+  if (incomingLinksError) return NextResponse.json({ error: incomingLinksError.message }, { status: 500 });
+
+  const { error: deleteError } = await supabase.from('pages').delete().eq('id', page.id);
+  if (deleteError) return NextResponse.json({ error: deleteError.message }, { status: 500 });
+
+  return NextResponse.json({ ok: true });
+}
+
 function deriveTitleFromContent(content: string, fallback: string | null): string | null {
   const frontmatterTitle = content.match(/^title:\s*"?(.*?)"?$/m)?.[1]?.trim();
   if (frontmatterTitle) return frontmatterTitle;
@@ -159,4 +286,33 @@ function deriveTitleFromContent(content: string, fallback: string | null): strin
 async function hashContent(content: string): Promise<string> {
   const { createHash } = await import('crypto');
   return createHash('sha256').update(content, 'utf8').digest('hex').slice(0, 16);
+}
+
+function slugify(text: string): string {
+  const ascii = text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, '')
+    .trim()
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+
+  if (ascii) return ascii.slice(0, 40);
+  return `note-${Date.now()}`;
+}
+
+function renameNoteContent(content: string, title: string): string {
+  if (/^title:\s*.*$/m.test(content)) {
+    return content.replace(/^title:\s*.*$/m, `title: "${escapeYamlTitle(title)}"`);
+  }
+
+  if (/^#\s+.+$/m.test(content)) {
+    return content.replace(/^#\s+.+$/m, `# ${title}`);
+  }
+
+  return `# ${title}\n\n${content}`;
+}
+
+function escapeYamlTitle(value: string): string {
+  return value.replace(/"/g, '\\"');
 }

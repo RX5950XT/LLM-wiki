@@ -1,19 +1,25 @@
 package com.llmwiki.data
 
+import com.llmwiki.BuildConfig
 import com.llmwiki.data.room.AppDatabase
 import com.llmwiki.data.room.PageEntity
 import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.query.Order
+import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.statement.HttpResponse
+import io.ktor.client.statement.bodyAsText
 import kotlinx.coroutines.flow.Flow
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 
 class PageRepository(
     private val db: AppDatabase,
     private val driveClient: DriveClient?,
 ) {
     private val supabase get() = SupabaseClientProvider.client
+    private val json = Json { ignoreUnknownKeys = true }
 
     fun observePages(workspaceId: String, accountName: String): Flow<List<PageEntity>> =
         db.pageDao().observePages(workspaceId, accountName)
@@ -57,7 +63,9 @@ class PageRepository(
     suspend fun loadPageContent(workspaceId: String, accountName: String, slug: String): String? {
         val entity = db.pageDao().getPage(workspaceId, accountName, slug) ?: return null
         if (entity.content != null) return entity.content
-        val content = driveClient?.readFile(entity.driveFileId) ?: return null
+        val content = loadPageContentFromApi(workspaceId, slug)
+            ?: driveClient?.readFile(entity.driveFileId)
+            ?: return null
         db.pageDao().updateContent(workspaceId, accountName, slug, content)
         return content
     }
@@ -107,6 +115,28 @@ class PageRepository(
             header("x-llm-wiki-locale", locale)
         }
 
+    private suspend fun loadPageContentFromApi(workspaceId: String, slug: String): String? {
+        var accessToken = supabase.requireAccessToken(forceRefresh = false)
+            ?: supabase.requireAccessToken(forceRefresh = true)
+            ?: return null
+
+        var response = getPageContentResponse(accessToken, workspaceId, slug)
+        if (response.status.value == 401) {
+            accessToken = supabase.requireAccessToken(forceRefresh = true) ?: return null
+            response = getPageContentResponse(accessToken, workspaceId, slug)
+        }
+
+        if (response.status.value !in 200..299) return null
+        val raw = response.bodyAsText()
+        if (!raw.trimStart().startsWith("{")) return null
+        return runCatching { json.decodeFromString<PageContentResponse>(raw).content }.getOrNull()
+    }
+
+    private suspend fun getPageContentResponse(accessToken: String, workspaceId: String, slug: String): HttpResponse =
+        AndroidHttpClient.instance.get("${BuildConfig.WEB_API_BASE_URL.trimEnd('/')}/api/pages/$workspaceId/${slug.encodePathSegments()}") {
+            header("Authorization", "Bearer $accessToken")
+        }
+
     private suspend fun <T> withSupabaseRetry(block: suspend () -> T): T {
         supabase.requireAccessToken(forceRefresh = false) ?: supabase.requireAccessToken(forceRefresh = true)
         return runCatching { block() }
@@ -126,4 +156,14 @@ class PageRepository(
                     message.contains("schema cache", ignoreCase = true)
                 )
     }
+
+    private fun String.encodePathSegments(): String =
+        split('/').joinToString("/") { segment ->
+            java.net.URLEncoder.encode(segment, "UTF-8").replace("+", "%20")
+        }
 }
+
+@Serializable
+private data class PageContentResponse(
+    val content: String,
+)

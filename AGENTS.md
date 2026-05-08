@@ -142,12 +142,13 @@ Query API 文字串流結尾附加 `\x00CITATIONS\x00["entities/karpathy.md",...
 ### Drive Token 失效處理
 `create-form.tsx` 偵測 403 + "Google Drive" → 顯示「Re-connect Google Drive」按鈕 → `signInWithOAuth({ prompt: 'consent', access_type: 'offline' })` → auth/callback 重新儲存 refresh token。
 
-### 筆記／結構區
-- 工作區建立與頁面列表讀取時，會自動補齊 `notes/guide.md` 與 `_schema/{ingest,query,lint}.md` 的 metadata，避免「筆記／結構」區看起來像空白故障
-- `notes/guide.md` 與 `_schema/*.md` 的預設內容會跟著目前 UI 語系切換；若頁面仍是預設模板，切語言時會同步改成對應語言
-- Web 與 Android 都可直接建立新的 `notes/*.md` 頁面，且筆記／規則頁都用內建 Markdown 工具列編輯；LLM 仍只讀 `notes/`，不會主動改寫
-- `_schema/*.md` 在 UI 內顯示為「匯入規則 / 查詢規則 / 健康檢查規則」，Zone 名稱統一顯示為「規則 / Rules」
+### 筆記／規則
+- 工作區建立與頁面列表讀取時，會自動補齊 `notes/guide.md` 與 `_schema/{ingest,query,lint}.md` 的 metadata，避免「筆記／規則」區看起來像空白故障
+- `notes/guide.md` 與 `_schema/*.md` 的預設內容會跟著目前 UI 語系切換；若內容仍是預設模板，切語言時要同步改成對應語言並 bump `version`，讓 Android Room cache 重新載入
+- Web 與 Android 都可新增、重新命名、刪除新的 `notes/*.md` 頁面，且筆記／規則頁都用內建 Markdown 工具列編輯；LLM 仍只讀 `notes/`，不會主動改寫
+- `_schema/*.md` 入口搬到設定頁，仍顯示為「匯入規則 / 查詢規則 / 健康檢查規則」；不要再把規則當成一般 Wiki 側欄區塊
 - Web 與 Android 的 markdown 內部連結都應留在同一個 App / 視窗內跳轉，不另開新視窗
+- Android 頁面內容讀取優先走 Web `/api/pages/{workspaceId}/{slug}`，避免手機端 Google Drive `drive.file` scope 與 Web 匯入檔案歸屬不同造成空內容
 
 ### 工作區排序
 - `workspaces.sort_order`（`0005_workspace_sort_order.sql`）保存使用者自訂順序

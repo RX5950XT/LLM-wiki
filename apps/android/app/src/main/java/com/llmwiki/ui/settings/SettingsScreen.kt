@@ -1,6 +1,7 @@
 package com.llmwiki.ui.settings
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -20,6 +21,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
@@ -77,6 +79,8 @@ private val providerPresets = listOf(
 @Composable
 fun SettingsScreen(
     onBack: () -> Unit,
+    workspaceId: String? = null,
+    onOpenRule: (String) -> Unit = {},
     settingsViewModel: SettingsViewModel = viewModel(),
 ) {
     val uiState by settingsViewModel.uiState.collectAsState()
@@ -187,6 +191,27 @@ fun SettingsScreen(
                 }
             }
 
+            if (!workspaceId.isNullOrBlank()) {
+                item {
+                    SettingsSection(title = stringResource(R.string.settings_rules)) {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            RuleRow(
+                                title = stringResource(R.string.wiki_schema_ingest),
+                                onClick = { onOpenRule("_schema/ingest.md") },
+                            )
+                            RuleRow(
+                                title = stringResource(R.string.wiki_schema_query),
+                                onClick = { onOpenRule("_schema/query.md") },
+                            )
+                            RuleRow(
+                                title = stringResource(R.string.wiki_schema_lint),
+                                onClick = { onOpenRule("_schema/lint.md") },
+                            )
+                        }
+                    }
+                }
+            }
+
             uiState.error?.let { error ->
                 item {
                     Text(
@@ -232,6 +257,32 @@ fun SettingsScreen(
                 }
             },
         )
+    }
+}
+
+@Composable
+private fun RuleRow(
+    title: String,
+    onClick: () -> Unit,
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = MaterialTheme.shapes.medium,
+        modifier = Modifier.clickable(onClick = onClick),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                Icons.Default.Description,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(18.dp),
+            )
+            Text(title, style = MaterialTheme.typography.bodyMedium)
+        }
     }
 }
 

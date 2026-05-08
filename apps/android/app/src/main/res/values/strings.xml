@@ -69,6 +69,9 @@
     <string name="wiki_create_note">New note</string>
     <string name="wiki_create_note_hint">Create a note page first, then edit it in Markdown.</string>
     <string name="wiki_note_created">Note created</string>
+    <string name="wiki_rename_note">Rename note</string>
+    <string name="wiki_delete_note">Delete note</string>
+    <string name="wiki_delete_note_confirm">Delete \"%1$s\"? This cannot be undone.</string>
     <string name="wiki_select_model">Select model</string>
     <string name="wiki_current_workspace">Current workspace</string>
     <string name="workspace_actions">Workspace actions</string>
@@ -88,6 +91,7 @@
     <string name="settings_theme_dark">Dark</string>
     <string name="settings_theme_system">System</string>
     <string name="settings_language">Language</string>
+    <string name="settings_rules">Rules</string>
     <string name="settings_language_system">Follow system</string>
     <string name="settings_language_zh_tw">繁體中文</string>
     <string name="settings_language_en">English</string>
@@ -103,13 +107,13 @@
     <!-- Help -->
     <string name="help_title">Help</string>
     <string name="help_workspace_title">Workspaces and pages</string>
-    <string name="help_workspace_body">Use the workspace menu to switch, reorder, or create a workspace. Knowledge pages are LLM-maintained, notes are yours, and rule pages contain the prompts and control files that steer the LLM.</string>
+    <string name="help_workspace_body">Use the workspace menu to switch, reorder, or create a workspace. Knowledge pages are LLM-maintained; notes can be created, renamed, deleted, and edited in Markdown.</string>
     <string name="help_ingest_title">Import content</string>
     <string name="help_ingest_body">Use + to paste a URL, text, or Markdown. Use the attachment button to import a text file from your phone.</string>
     <string name="help_chat_title">Chat and synthesis</string>
     <string name="help_chat_body">Open Chat to ask your wiki questions. Choose a model profile in the chat bar, then save useful answers as synthesis pages.</string>
     <string name="help_settings_title">Settings and profiles</string>
-    <string name="help_settings_body">Settings manages LLM profiles, language, and appearance. Profiles are synced through your Supabase account.</string>
+    <string name="help_settings_body">Settings manages LLM profiles, language, appearance, and rules. Rules are the prompt files that control ingest, query, and health checks.</string>
     <string name="help_drive_title">Google Drive reconnect</string>
     <string name="help_drive_body">If Drive permission expires, reconnect in the browser and return to the app. The app will refresh workspace and profile data after reconnecting.</string>
     <string name="workspace_create_menu_hint">Add another Drive-backed wiki</string>

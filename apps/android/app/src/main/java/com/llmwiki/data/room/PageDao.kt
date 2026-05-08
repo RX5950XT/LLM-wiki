@@ -30,6 +30,9 @@ interface PageDao {
     @Query("DELETE FROM pages WHERE workspace_id = :workspaceId AND account_name = :accountName")
     suspend fun deleteByWorkspace(workspaceId: String, accountName: String)
 
+    @Query("DELETE FROM pages WHERE workspace_id = :workspaceId AND account_name = :accountName AND slug = :slug")
+    suspend fun deletePage(workspaceId: String, accountName: String, slug: String)
+
     @Query("DELETE FROM pages WHERE workspace_id = :workspaceId AND account_name = :accountName AND slug NOT IN (:slugs)")
     suspend fun deleteMissingPages(workspaceId: String, accountName: String, slugs: List<String>)
 

@@ -53,6 +53,8 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
   const [renamingWorkspace, setRenamingWorkspace] = useState<WorkspaceEntry | null>(null);
   const [deletingWorkspace, setDeletingWorkspace] = useState<WorkspaceEntry | null>(null);
   const [creatingNote, setCreatingNote] = useState(false);
+  const [renamingNote, setRenamingNote] = useState<PageEntry | null>(null);
+  const [deletingNote, setDeletingNote] = useState<PageEntry | null>(null);
   const [workspaceActionError, setWorkspaceActionError] = useState<string | null>(null);
   const [workspaceActionLoading, setWorkspaceActionLoading] = useState(false);
   const [pages, setPages] = useState(initialPages);
@@ -270,6 +272,51 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
       setWorkspaceActionLoading(false);
     }
   }, [locale, refreshPageList, selectPage, workspaceId]);
+
+  const renameNote = useCallback(async (page: PageEntry, title: string) => {
+    const trimmed = title.trim();
+    if (!trimmed || trimmed === page.title) {
+      setRenamingNote(null);
+      return;
+    }
+
+    setWorkspaceActionLoading(true);
+    setWorkspaceActionError(null);
+    try {
+      const res = await fetch(`/api/pages/${workspaceId}/${encodeSlugPath(page.slug)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: trimmed }),
+      });
+      const data = await res.json().catch(() => null) as { error?: string } | null;
+      if (!res.ok) throw new Error(data?.error ?? 'Failed to rename note');
+      setPages((prev) => prev.map((item) => (item.slug === page.slug ? { ...item, title: trimmed } : item)));
+      setRenamingNote(null);
+      refreshPageList();
+    } catch (error) {
+      setWorkspaceActionError(error instanceof Error ? error.message : 'Failed to rename note');
+    } finally {
+      setWorkspaceActionLoading(false);
+    }
+  }, [refreshPageList, workspaceId]);
+
+  const deleteNote = useCallback(async (page: PageEntry) => {
+    setWorkspaceActionLoading(true);
+    setWorkspaceActionError(null);
+    try {
+      const res = await fetch(`/api/pages/${workspaceId}/${encodeSlugPath(page.slug)}`, { method: 'DELETE' });
+      const data = await res.json().catch(() => null) as { error?: string } | null;
+      if (!res.ok) throw new Error(data?.error ?? 'Failed to delete note');
+      setPages((prev) => prev.filter((item) => item.slug !== page.slug));
+      if (activePage === page.slug) selectPage('index.md');
+      setDeletingNote(null);
+      refreshPageList();
+    } catch (error) {
+      setWorkspaceActionError(error instanceof Error ? error.message : 'Failed to delete note');
+    } finally {
+      setWorkspaceActionLoading(false);
+    }
+  }, [activePage, refreshPageList, selectPage, workspaceId]);
 
   const renameWorkspace = useCallback(async (workspace: WorkspaceEntry, name: string) => {
     const trimmed = name.trim();
@@ -632,6 +679,14 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
                   setWorkspaceActionError(null);
                   setCreatingNote(true);
                 }}
+                onRenameNote={(page) => {
+                  setWorkspaceActionError(null);
+                  setRenamingNote(page);
+                }}
+                onDeleteNote={(page) => {
+                  setWorkspaceActionError(null);
+                  setDeletingNote(page);
+                }}
               />
             </div>
             <div
@@ -715,8 +770,30 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
           onSubmit={createNote}
         />
       )}
+      {renamingNote && (
+        <NoteRenameDialog
+          note={renamingNote}
+          loading={workspaceActionLoading}
+          error={workspaceActionError}
+          onClose={() => setRenamingNote(null)}
+          onSubmit={(title) => renameNote(renamingNote, title)}
+        />
+      )}
+      {deletingNote && (
+        <NoteDeleteDialog
+          note={deletingNote}
+          loading={workspaceActionLoading}
+          error={workspaceActionError}
+          onClose={() => setDeletingNote(null)}
+          onConfirm={() => deleteNote(deletingNote)}
+        />
+      )}
     </div>
   );
+}
+
+function encodeSlugPath(slug: string): string {
+  return slug.split('/').map(encodeURIComponent).join('/');
 }
 
 function WorkspaceRenameDialog({
@@ -884,6 +961,107 @@ function NoteCreateDialog({
           </button>
         </div>
       </form>
+    </div>
+  );
+}
+
+function NoteRenameDialog({
+  note,
+  loading,
+  error,
+  onClose,
+  onSubmit,
+}: {
+  note: PageEntry;
+  loading: boolean;
+  error: string | null;
+  onClose: () => void;
+  onSubmit: (title: string) => void;
+}) {
+  const t = useTranslations();
+  const [title, setTitle] = useState(note.title ?? note.slug.replace(/^notes\//, '').replace(/\.md$/, ''));
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <button className="absolute inset-0 cursor-default" style={{ background: 'oklch(8% 0.01 250 / 0.55)' }} onClick={onClose} />
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSubmit(title);
+        }}
+        className="relative w-full max-w-sm space-y-4 rounded-xl border p-5 shadow-2xl"
+        style={{ background: 'var(--bg)', borderColor: 'var(--border)', color: 'var(--fg)' }}
+      >
+        <h2 className="text-base font-semibold">{t('wiki.renameNote')}</h2>
+        <input
+          value={title}
+          onChange={(event) => setTitle(event.target.value)}
+          maxLength={120}
+          className="w-full rounded-md border px-3 py-2 text-sm outline-none"
+          style={{ background: 'var(--bg-2)', borderColor: 'var(--border)', color: 'var(--fg)' }}
+          autoFocus
+        />
+        {error && <p className="text-xs" style={{ color: 'oklch(65% 0.18 30)' }}>{error}</p>}
+        <div className="flex justify-end gap-2">
+          <button type="button" onClick={onClose} className="rounded-md px-3 py-2 text-sm" style={{ color: 'var(--fg-muted)' }}>
+            {t('common.cancel')}
+          </button>
+          <button
+            type="submit"
+            disabled={loading || !title.trim()}
+            className="rounded-md px-3 py-2 text-sm font-medium disabled:opacity-50"
+            style={{ background: 'var(--color-accent)', color: 'oklch(10% 0.015 250)' }}
+          >
+            {t('common.save')}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function NoteDeleteDialog({
+  note,
+  loading,
+  error,
+  onClose,
+  onConfirm,
+}: {
+  note: PageEntry;
+  loading: boolean;
+  error: string | null;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  const t = useTranslations();
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <button className="absolute inset-0 cursor-default" style={{ background: 'oklch(8% 0.01 250 / 0.55)' }} onClick={onClose} />
+      <section
+        className="relative w-full max-w-sm space-y-4 rounded-xl border p-5 shadow-2xl"
+        style={{ background: 'var(--bg)', borderColor: 'var(--border)', color: 'var(--fg)' }}
+      >
+        <h2 className="text-base font-semibold">{t('wiki.deleteNote')}</h2>
+        <p className="text-sm leading-6" style={{ color: 'var(--fg-muted)' }}>
+          {t('wiki.deleteNoteConfirm', { title: note.title ?? note.slug })}
+        </p>
+        {error && <p className="text-xs" style={{ color: 'oklch(65% 0.18 30)' }}>{error}</p>}
+        <div className="flex justify-end gap-2">
+          <button type="button" onClick={onClose} className="rounded-md px-3 py-2 text-sm" style={{ color: 'var(--fg-muted)' }}>
+            {t('common.cancel')}
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={loading}
+            className="rounded-md px-3 py-2 text-sm font-medium disabled:opacity-50"
+            style={{ background: 'oklch(65% 0.18 30)', color: 'oklch(10% 0.015 30)' }}
+          >
+            {t('common.delete')}
+          </button>
+        </div>
+      </section>
     </div>
   );
 }

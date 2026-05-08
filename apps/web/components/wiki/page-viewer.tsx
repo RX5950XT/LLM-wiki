@@ -67,6 +67,10 @@ function normalizeWikiSlug(slug: string): string {
   return trimmed.endsWith('.md') ? trimmed : `${trimmed}.md`;
 }
 
+function encodeSlugPath(slug: string): string {
+  return slug.split('/').map(encodeURIComponent).join('/');
+}
+
 type EditorAction = {
   id: string;
   label: string;
@@ -148,7 +152,7 @@ export function PageViewer({
       setError(null);
       setStale(false);
 
-      fetch(`/api/pages/${workspaceId}/${encodeURIComponent(target)}`)
+      fetch(`/api/pages/${workspaceId}/${encodeSlugPath(target)}`)
         .then((r) => (r.ok ? r.json() : Promise.reject(r.statusText)))
         .then((data: PageData) => {
           setPage(data);
@@ -190,7 +194,7 @@ export function PageViewer({
     setLockPending(true);
     try {
       await fetch(
-        `/api/pages/${workspaceId}/${encodeURIComponent(page.slug)}`,
+        `/api/pages/${workspaceId}/${encodeSlugPath(page.slug)}`,
         {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
@@ -210,7 +214,7 @@ export function PageViewer({
     setSavePending(true);
     setError(null);
     try {
-      const res = await fetch(`/api/pages/${workspaceId}/${encodeURIComponent(page.slug)}`, {
+      const res = await fetch(`/api/pages/${workspaceId}/${encodeSlugPath(page.slug)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content: draft }),

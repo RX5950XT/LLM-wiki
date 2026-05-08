@@ -118,12 +118,16 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
     private val _uiState = MutableStateFlow(WikiUiState())
     val uiState: StateFlow<WikiUiState> = _uiState
 
-    fun init(workspaceIdParam: String?, accountName: String) {
+    fun init(workspaceIdParam: String?, accountName: String, initialPageSlug: String? = null) {
         this.accountName = accountName
         accountNameFlow.value = accountName
         driveClient = DriveClient(getApplication(), accountName)
 
-        refreshWorkspaces(preferredWorkspaceId = workspaceIdParam, syncSelected = true)
+        refreshWorkspaces(
+            preferredWorkspaceId = workspaceIdParam,
+            preferredPageSlug = initialPageSlug,
+            syncSelected = true,
+        )
         loadProfiles()
     }
 
@@ -391,6 +395,95 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun renameNote(page: PageEntity, title: String, onDone: (Boolean) -> Unit = {}) {
+        val trimmed = title.trim()
+        if (trimmed.isBlank() || page.zone != "notes" || page.slug == "notes/guide.md") {
+            onDone(false)
+            return
+        }
+
+        viewModelScope.launch {
+            val wsId = workspaceId.value ?: return@launch
+            _uiState.update { it.copy(pageSaveLoading = true, syncError = null) }
+            try {
+                val bodyJson = buildJsonObject { put("title", trimmed) }.toString()
+                val response = sendAuthorizedRequest { accessToken ->
+                    AndroidHttpClient.instance.patch(webApiUrl("/api/pages/$wsId/${page.slug.encodePathSegments()}")) {
+                        header("Authorization", "Bearer $accessToken")
+                        contentType(ContentType.Application.Json)
+                        setBody(bodyJson)
+                    }
+                } ?: run {
+                    _uiState.update { it.copy(pageSaveLoading = false, syncError = unauthorizedMessage()) }
+                    onDone(false)
+                    return@launch
+                }
+                val text = response.bodyAsText()
+                if (response.status.value !in 200..299) {
+                    _uiState.update { it.copy(pageSaveLoading = false, syncError = parseApiError(text, "Failed to rename note")) }
+                    onDone(false)
+                    return@launch
+                }
+
+                syncPagesInternal(wsId)
+                val updated = db.pageDao().getPage(wsId, accountName, page.slug)
+                if (updated != null && _uiState.value.activePage?.slug == page.slug) {
+                    _uiState.update { it.copy(activePage = updated) }
+                }
+                _uiState.update { it.copy(pageSaveLoading = false, syncError = null) }
+                onDone(true)
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(pageSaveLoading = false, syncError = e.toUserFacingMessage("Failed to rename note"))
+                }
+                onDone(false)
+            }
+        }
+    }
+
+    fun deleteNote(page: PageEntity, onDone: (Boolean) -> Unit = {}) {
+        if (page.zone != "notes" || page.slug == "notes/guide.md") {
+            onDone(false)
+            return
+        }
+
+        viewModelScope.launch {
+            val wsId = workspaceId.value ?: return@launch
+            _uiState.update { it.copy(pageSaveLoading = true, syncError = null) }
+            try {
+                val response = sendAuthorizedRequest { accessToken ->
+                    AndroidHttpClient.instance.delete(webApiUrl("/api/pages/$wsId/${page.slug.encodePathSegments()}")) {
+                        header("Authorization", "Bearer $accessToken")
+                    }
+                } ?: run {
+                    _uiState.update { it.copy(pageSaveLoading = false, syncError = unauthorizedMessage()) }
+                    onDone(false)
+                    return@launch
+                }
+                val text = response.bodyAsText()
+                if (response.status.value !in 200..299) {
+                    _uiState.update { it.copy(pageSaveLoading = false, syncError = parseApiError(text, "Failed to delete note")) }
+                    onDone(false)
+                    return@launch
+                }
+
+                db.pageDao().deletePage(wsId, accountName, page.slug)
+                if (_uiState.value.activePage?.slug == page.slug) {
+                    _uiState.update { it.copy(activePage = null, pageContent = null, contentLoading = false) }
+                }
+                syncPagesInternal(wsId)
+                selectDefaultPageIfNeeded(wsId)
+                _uiState.update { it.copy(pageSaveLoading = false, syncError = null) }
+                onDone(true)
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(pageSaveLoading = false, syncError = e.toUserFacingMessage("Failed to delete note"))
+                }
+                onDone(false)
+            }
+        }
+    }
+
     fun selectSearchResult(slug: String) {
         val existing = pages.value.find { it.slug == slug }
         if (existing != null) {
@@ -428,7 +521,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
             val wsId = workspaceId.value ?: return@launch
             try {
                 val response = sendAuthorizedRequest { accessToken ->
-                    AndroidHttpClient.instance.patch(webApiUrl("/api/pages/$wsId/${slug.encodeUrl()}")) {
+                    AndroidHttpClient.instance.patch(webApiUrl("/api/pages/$wsId/${slug.encodePathSegments()}")) {
                         header("Authorization", "Bearer $accessToken")
                         contentType(ContentType.Application.Json)
                         setBody("""{"locked_by_human":${!currentLocked}}""")
@@ -710,7 +803,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                     put("content", content)
                 }.toString()
                 val response = sendAuthorizedRequest { accessToken ->
-                    AndroidHttpClient.instance.patch(webApiUrl("/api/pages/$wsId/${slug.encodeUrl()}")) {
+                    AndroidHttpClient.instance.patch(webApiUrl("/api/pages/$wsId/${slug.encodePathSegments()}")) {
                         header("Authorization", "Bearer $accessToken")
                         contentType(ContentType.Application.Json)
                         setBody(bodyJson)
@@ -772,7 +865,11 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                         contentType(ContentType.Application.Json)
                         setBody(bodyJson)
                     }
-                } ?: return@launch
+                } ?: run {
+                    _uiState.update { it.copy(syncError = unauthorizedMessage()) }
+                    onDone(false)
+                    return@launch
+                }
                 val text = response.bodyAsText()
                 if (response.status.value !in 200..299) {
                     _uiState.update { it.copy(syncError = parseApiError(text, "Lint failed")) }
@@ -895,6 +992,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun refreshWorkspaces(
         preferredWorkspaceId: String? = workspaceId.value,
+        preferredPageSlug: String? = null,
         syncSelected: Boolean,
     ) {
         viewModelScope.launch {
@@ -924,7 +1022,11 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                 if (targetId != null) {
                     if (syncSelected || targetId != previousId) {
                         syncPagesInternal(targetId)
-                        selectDefaultPageIfNeeded(targetId)
+                        if (!preferredPageSlug.isNullOrBlank()) {
+                            selectPageBySlugFromDb(targetId, preferredPageSlug)
+                        } else {
+                            selectDefaultPageIfNeeded(targetId)
+                        }
                     }
                     SyncWorker.schedule(getApplication(), accountName, targetId)
                 }
@@ -970,6 +1072,17 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
             ?: db.pageDao().getPage(wsId, accountName, "log.md")
             ?: return
         selectPage(page)
+    }
+
+    private suspend fun selectPageBySlugFromDb(wsId: String, slug: String) {
+        val normalized = normalizeWikiSlug(slug)
+        val page = db.pageDao().getPage(wsId, accountName, normalized)
+            ?: db.pageDao().getPage(wsId, accountName, slug)
+        if (page != null) {
+            selectPage(page)
+        } else {
+            selectDefaultPageIfNeeded(wsId)
+        }
     }
 
     private fun requestDriveReconnect(source: String, message: String) {
@@ -1037,6 +1150,9 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun String.encodeUrl() =
         java.net.URLEncoder.encode(this, "UTF-8").replace("+", "%20")
+
+    private fun String.encodePathSegments(): String =
+        split('/').joinToString("/") { it.encodeUrl() }
 
     private fun currentUiLocale(): String {
         val primary = getApplication<Application>().resources.configuration.locales[0]

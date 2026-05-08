@@ -66,19 +66,29 @@ fun LlmWikiNavGraph(
             )
         }
         composable(
-            route = "wiki?workspaceId={workspaceId}",
-            arguments = listOf(navArgument("workspaceId") {
-                type = NavType.StringType
-                nullable = true
-                defaultValue = null
-            }),
+            route = "wiki?workspaceId={workspaceId}&page={page}",
+            arguments = listOf(
+                navArgument("workspaceId") {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = null
+                },
+                navArgument("page") {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = null
+                },
+            ),
         ) { backStackEntry ->
             WikiScreen(
                 workspaceId = backStackEntry.arguments?.getString("workspaceId"),
+                initialPageSlug = backStackEntry.arguments?.getString("page"),
                 accountName = accountName,
                 shareUrl = shareUrlEvent?.value,
                 authReturnUri = authReturnEvent?.value,
-                onNavigateToSettings = { navController.navigate("settings") },
+                onNavigateToSettings = { currentWorkspaceId ->
+                    navController.navigate("settings?workspaceId=${currentWorkspaceId.orEmpty()}")
+                },
                 onNavigateToCreateWorkspace = { navController.navigate("workspace-create") },
                 onSignedOut = {
                     navController.navigate("auth") {
@@ -99,9 +109,22 @@ fun LlmWikiNavGraph(
                 },
             )
         }
-        composable("settings") {
+        composable(
+            route = "settings?workspaceId={workspaceId}",
+            arguments = listOf(navArgument("workspaceId") {
+                type = NavType.StringType
+                nullable = true
+                defaultValue = null
+            }),
+        ) { backStackEntry ->
+            val settingsWorkspaceId = backStackEntry.arguments?.getString("workspaceId")
             SettingsScreen(
                 onBack = { navController.popBackStack() },
+                workspaceId = settingsWorkspaceId,
+                onOpenRule = { slug ->
+                    val encodedSlug = java.net.URLEncoder.encode(slug, "UTF-8").replace("+", "%20")
+                    navController.navigate("wiki?workspaceId=${settingsWorkspaceId.orEmpty()}&page=$encodedSlug")
+                },
             )
         }
     }

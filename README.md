@@ -81,10 +81,10 @@ bun run dev
 2. **設定 LLM Profile** — 前往設定頁，新增 OpenAI-compatible endpoint（OpenRouter、OpenAI、本地 Ollama 等）
 3. **Ingest 來源** — 在右側面板貼上 URL、純文字或 Markdown，點「整合」，LLM 自動更新 wiki 頁面
 4. **查詢 Wiki** — 在對話欄輸入問題，回答底部顯示引用頁面，可一鍵存成 Synthesis 頁面
-5. **瀏覽 Wiki** — 左側頁面樹瀏覽所有頁面，鎖定圖示可防止 LLM 覆寫特定頁面
-6. **理解三個區域** — `wiki/` 是 LLM 維護的知識頁；`notes/` 是你自己寫的筆記；`_schema/` 是控制 ingest / query / lint 的規則檔
-7. **新增與編輯筆記** — Web 與 Android 都可建立新的 `notes/*.md` 頁面，並用內建 Markdown 工具列編輯
-8. **編輯規則頁** — Web 與 Android 都可直接編輯 `_schema/` 的 Markdown；若頁面仍是預設模板，切換語言時也會跟著本地化
+5. **瀏覽 Wiki** — 左側頁面樹瀏覽知識頁與筆記，鎖定圖示可防止 LLM 覆寫特定頁面
+6. **理解頁面分工** — `wiki/` 是 LLM 維護的知識頁；`notes/` 是你自己寫的筆記；`_schema/` 是設定內的 ingest / query / lint 規則檔
+7. **管理筆記** — Web 與 Android 都可新增、重新命名、刪除 `notes/*.md` 頁面，並用內建 Markdown 工具列編輯
+8. **編輯規則** — 規則入口已搬到設定頁；若 `_schema/*.md` 仍是預設模板，切換語言時會跟著本地化
 9. **調整工作區順序** — Web 可直接拖移排序，Android 可在工作區選單調整上下順序
 9. **Graph View** — 頂列 GitFork 按鈕，查看頁面間的 wikilink 關係圖
 

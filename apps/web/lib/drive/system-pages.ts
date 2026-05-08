@@ -9,6 +9,7 @@ import {
   type UiLocale,
 } from '@llm-wiki/drive-schema';
 import { getDefaultPrompt, type PromptKind } from '@llm-wiki/prompts';
+import { createHash } from 'crypto';
 import type { drive_v3 } from 'googleapis';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { ensureFolder, findFile, readDriveFile, writeDriveFile } from './client';
@@ -146,17 +147,17 @@ async function maybeLocalizeSystemPage(
   locale: UiLocale,
 ) {
   const current = await readDriveFile(drive, fileId);
-  if (!isKnownDefaultContent(seed, current)) return false;
+  if (!isKnownDefaultContent(seed, current)) return null;
 
   const localized = buildSeedContent(seed, locale, parseCreatedDate(current) ?? undefined);
-  if (current.trim() === localized.trim()) return false;
+  if (current.trim() === localized.trim()) return null;
 
   await writeDriveFile(drive, localized, {
     fileId,
     name: seed.fileName,
     parentId: '',
   });
-  return true;
+  return localized;
 }
 
 type ExistingPageRow = {
@@ -164,6 +165,7 @@ type ExistingPageRow = {
   slug: string;
   drive_file_id: string;
   title: string | null;
+  version: number | null;
 };
 
 export async function ensureWorkspaceSystemPages(
@@ -182,7 +184,7 @@ export async function ensureWorkspaceSystemPages(
 
   const { data: existingPages, error } = await admin
     .from('pages')
-    .select('id, slug, drive_file_id, title')
+    .select('id, slug, drive_file_id, title, version')
     .eq('workspace_id', workspaceId);
   if (error) {
     throw new Error(`Failed to load existing system pages: ${error.message}`);
@@ -217,18 +219,23 @@ export async function ensureWorkspaceSystemPages(
     const localizedTitle = buildSeedTitle(seed, normalizedLocale);
 
     if (existing) {
-      const localizedContentChanged = await maybeLocalizeSystemPage(
+      const localizedContent = await maybeLocalizeSystemPage(
         drive,
         seed,
         driveFileId,
         normalizedLocale,
       );
 
-      if (localizedContentChanged || isKnownDefaultTitle(seed, existing.title)) {
-        await admin
-          .from('pages')
-          .update({ title: localizedTitle })
-          .eq('id', existing.id);
+      if (localizedContent || isKnownDefaultTitle(seed, existing.title)) {
+        const values = localizedContent
+          ? {
+              title: localizedTitle,
+              content_hash: hashContent(localizedContent),
+              version: (existing.version ?? 0) + 1,
+              updated_at: new Date().toISOString(),
+            }
+          : { title: localizedTitle };
+        await admin.from('pages').update(values).eq('id', existing.id);
       }
 
       continue;
@@ -252,4 +259,8 @@ export async function ensureWorkspaceSystemPages(
       throw new Error(`Failed to insert system pages: ${insertError.message}`);
     }
   }
+}
+
+function hashContent(content: string): string {
+  return createHash('sha256').update(content, 'utf8').digest('hex').slice(0, 16);
 }

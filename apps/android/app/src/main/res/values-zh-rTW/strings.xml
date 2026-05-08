@@ -69,6 +69,9 @@
     <string name="wiki_create_note">新增筆記</string>
     <string name="wiki_create_note_hint">先建立一個新頁面，再用 Markdown 編輯內容。</string>
     <string name="wiki_note_created">已建立筆記</string>
+    <string name="wiki_rename_note">重新命名筆記</string>
+    <string name="wiki_delete_note">刪除筆記</string>
+    <string name="wiki_delete_note_confirm">刪除「%1$s」？此動作無法復原。</string>
     <string name="wiki_select_model">選擇模型</string>
     <string name="wiki_current_workspace">目前工作區</string>
     <string name="workspace_actions">工作區操作</string>
@@ -88,6 +91,7 @@
     <string name="settings_theme_dark">深色</string>
     <string name="settings_theme_system">跟隨系統</string>
     <string name="settings_language">語言</string>
+    <string name="settings_rules">規則</string>
     <string name="settings_language_system">跟隨系統</string>
     <string name="settings_language_zh_tw">繁體中文</string>
     <string name="settings_language_en">English</string>
@@ -103,13 +107,13 @@
     <!-- 使用說明 -->
     <string name="help_title">使用說明</string>
     <string name="help_workspace_title">工作區與頁面</string>
-    <string name="help_workspace_body">用工作區選單切換、排序或建立工作區。知識頁由 LLM 維護；筆記是你自己的內容；規則頁是控制 LLM 的提示詞與規則檔。</string>
+    <string name="help_workspace_body">用工作區選單切換、排序或建立工作區。知識頁由 LLM 維護；筆記可新增、重新命名、刪除並用 Markdown 編輯。</string>
     <string name="help_ingest_title">匯入內容</string>
     <string name="help_ingest_body">用 + 貼上網址、文字或 Markdown。用附加檔案按鈕可從手機匯入文字檔。</string>
     <string name="help_chat_title">對話與綜合頁</string>
     <string name="help_chat_body">打開對話詢問 Wiki。可在輸入列選模型設定檔，並將有用回答存成綜合頁面。</string>
     <string name="help_settings_title">設定與 LLM 設定檔</string>
-    <string name="help_settings_body">設定頁管理 LLM profile、語言與外觀。Profile 會透過同一個 Supabase 帳號同步。</string>
+    <string name="help_settings_body">設定頁管理 LLM profile、語言、外觀與規則。規則是控制匯入、查詢與健康檢查的提示詞檔。</string>
     <string name="help_drive_title">Google Drive 重新連線</string>
     <string name="help_drive_body">若 Drive 授權失效，請在瀏覽器重新授權後回到 App，App 會重新整理工作區與設定檔。</string>
     <string name="workspace_create_menu_hint">新增另一個連到 Drive 的 Wiki</string>

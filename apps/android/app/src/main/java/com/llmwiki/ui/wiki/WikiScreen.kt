@@ -100,6 +100,7 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
@@ -123,11 +124,12 @@ import kotlinx.coroutines.launch
 @Composable
 fun WikiScreen(
     workspaceId: String?,
+    initialPageSlug: String? = null,
     accountName: String,
     shareUrl: String? = null,
     authReturnUri: String? = null,
     modifier: Modifier = Modifier,
-    onNavigateToSettings: () -> Unit = {},
+    onNavigateToSettings: (String?) -> Unit = {},
     onNavigateToCreateWorkspace: () -> Unit = {},
     onSignedOut: () -> Unit = {},
     wikiViewModel: WikiViewModel = viewModel(),
@@ -146,6 +148,8 @@ fun WikiScreen(
     var showCreateNoteDialog by remember { mutableStateOf(false) }
     var renameWorkspace by remember { mutableStateOf<WorkspaceRow?>(null) }
     var deleteWorkspace by remember { mutableStateOf<WorkspaceRow?>(null) }
+    var renameNote by remember { mutableStateOf<PageEntity?>(null) }
+    var deleteNote by remember { mutableStateOf<PageEntity?>(null) }
     val workspaceArrowRotation by animateFloatAsState(
         targetValue = if (showWorkspaceMenu) 180f else 0f,
         label = "workspace-menu-arrow",
@@ -153,6 +157,7 @@ fun WikiScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val searchFocusRequester = remember { FocusRequester() }
     val context = LocalContext.current
+    val configuration = LocalConfiguration.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument(),
@@ -179,8 +184,14 @@ fun WikiScreen(
         }
     }
 
-    LaunchedEffect(workspaceId, accountName) {
-        if (accountName.isNotBlank()) wikiViewModel.init(workspaceId, accountName)
+    LaunchedEffect(workspaceId, accountName, initialPageSlug) {
+        if (accountName.isNotBlank()) wikiViewModel.init(workspaceId, accountName, initialPageSlug)
+    }
+
+    LaunchedEffect(configuration.locales.toLanguageTags()) {
+        if (accountName.isNotBlank() && uiState.workspace != null) {
+            wikiViewModel.syncPages()
+        }
     }
 
     LaunchedEffect(shareUrl) {
@@ -344,7 +355,6 @@ fun WikiScreen(
                         val zones = listOf(
                             "wiki" to stringResource(R.string.wiki_zone_wiki),
                             "notes" to stringResource(R.string.wiki_zone_notes),
-                            "schema" to stringResource(R.string.wiki_zone_schema),
                         )
 
                         LazyColumn(Modifier.fillMaxSize()) {
@@ -366,6 +376,12 @@ fun WikiScreen(
                                         onToggleLock = {
                                             wikiViewModel.toggleLock(page.slug, page.lockedByHuman)
                                         },
+                                        onRenameNote = if (page.zone == "notes" && page.slug != "notes/guide.md") {
+                                            { renameNote = page }
+                                        } else null,
+                                        onDeleteNote = if (page.zone == "notes" && page.slug != "notes/guide.md") {
+                                            { deleteNote = page }
+                                        } else null,
                                     )
                                 }
                                 item {
@@ -397,6 +413,12 @@ fun WikiScreen(
                                             onToggleLock = {
                                                 wikiViewModel.toggleLock(page.slug, page.lockedByHuman)
                                             },
+                                            onRenameNote = if (page.zone == "notes" && page.slug != "notes/guide.md") {
+                                                { renameNote = page }
+                                            } else null,
+                                            onDeleteNote = if (page.zone == "notes" && page.slug != "notes/guide.md") {
+                                                { deleteNote = page }
+                                            } else null,
                                         )
                                     }
                                 }
@@ -413,17 +435,6 @@ fun WikiScreen(
                     horizontalArrangement = Arrangement.SpaceEvenly,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    IconButton(onClick = {
-                        wikiViewModel.runLint()
-                        scope.launch {
-                            snackbarHostState.showSnackbar(context.getString(R.string.wiki_lint_started))
-                        }
-                    }) {
-                        Icon(
-                            Icons.Default.Refresh,
-                            contentDescription = stringResource(R.string.wiki_lint),
-                        )
-                    }
                     IconButton(onClick = { showHelpDialog = true }) {
                         Icon(
                             Icons.AutoMirrored.Filled.Help,
@@ -432,7 +443,7 @@ fun WikiScreen(
                     }
                     IconButton(onClick = {
                         scope.launch { drawerState.close() }
-                        onNavigateToSettings()
+                        onNavigateToSettings(uiState.workspace?.id)
                     }) {
                         Icon(
                             Icons.Default.Settings,
@@ -732,6 +743,32 @@ fun WikiScreen(
                             )
                         }
                     }
+                }
+            },
+        )
+    }
+
+    renameNote?.let { page ->
+        NoteRenameDialog(
+            page = page,
+            isLoading = uiState.pageSaveLoading,
+            onDismiss = { renameNote = null },
+            onConfirm = { title ->
+                wikiViewModel.renameNote(page, title) { success ->
+                    if (success) renameNote = null
+                }
+            },
+        )
+    }
+
+    deleteNote?.let { page ->
+        NoteDeleteDialog(
+            page = page,
+            isLoading = uiState.pageSaveLoading,
+            onDismiss = { deleteNote = null },
+            onConfirm = {
+                wikiViewModel.deleteNote(page) { success ->
+                    if (success) deleteNote = null
                 }
             },
         )
@@ -1109,27 +1146,66 @@ private fun PageListItem(
     isSelected: Boolean,
     onClick: () -> Unit,
     onToggleLock: () -> Unit,
+    onRenameNote: (() -> Unit)? = null,
+    onDeleteNote: (() -> Unit)? = null,
     label: String? = null,
 ) {
+    var showMenu by remember { mutableStateOf(false) }
     NavigationDrawerItem(
         label = { Text(label ?: page.title ?: page.slug, maxLines = 1) },
         selected = isSelected,
         onClick = onClick,
         modifier = Modifier.padding(horizontal = 8.dp),
         badge = {
-            IconButton(onClick = onToggleLock) {
-                Icon(
-                    if (page.lockedByHuman) Icons.Default.Lock else Icons.Default.LockOpen,
-                    contentDescription = if (page.lockedByHuman)
-                        stringResource(R.string.wiki_locked)
-                    else
-                        stringResource(R.string.wiki_unlocked),
-                    modifier = Modifier.size(20.dp),
-                    tint = if (page.lockedByHuman)
-                        MaterialTheme.colorScheme.primary
-                    else
-                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
-                )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onToggleLock) {
+                    Icon(
+                        if (page.lockedByHuman) Icons.Default.Lock else Icons.Default.LockOpen,
+                        contentDescription = if (page.lockedByHuman)
+                            stringResource(R.string.wiki_locked)
+                        else
+                            stringResource(R.string.wiki_unlocked),
+                        modifier = Modifier.size(20.dp),
+                        tint = if (page.lockedByHuman)
+                            MaterialTheme.colorScheme.primary
+                        else
+                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
+                    )
+                }
+                if (onRenameNote != null || onDeleteNote != null) {
+                    Box {
+                        IconButton(onClick = { showMenu = true }) {
+                            Icon(
+                                Icons.Default.MoreVert,
+                                contentDescription = stringResource(R.string.workspace_actions),
+                                modifier = Modifier.size(20.dp),
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = showMenu,
+                            onDismissRequest = { showMenu = false },
+                        ) {
+                            if (onRenameNote != null) {
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.wiki_rename_note)) },
+                                    onClick = {
+                                        showMenu = false
+                                        onRenameNote()
+                                    },
+                                )
+                            }
+                            if (onDeleteNote != null) {
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.wiki_delete_note)) },
+                                    onClick = {
+                                        showMenu = false
+                                        onDeleteNote()
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
             }
         },
     )
@@ -1570,6 +1646,94 @@ private fun NoteCreateDialog(
                     )
                 } else {
                     Text(stringResource(R.string.action_save))
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !isLoading) {
+                Text(stringResource(R.string.action_cancel))
+            }
+        },
+    )
+}
+
+@Composable
+private fun NoteRenameDialog(
+    page: PageEntity,
+    isLoading: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit,
+) {
+    var title by remember(page.slug) {
+        mutableStateOf(page.title ?: page.slug.removePrefix("notes/").removeSuffix(".md"))
+    }
+
+    AlertDialog(
+        onDismissRequest = {
+            if (!isLoading) onDismiss()
+        },
+        title = { Text(stringResource(R.string.wiki_rename_note)) },
+        text = {
+            OutlinedTextField(
+                value = title,
+                onValueChange = { title = it },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+            )
+        },
+        confirmButton = {
+            Button(
+                onClick = { onConfirm(title.trim()) },
+                enabled = !isLoading && title.trim().isNotEmpty(),
+            ) {
+                if (isLoading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onPrimary,
+                    )
+                } else {
+                    Text(stringResource(R.string.action_save))
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !isLoading) {
+                Text(stringResource(R.string.action_cancel))
+            }
+        },
+    )
+}
+
+@Composable
+private fun NoteDeleteDialog(
+    page: PageEntity,
+    isLoading: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = {
+            if (!isLoading) onDismiss()
+        },
+        title = { Text(stringResource(R.string.wiki_delete_note)) },
+        text = {
+            Text(stringResource(R.string.wiki_delete_note_confirm, page.title ?: page.slug))
+        },
+        confirmButton = {
+            Button(
+                onClick = onConfirm,
+                enabled = !isLoading,
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+            ) {
+                if (isLoading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onError,
+                    )
+                } else {
+                    Text(stringResource(R.string.action_delete))
                 }
             }
         },
