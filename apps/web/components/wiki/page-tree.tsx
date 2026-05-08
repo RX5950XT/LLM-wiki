@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { FileText, ChevronDown, ChevronRight } from 'lucide-react';
+import { FileText, ChevronDown, ChevronRight, PlusSquare } from 'lucide-react';
 
 interface PageEntry {
   slug: string;
@@ -15,6 +15,7 @@ interface PageTreeProps {
   initialPages: PageEntry[];
   activePage: string | null;
   onSelectPage: (slug: string) => void;
+  onCreateNote?: () => void;
 }
 
 const PINNED_SLUGS = ['index.md', 'log.md'];
@@ -28,7 +29,7 @@ function groupByZone(pages: PageEntry[]) {
   return groups;
 }
 
-export function PageTree({ initialPages, activePage, onSelectPage }: PageTreeProps) {
+export function PageTree({ initialPages, activePage, onSelectPage, onCreateNote }: PageTreeProps) {
   const t = useTranslations();
   const [expanded, setExpanded] = useState<Record<string, boolean>>({ wiki: true });
 
@@ -48,12 +49,6 @@ export function PageTree({ initialPages, activePage, onSelectPage }: PageTreePro
     wiki: t('wiki.zoneWiki'),
     notes: t('wiki.zoneNotes'),
     schema: t('wiki.zoneSchema'),
-  };
-
-  const ZONE_HINTS: Record<string, string> = {
-    wiki: t('wiki.zoneWikiHint'),
-    notes: t('wiki.zoneNotesHint'),
-    schema: t('wiki.zoneSchemaHint'),
   };
 
   const pages = useMemo(() => initialPages, [initialPages]);
@@ -102,20 +97,31 @@ export function PageTree({ initialPages, activePage, onSelectPage }: PageTreePro
       {/* Zone sections */}
       {Object.entries(ZONE_LABELS).map(([zone, label]) => (
         <div key={zone}>
-          <button
-            onClick={() => toggleZone(zone)}
-            className="flex w-full items-center gap-1.5 px-3 py-1.5 text-xs font-semibold uppercase tracking-wider transition-opacity hover:opacity-70"
-            style={{ color: 'var(--fg-muted)' }}
-          >
-            {expanded[zone] ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-            {label}
-          </button>
+          <div className="flex items-center justify-between px-3 py-1.5">
+            <button
+              onClick={() => toggleZone(zone)}
+              className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider transition-opacity hover:opacity-70"
+              style={{ color: 'var(--fg-muted)' }}
+            >
+              {expanded[zone] ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+              {label}
+            </button>
+            {zone === 'notes' && onCreateNote && (
+              <button
+                type="button"
+                onClick={onCreateNote}
+                className="rounded p-1 transition-opacity hover:opacity-70"
+                style={{ color: 'var(--fg-muted)' }}
+                aria-label={t('wiki.createNote')}
+                title={t('wiki.createNote')}
+              >
+                <PlusSquare size={14} />
+              </button>
+            )}
+          </div>
 
           {expanded[zone] && (
             <>
-              <p className="px-4 pb-1 text-[11px] leading-5" style={{ color: 'var(--fg-muted)' }}>
-                {ZONE_HINTS[zone]}
-              </p>
               <ul>
                 {(grouped[zone] ?? []).map((page) => (
                   <li key={page.slug}>

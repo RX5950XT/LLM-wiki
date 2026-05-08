@@ -55,6 +55,7 @@ import kotlinx.serialization.json.add
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
@@ -128,7 +129,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
 
     fun refreshAfterForeground() {
         loadProfiles()
-        refreshWorkspaces(syncSelected = false)
+        refreshWorkspaces(syncSelected = true)
     }
 
     fun switchWorkspace(ws: WorkspaceRow) {
@@ -311,8 +312,83 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun selectPageBySlug(slug: String) {
-        val page = pages.value.find { it.slug == slug } ?: return
+        val normalized = normalizeWikiSlug(slug)
+        val page = pages.value.find { it.slug == normalized }
+            ?: pages.value.find { it.slug == slug }
+            ?: return
         selectPage(page)
+    }
+
+    fun createNote(title: String, onDone: (Boolean) -> Unit = {}) {
+        val trimmed = title.trim()
+        if (trimmed.isBlank()) {
+            onDone(false)
+            return
+        }
+
+        viewModelScope.launch {
+            val wsId = workspaceId.value ?: return@launch
+            _uiState.update { it.copy(pageSaveLoading = true) }
+            try {
+                val bodyJson = buildJsonObject {
+                    put("zone", "notes")
+                    put("title", trimmed)
+                }.toString()
+                val response = sendAuthorizedRequest { accessToken ->
+                    AndroidHttpClient.instance.post(webApiUrl("/api/pages/$wsId")) {
+                        header("Authorization", "Bearer $accessToken")
+                        header("x-llm-wiki-locale", currentUiLocale())
+                        contentType(ContentType.Application.Json)
+                        setBody(bodyJson)
+                    }
+                } ?: run {
+                    _uiState.update {
+                        it.copy(pageSaveLoading = false, syncError = unauthorizedMessage())
+                    }
+                    onDone(false)
+                    return@launch
+                }
+
+                val text = response.bodyAsText()
+                if (response.status.value !in 200..299) {
+                    _uiState.update {
+                        it.copy(
+                            pageSaveLoading = false,
+                            syncError = parseApiError(text, "Failed to create note"),
+                        )
+                    }
+                    onDone(false)
+                    return@launch
+                }
+
+                if (!isJsonObject(text)) {
+                    _uiState.update {
+                        it.copy(
+                            pageSaveLoading = false,
+                            syncError = nonJsonApiMessage("Failed to create note"),
+                        )
+                    }
+                    onDone(false)
+                    return@launch
+                }
+
+                val slug = apiJson.parseToJsonElement(text).jsonObject["slug"]?.jsonPrimitive?.contentOrNull
+                syncPagesInternal(wsId)
+                if (!slug.isNullOrBlank()) {
+                    db.pageDao().getPage(wsId, accountName, slug)?.let(::selectPage)
+                }
+                _uiState.update { it.copy(pageSaveLoading = false, syncError = null) }
+                onDone(slug != null)
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        pageSaveLoading = false,
+                        syncError = e.toUserFacingMessage("Failed to create note"),
+                    )
+                }
+                onDone(false)
+            }
+        }
     }
 
     fun selectSearchResult(slug: String) {
@@ -929,6 +1005,13 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun nonJsonApiMessage(fallback: String): String =
         "$fallback: ${getApplication<Application>().getString(R.string.error_api_not_json)}"
+
+    private fun normalizeWikiSlug(slug: String): String {
+        val trimmed = slug.trim().removePrefix("/").substringBefore("#")
+        if (trimmed.isBlank()) return trimmed
+        if (trimmed.endsWith(".md")) return trimmed
+        return "$trimmed.md"
+    }
 
     private fun unauthorizedMessage(): String =
         getApplication<Application>().getString(R.string.error_unauthorized)

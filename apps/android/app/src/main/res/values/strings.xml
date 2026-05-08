@@ -29,7 +29,7 @@
     <string name="wiki_schema_lint">Lint Rules</string>
     <string name="wiki_zone_wiki">Knowledge</string>
     <string name="wiki_zone_notes">Notes</string>
-    <string name="wiki_zone_schema">Schema</string>
+    <string name="wiki_zone_schema">Rules</string>
     <string name="ingest_add_source">Add source</string>
     <string name="ingest_running">Ingesting…</string>
     <string name="query_placeholder">Ask your wiki anything…</string>
@@ -66,6 +66,9 @@
     <string name="wiki_search_empty">No results found</string>
     <string name="wiki_lint">Run wiki health check</string>
     <string name="wiki_lint_started">Wiki health check started</string>
+    <string name="wiki_create_note">New note</string>
+    <string name="wiki_create_note_hint">Create a note page first, then edit it in Markdown.</string>
+    <string name="wiki_note_created">Note created</string>
     <string name="wiki_select_model">Select model</string>
     <string name="wiki_current_workspace">Current workspace</string>
     <string name="workspace_actions">Workspace actions</string>
@@ -100,7 +103,7 @@
     <!-- Help -->
     <string name="help_title">Help</string>
     <string name="help_workspace_title">Workspaces and pages</string>
-    <string name="help_workspace_body">Use the workspace menu to switch, reorder, or create a workspace. Knowledge pages are LLM-maintained, notes are yours, and schema files steer the LLM.</string>
+    <string name="help_workspace_body">Use the workspace menu to switch, reorder, or create a workspace. Knowledge pages are LLM-maintained, notes are yours, and rule pages contain the prompts and control files that steer the LLM.</string>
     <string name="help_ingest_title">Import content</string>
     <string name="help_ingest_body">Use + to paste a URL, text, or Markdown. Use the attachment button to import a text file from your phone.</string>
     <string name="help_chat_title">Chat and synthesis</string>

@@ -31,12 +31,17 @@ private fun stripFrontmatterAndWikilinks(content: String): String {
 
 private fun parseInternalWikiLink(link: String): String? {
     if (link.startsWith("wiki://")) {
-        return Uri.decode(link.removePrefix("wiki://").substringBefore("#"))
+        return normalizeWikiSlug(Uri.decode(link.removePrefix("wiki://").substringBefore("#")))
     }
     if (link.startsWith("#")) return null
     if (link.startsWith("http://") || link.startsWith("https://") || link.startsWith("mailto:")) return null
-    if (!link.endsWith(".md")) return null
-    return link.removePrefix("/").substringBefore("#")
+    return normalizeWikiSlug(link.removePrefix("/").substringBefore("#"))
+}
+
+private fun normalizeWikiSlug(raw: String): String? {
+    val slug = raw.trim()
+    if (slug.isBlank()) return null
+    return if (slug.endsWith(".md")) slug else "$slug.md"
 }
 
 @Composable

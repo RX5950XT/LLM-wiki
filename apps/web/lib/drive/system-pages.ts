@@ -94,6 +94,10 @@ const SYSTEM_PAGE_SEEDS: PageSeed[] = [
 const LEGACY_DEFAULT_CONTENT: Record<string, string[]> = {
   'index.md': ['# Wiki Index', 'This knowledge base is empty.'],
   'log.md': ['# Change Log', '# Log', 'Chronological record'],
+  'notes/guide.md': ['# Notes Guide', '# 筆記使用說明', 'The Notes zone is your own writing space.'],
+  '_schema/ingest.md': ['# Ingest Schema', '# 匯入規則', 'Append one English entry to `/wiki/log.md`'],
+  '_schema/query.md': ['# Query Schema', '# 查詢規則', 'The user is asking a question against the wiki.'],
+  '_schema/lint.md': ['# Lint Schema', '# 健康檢查規則', 'You are auditing the wiki for structural health'],
 };
 
 function buildSeedContent(seed: PageSeed, locale: UiLocale, createdAt?: string): string {

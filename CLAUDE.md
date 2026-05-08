@@ -218,6 +218,8 @@ apps/android/app/src/main/java/com/llmwiki/
 - `Icons.AutoMirrored.Filled.List` 取代舊版 `Icons.Default.Menu`（Compose Material 3 方向性圖示）
 - `SyncWorker.schedule()` 使用 `ExistingPeriodicWorkPolicy.KEEP`（不重複排程同一個 workspace）
 - `PageRepository.syncPages()` 不再限制 200 筆，且會刪除本機 Room 中伺服器已不存在的頁面，避免 Android 側欄殘留舊頁
+- Android `refreshAfterForeground()` 回到前景時需同步目前 workspace，否則 Web 端剛匯入完成的 `index.md` / `log.md` 容易被本機舊快取蓋住，看起來像手機沒更新
+- Android / Web 的內部 wiki 連結解析都要接受不帶副檔名的 slug（例如 `entities/foo`），並自動補成 `.md`，否則索引頁連結會顯示但不能跳
 - `ingestUrl()` / `ingestText()` 呼叫 Web app 的 `/api/ingest`，使用 Supabase session accessToken
 - Web API 端點位址由 `BuildConfig.WEB_API_BASE_URL` 決定（從 `local.properties` 的 `WEB_API_BASE_URL` 或 `NEXT_PUBLIC_SITE_URL` 注入）
 - Chat 串流協定：POST `/api/query` → `text/plain` stream，結尾附 `\x00CITATIONS\x00[...]`；Android 用 Ktor `bodyAsChannel()` + `readUTF8Line()` 消費
@@ -282,8 +284,8 @@ Conversation panel 輸入框左側有模型選擇按鈕（`Bot` icon），從 `/
 
 - 工作區建立與頁面列表讀取時，會自動補齊 `notes/guide.md` 與 `_schema/{ingest,query,lint}.md` 的 metadata，避免「筆記／結構」看起來是空白壞掉
 - `notes/guide.md`、`_schema/*.md` 會依目前 UI 語系自動本地化預設內容；若內容仍是預設模板，切換語言時會同步轉成對應語言
-- Web 與 Android 現在都可直接編輯 `notes/` 與 `_schema/` 內的 Markdown；LLM 仍只讀 `notes/`、不會主動改寫
-- `_schema/*.md` 會在 UI 顯示為「匯入規則 / 查詢規則 / 健康檢查規則」
+- Web 與 Android 現在都可直接建立新的 `notes/*.md` 頁面，且筆記／規則頁都用內建 Markdown 工具列編輯；LLM 仍只讀 `notes/`、不會主動改寫
+- `_schema/*.md` 會在 UI 顯示為「匯入規則 / 查詢規則 / 健康檢查規則」，Zone 名稱統一顯示為「規則 / Rules」
 - Web `PageViewer` 與 Android `MarkdownViewer` 都會把 wiki 內部連結留在同一個 App / 視窗內跳轉，不再強制另開新視窗
 
 ## 工作區排序

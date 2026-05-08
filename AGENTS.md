@@ -145,8 +145,8 @@ Query API 文字串流結尾附加 `\x00CITATIONS\x00["entities/karpathy.md",...
 ### 筆記／結構區
 - 工作區建立與頁面列表讀取時，會自動補齊 `notes/guide.md` 與 `_schema/{ingest,query,lint}.md` 的 metadata，避免「筆記／結構」區看起來像空白故障
 - `notes/guide.md` 與 `_schema/*.md` 的預設內容會跟著目前 UI 語系切換；若頁面仍是預設模板，切語言時會同步改成對應語言
-- Web 與 Android 都可直接編輯 `notes/` 與 `_schema/` 內的 Markdown；LLM 仍只讀 `notes/`，不會主動改寫
-- `_schema/*.md` 在 UI 內顯示為「匯入規則 / 查詢規則 / 健康檢查規則」
+- Web 與 Android 都可直接建立新的 `notes/*.md` 頁面，且筆記／規則頁都用內建 Markdown 工具列編輯；LLM 仍只讀 `notes/`，不會主動改寫
+- `_schema/*.md` 在 UI 內顯示為「匯入規則 / 查詢規則 / 健康檢查規則」，Zone 名稱統一顯示為「規則 / Rules」
 - Web 與 Android 的 markdown 內部連結都應留在同一個 App / 視窗內跳轉，不另開新視窗
 
 ### 工作區排序
@@ -201,6 +201,8 @@ Query API 文字串流結尾附加 `\x00CITATIONS\x00["entities/karpathy.md",...
 - 登出：`PageDao.deleteAll()` + `SyncWorker.cancel()` + `navigate("auth") popUpTo(0) inclusive=true`
 - `Icons.AutoMirrored.Filled.List` 取代舊版 `Icons.Default.Menu`
 - `PageRepository.syncPages()` 不再限制 200 筆，且會刪除本機已過期頁面，避免手機端顯示舊資料
+- Android `refreshAfterForeground()` 回到前景時需同步目前 workspace，否則 Web 端剛匯入完成的 `index.md` / `log.md` 容易被本機舊快取蓋住，看起來像手機沒更新
+- Android / Web 的內部 wiki 連結解析都要接受不帶副檔名的 slug（例如 `entities/foo`），並自動補成 `.md`，否則索引頁連結會顯示但不能跳
 - Web / Android 建立工作區 UI 不保留 description 欄位；Web `/w/create` 需提供返回 `/w` 的按鈕
 - 使用說明入口需在 Web top bar 與 Android drawer 同步提供，說明內容涵蓋工作區、匯入、對話、設定同步與 Drive 重授權
 
@@ -225,7 +227,7 @@ Query API 文字串流結尾附加 `\x00CITATIONS\x00["entities/karpathy.md",...
 <claude-mem-context>
 # Memory Context
 
-# [LLM-wiki] recent context, 2026-05-08 12:10am GMT+8
+# [LLM-wiki] recent context, 2026-05-08 10:33am GMT+8
 
 Legend: 🎯session 🔴bugfix 🟣feature 🔄refactor ✅change 🔵discovery ⚖️decision 🚨security_alert 🔐security_note
 Format: ID TIME TYPE TITLE

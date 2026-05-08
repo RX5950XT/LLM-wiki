@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -99,9 +100,11 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
@@ -140,6 +143,7 @@ fun WikiScreen(
     var showWorkspaceMenu by remember { mutableStateOf(false) }
     var showHelpDialog by remember { mutableStateOf(false) }
     var showPageEditDialog by remember { mutableStateOf(false) }
+    var showCreateNoteDialog by remember { mutableStateOf(false) }
     var renameWorkspace by remember { mutableStateOf<WorkspaceRow?>(null) }
     var deleteWorkspace by remember { mutableStateOf<WorkspaceRow?>(null) }
     val workspaceArrowRotation by animateFloatAsState(
@@ -504,6 +508,9 @@ fun WikiScreen(
                             IconButton(onClick = { wikiViewModel.toggleSearch() }) {
                                 Icon(Icons.Default.Search, contentDescription = stringResource(R.string.wiki_search))
                             }
+                            IconButton(onClick = { showCreateNoteDialog = true }) {
+                                Icon(Icons.Default.Add, contentDescription = stringResource(R.string.wiki_create_note))
+                            }
                             if (editablePage != null) {
                                 IconButton(onClick = { showPageEditDialog = true }) {
                                     Icon(Icons.Default.Edit, contentDescription = stringResource(R.string.action_edit))
@@ -709,6 +716,25 @@ fun WikiScreen(
 
     if (showHelpDialog) {
         WikiHelpDialog(onDismiss = { showHelpDialog = false })
+    }
+
+    if (showCreateNoteDialog) {
+        NoteCreateDialog(
+            isLoading = uiState.pageSaveLoading,
+            onDismiss = { showCreateNoteDialog = false },
+            onConfirm = { title ->
+                wikiViewModel.createNote(title) { success ->
+                    if (success) {
+                        showCreateNoteDialog = false
+                        scope.launch {
+                            snackbarHostState.showSnackbar(
+                                context.getString(R.string.wiki_note_created)
+                            )
+                        }
+                    }
+                }
+            },
+        )
     }
 
     if (showPageEditDialog) {
@@ -1434,7 +1460,19 @@ private fun PageEditDialog(
     onDismiss: () -> Unit,
     onConfirm: (String) -> Unit,
 ) {
-    var text by remember(initialContent) { mutableStateOf(initialContent) }
+    var value by remember(initialContent) { mutableStateOf(TextFieldValue(initialContent)) }
+    val toolbarActions = remember {
+        listOf(
+            MarkdownToolbarAction("H1") { applyLinePrefix(it, "# ", "Heading") },
+            MarkdownToolbarAction("B") { wrapSelection(it, "**", "**", "bold") },
+            MarkdownToolbarAction("I") { wrapSelection(it, "_", "_", "italic") },
+            MarkdownToolbarAction("-") { applyLinePrefix(it, "- ", "item") },
+            MarkdownToolbarAction("[ ]") { applyLinePrefix(it, "- [ ] ", "task") },
+            MarkdownToolbarAction(">") { applyLinePrefix(it, "> ", "quote") },
+            MarkdownToolbarAction("</>") { wrapSelection(it, "```\n", "\n```", "code") },
+            MarkdownToolbarAction("link") { wrapSelection(it, "[", "](https://example.com)", "label") },
+        )
+    }
 
     AlertDialog(
         onDismissRequest = {
@@ -1442,16 +1480,33 @@ private fun PageEditDialog(
         },
         title = { Text(title) },
         text = {
-            OutlinedTextField(
-                value = text,
-                onValueChange = { text = it },
-                modifier = Modifier.fillMaxWidth().heightIn(min = 280.dp),
-                maxLines = 18,
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    toolbarActions.forEach { action ->
+                        SmallFloatingActionButton(
+                            onClick = { value = action.apply(value) },
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                            modifier = Modifier.size(36.dp),
+                        ) {
+                            Text(action.label, style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                }
+                OutlinedTextField(
+                    value = value,
+                    onValueChange = { value = it },
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 280.dp),
+                    maxLines = 18,
+                )
+            }
         },
         confirmButton = {
             Button(
-                onClick = { onConfirm(text) },
+                onClick = { onConfirm(value.text) },
                 enabled = !isLoading,
             ) {
                 if (isLoading) {
@@ -1471,6 +1526,100 @@ private fun PageEditDialog(
             }
         },
     )
+}
+
+@Composable
+private fun NoteCreateDialog(
+    isLoading: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit,
+) {
+    var title by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = {
+            if (!isLoading) onDismiss()
+        },
+        title = { Text(stringResource(R.string.wiki_create_note)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    stringResource(R.string.wiki_create_note_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    placeholder = { Text(stringResource(R.string.wiki_untitled)) },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onConfirm(title.trim()) },
+                enabled = !isLoading && title.trim().isNotEmpty(),
+            ) {
+                if (isLoading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onPrimary,
+                    )
+                } else {
+                    Text(stringResource(R.string.action_save))
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !isLoading) {
+                Text(stringResource(R.string.action_cancel))
+            }
+        },
+    )
+}
+
+private data class MarkdownToolbarAction(
+    val label: String,
+    val apply: (TextFieldValue) -> TextFieldValue,
+)
+
+private fun wrapSelection(
+    value: TextFieldValue,
+    before: String,
+    after: String,
+    placeholder: String,
+): TextFieldValue {
+    val selection = value.selection
+    val start = selection.start.coerceAtLeast(0)
+    val end = selection.end.coerceAtLeast(start)
+    val chosen = value.text.substring(start, end).ifBlank { placeholder }
+    val inserted = before + chosen + after
+    val next = value.text.replaceRange(start, end, inserted)
+    val caret = start + inserted.length
+    return TextFieldValue(next, TextRange(caret, caret))
+}
+
+private fun applyLinePrefix(
+    value: TextFieldValue,
+    prefix: String,
+    placeholder: String,
+): TextFieldValue {
+    val text = value.text
+    val start = value.selection.start.coerceAtLeast(0)
+    val end = value.selection.end.coerceAtLeast(start)
+    val lineStart = text.lastIndexOf('\n', (start - 1).coerceAtLeast(0)).let { if (it == -1) 0 else it + 1 }
+    val lineEndIndex = text.indexOf('\n', end)
+    val lineEnd = if (lineEndIndex == -1) text.length else lineEndIndex
+    val selected = text.substring(lineStart, lineEnd).ifBlank { placeholder }
+    val replaced = selected.split('\n').joinToString("\n") { line ->
+        prefix + if (line.isBlank()) placeholder else line
+    }
+    val next = text.replaceRange(lineStart, lineEnd, replaced)
+    val caret = lineStart + replaced.length
+    return TextFieldValue(next, TextRange(caret, caret))
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────

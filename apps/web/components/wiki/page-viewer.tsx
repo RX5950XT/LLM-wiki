@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback, type ReactNode } from 'react';
+import { useEffect, useState, useCallback, useRef, type ReactNode } from 'react';
 import { Pencil, Lock, Unlock, RefreshCw, AlertTriangle, Check, X } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import ReactMarkdown from 'react-markdown';
@@ -45,7 +45,7 @@ function parseInternalHref(href: string): { slug: string; anchor?: string } | nu
     const withoutScheme = href.slice(7);
     const [rawSlug = '', rawAnchor] = withoutScheme.split('#');
     return {
-      slug: decodeURIComponent(rawSlug),
+      slug: normalizeWikiSlug(decodeURIComponent(rawSlug)),
       anchor: rawAnchor ? decodeURIComponent(rawAnchor) : undefined,
     };
   }
@@ -53,13 +53,51 @@ function parseInternalHref(href: string): { slug: string; anchor?: string } | nu
   if (href.startsWith('#')) return null;
 
   if (/^(https?:|mailto:|tel:)/i.test(href)) return null;
-  if (!href.endsWith('.md')) return null;
 
   const [slug = '', anchor] = href.replace(/^\//, '').split('#');
   return {
-    slug,
+    slug: normalizeWikiSlug(slug),
     anchor: anchor ? decodeURIComponent(anchor) : undefined,
   };
+}
+
+function normalizeWikiSlug(slug: string): string {
+  const trimmed = slug.trim().replace(/^\//, '');
+  if (!trimmed) return trimmed;
+  return trimmed.endsWith('.md') ? trimmed : `${trimmed}.md`;
+}
+
+type EditorAction = {
+  id: string;
+  label: string;
+  apply: (input: HTMLTextAreaElement) => string;
+};
+
+function replaceSelection(
+  input: HTMLTextAreaElement,
+  before: string,
+  after = before,
+  placeholder = '',
+): string {
+  const start = input.selectionStart ?? 0;
+  const end = input.selectionEnd ?? 0;
+  const selected = input.value.slice(start, end) || placeholder;
+  return `${input.value.slice(0, start)}${before}${selected}${after}${input.value.slice(end)}`;
+}
+
+function prefixSelectedLines(input: HTMLTextAreaElement, prefix: string, placeholder: string): string {
+  const start = input.selectionStart ?? 0;
+  const end = input.selectionEnd ?? 0;
+  const value = input.value;
+  const lineStart = value.lastIndexOf('\n', Math.max(0, start - 1)) + 1;
+  const lineEnd = value.indexOf('\n', end);
+  const sliceEnd = lineEnd === -1 ? value.length : lineEnd;
+  const selected = value.slice(lineStart, sliceEnd) || placeholder;
+  const updated = selected
+    .split('\n')
+    .map((line) => `${prefix}${line || placeholder}`)
+    .join('\n');
+  return `${value.slice(0, lineStart)}${updated}${value.slice(sliceEnd)}`;
 }
 
 interface PageViewerProps {
@@ -100,6 +138,7 @@ export function PageViewer({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
   const [savePending, setSavePending] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   const fetchPage = useCallback(
     (forceSlug?: string) => {
@@ -191,6 +230,27 @@ export function PageViewer({
       setSavePending(false);
     }
   }, [draft, onPageSaved, page, workspaceId]);
+
+  const editorActions: EditorAction[] = [
+    { id: 'h1', label: t('wiki.editorHeading'), apply: (input) => prefixSelectedLines(input, '# ', 'Heading') },
+    { id: 'bold', label: t('wiki.editorBold'), apply: (input) => replaceSelection(input, '**', '**', 'bold') },
+    { id: 'italic', label: t('wiki.editorItalic'), apply: (input) => replaceSelection(input, '_', '_', 'italic') },
+    { id: 'bullet', label: t('wiki.editorBullet'), apply: (input) => prefixSelectedLines(input, '- ', 'list item') },
+    { id: 'task', label: t('wiki.editorTask'), apply: (input) => prefixSelectedLines(input, '- [ ] ', 'task') },
+    { id: 'quote', label: t('wiki.editorQuote'), apply: (input) => prefixSelectedLines(input, '> ', 'quote') },
+    { id: 'code', label: t('wiki.editorCode'), apply: (input) => replaceSelection(input, '```\n', '\n```', 'code') },
+    { id: 'link', label: t('wiki.editorLink'), apply: (input) => replaceSelection(input, '[', '](https://example.com)', 'label') },
+  ];
+
+  const applyEditorAction = useCallback((action: EditorAction) => {
+    const input = textareaRef.current;
+    if (!input) return;
+    const nextValue = action.apply(input);
+    setDraft(nextValue);
+    window.requestAnimationFrame(() => {
+      input.focus();
+    });
+  }, []);
 
   if (!slug) {
     return (
@@ -340,16 +400,38 @@ export function PageViewer({
       {/* Markdown content */}
       <div className="flex-1 overflow-y-auto px-8 py-6">
         {editing ? (
-          <textarea
-            value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-            className="min-h-[60vh] w-full rounded-xl border px-4 py-3 font-mono text-sm outline-none"
-            style={{
-              background: 'var(--bg-2)',
-              borderColor: 'var(--border)',
-              color: 'var(--fg)',
-            }}
-          />
+          <div className="space-y-3">
+            <div className="flex flex-wrap gap-2">
+              {editorActions.map((action) => (
+                <button
+                  key={action.id}
+                  type="button"
+                  onClick={() => applyEditorAction(action)}
+                  className="rounded-lg border px-2.5 py-1 text-xs transition-opacity hover:opacity-70"
+                  style={{
+                    background: 'var(--bg-2)',
+                    borderColor: 'var(--border)',
+                    color: 'var(--fg)',
+                  }}
+                  title={action.label}
+                  aria-label={action.label}
+                >
+                  {action.label}
+                </button>
+              ))}
+            </div>
+            <textarea
+              ref={textareaRef}
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              className="min-h-[60vh] w-full rounded-xl border px-4 py-3 font-mono text-sm outline-none"
+              style={{
+                background: 'var(--bg-2)',
+                borderColor: 'var(--border)',
+                color: 'var(--fg)',
+              }}
+            />
+          </div>
         ) : (
           <article className="wiki-prose max-w-none">
             <ReactMarkdown

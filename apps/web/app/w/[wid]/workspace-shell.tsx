@@ -52,6 +52,7 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
   const [currentWorkspaceName, setCurrentWorkspaceName] = useState(workspaceName);
   const [renamingWorkspace, setRenamingWorkspace] = useState<WorkspaceEntry | null>(null);
   const [deletingWorkspace, setDeletingWorkspace] = useState<WorkspaceEntry | null>(null);
+  const [creatingNote, setCreatingNote] = useState(false);
   const [workspaceActionError, setWorkspaceActionError] = useState<string | null>(null);
   const [workspaceActionLoading, setWorkspaceActionLoading] = useState(false);
   const [pages, setPages] = useState(initialPages);
@@ -239,6 +240,36 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
     await supabase.auth.signOut();
     window.location.href = '/login';
   }, []);
+
+  const createNote = useCallback(async (title: string) => {
+    const trimmed = title.trim();
+    if (!trimmed) {
+      setCreatingNote(false);
+      return;
+    }
+
+    setWorkspaceActionLoading(true);
+    setWorkspaceActionError(null);
+    try {
+      const res = await fetch(`/api/pages/${workspaceId}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-llm-wiki-locale': locale,
+        },
+        body: JSON.stringify({ zone: 'notes', title: trimmed }),
+      });
+      const data = await res.json().catch(() => null) as { slug?: string; error?: string } | null;
+      if (!res.ok || !data?.slug) throw new Error(data?.error ?? 'Failed to create note');
+      refreshPageList();
+      selectPage(data.slug);
+      setCreatingNote(false);
+    } catch (error) {
+      setWorkspaceActionError(error instanceof Error ? error.message : 'Failed to create note');
+    } finally {
+      setWorkspaceActionLoading(false);
+    }
+  }, [locale, refreshPageList, selectPage, workspaceId]);
 
   const renameWorkspace = useCallback(async (workspace: WorkspaceEntry, name: string) => {
     const trimmed = name.trim();
@@ -597,6 +628,10 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
                 initialPages={pages}
                 activePage={activePage}
                 onSelectPage={selectPage}
+                onCreateNote={() => {
+                  setWorkspaceActionError(null);
+                  setCreatingNote(true);
+                }}
               />
             </div>
             <div
@@ -670,6 +705,14 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
           error={workspaceActionError}
           onClose={() => setDeletingWorkspace(null)}
           onConfirm={() => deleteWorkspace(deletingWorkspace)}
+        />
+      )}
+      {creatingNote && (
+        <NoteCreateDialog
+          loading={workspaceActionLoading}
+          error={workspaceActionError}
+          onClose={() => setCreatingNote(false)}
+          onSubmit={createNote}
         />
       )}
     </div>
@@ -773,6 +816,74 @@ function WorkspaceDeleteDialog({
           </button>
         </div>
       </section>
+    </div>
+  );
+}
+
+function NoteCreateDialog({
+  loading,
+  error,
+  onClose,
+  onSubmit,
+}: {
+  loading: boolean;
+  error: string | null;
+  onClose: () => void;
+  onSubmit: (title: string) => void;
+}) {
+  const t = useTranslations();
+  const [title, setTitle] = useState('');
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <button className="absolute inset-0 cursor-default" style={{ background: 'oklch(8% 0.01 250 / 0.55)' }} onClick={onClose} />
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSubmit(title);
+        }}
+        className="relative w-full max-w-md rounded-2xl border p-5 shadow-2xl"
+        style={{ background: 'var(--bg-2)', borderColor: 'var(--border)' }}
+      >
+        <h2 className="text-sm font-semibold" style={{ color: 'var(--fg)' }}>
+          {t('wiki.createNote')}
+        </h2>
+        <p className="mt-1 text-xs" style={{ color: 'var(--fg-muted)' }}>
+          {t('wiki.createNoteHint')}
+        </p>
+        <input
+          autoFocus
+          value={title}
+          onChange={(event) => setTitle(event.target.value)}
+          placeholder={t('common.untitled')}
+          className="mt-4 w-full rounded-xl border px-3 py-2 text-sm outline-none"
+          style={{ background: 'var(--bg)', borderColor: 'var(--border)', color: 'var(--fg)' }}
+        />
+        {error && (
+          <p className="mt-3 text-xs" style={{ color: 'oklch(70% 0.18 25)' }}>
+            {error}
+          </p>
+        )}
+        <div className="mt-4 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg px-3 py-1.5 text-sm transition-opacity hover:opacity-70"
+            style={{ color: 'var(--fg-muted)' }}
+            disabled={loading}
+          >
+            {t('common.cancel')}
+          </button>
+          <button
+            type="submit"
+            disabled={loading || !title.trim()}
+            className="rounded-lg px-3 py-1.5 text-sm transition-opacity hover:opacity-70 disabled:opacity-40"
+            style={{ background: 'var(--color-accent)', color: 'white' }}
+          >
+            {loading ? t('common.loading') : t('common.save')}
+          </button>
+        </div>
+      </form>
     </div>
   );
 }

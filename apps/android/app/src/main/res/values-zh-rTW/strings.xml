@@ -29,7 +29,7 @@
     <string name="wiki_schema_lint">健康檢查規則</string>
     <string name="wiki_zone_wiki">知識頁</string>
     <string name="wiki_zone_notes">筆記</string>
-    <string name="wiki_zone_schema">結構</string>
+    <string name="wiki_zone_schema">規則</string>
     <string name="ingest_add_source">新增來源</string>
     <string name="ingest_running">整合中…</string>
     <string name="query_placeholder">問問你的 Wiki 任何問題…</string>
@@ -66,6 +66,9 @@
     <string name="wiki_search_empty">找不到結果</string>
     <string name="wiki_lint">執行 Wiki 健康檢查</string>
     <string name="wiki_lint_started">已開始執行 Wiki 健康檢查</string>
+    <string name="wiki_create_note">新增筆記</string>
+    <string name="wiki_create_note_hint">先建立一個新頁面，再用 Markdown 編輯內容。</string>
+    <string name="wiki_note_created">已建立筆記</string>
     <string name="wiki_select_model">選擇模型</string>
     <string name="wiki_current_workspace">目前工作區</string>
     <string name="workspace_actions">工作區操作</string>
@@ -100,7 +103,7 @@
     <!-- 使用說明 -->
     <string name="help_title">使用說明</string>
     <string name="help_workspace_title">工作區與頁面</string>
-    <string name="help_workspace_body">用工作區選單切換、排序或建立工作區。知識頁由 LLM 維護；筆記是你自己的內容；結構是控制 LLM 的規則檔。</string>
+    <string name="help_workspace_body">用工作區選單切換、排序或建立工作區。知識頁由 LLM 維護；筆記是你自己的內容；規則頁是控制 LLM 的提示詞與規則檔。</string>
     <string name="help_ingest_title">匯入內容</string>
     <string name="help_ingest_body">用 + 貼上網址、文字或 Markdown。用附加檔案按鈕可從手機匯入文字檔。</string>
     <string name="help_chat_title">對話與綜合頁</string>
