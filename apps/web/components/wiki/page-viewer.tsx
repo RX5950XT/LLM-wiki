@@ -41,8 +41,8 @@ function getTextContent(children: ReactNode): string {
 }
 
 function parseInternalHref(href: string): { slug: string; anchor?: string } | null {
-  if (href.startsWith('wiki://')) {
-    const withoutScheme = href.slice(7);
+  if (href.startsWith('wiki://') || href.startsWith('wiki:')) {
+    const withoutScheme = href.replace(/^wiki:(\/\/)?/, '');
     const [rawSlug = '', rawAnchor] = withoutScheme.split('#');
     return {
       slug: normalizeWikiSlug(decodeURIComponent(rawSlug)),
@@ -487,9 +487,12 @@ export function PageViewer({
 
                   const internalTarget = parseInternalHref(href);
                   if (internalTarget && onWikiLinkClick) {
+                    const internalHref = `/w/${workspaceId}?page=${encodeURIComponent(internalTarget.slug)}${
+                      internalTarget.anchor ? `#${encodeURIComponent(internalTarget.anchor)}` : ''
+                    }`;
                     return (
                       <a
-                        href={href}
+                        href={internalHref}
                         onClick={(e) => {
                           e.preventDefault();
                           onWikiLinkClick(internalTarget.slug, internalTarget.anchor);

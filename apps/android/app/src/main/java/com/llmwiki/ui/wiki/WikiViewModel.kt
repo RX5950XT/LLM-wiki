@@ -1120,7 +1120,8 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
         "$fallback: ${getApplication<Application>().getString(R.string.error_api_not_json)}"
 
     private fun normalizeWikiSlug(slug: String): String {
-        val trimmed = slug.trim().removePrefix("/").substringBefore("#")
+        val decoded = runCatching { java.net.URLDecoder.decode(slug, "UTF-8") }.getOrDefault(slug)
+        val trimmed = decoded.trim().removePrefix("/").substringBefore("#")
         if (trimmed.isBlank()) return trimmed
         if (trimmed.endsWith(".md")) return trimmed
         return "$trimmed.md"

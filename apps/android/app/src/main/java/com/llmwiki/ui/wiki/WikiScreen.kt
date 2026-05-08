@@ -143,13 +143,15 @@ fun WikiScreen(
     var pendingShareUrl by remember { mutableStateOf<String?>(null) }
     var showChatSheet by remember { mutableStateOf(false) }
     var showWorkspaceMenu by remember { mutableStateOf(false) }
+    var showActiveNoteMenu by remember { mutableStateOf(false) }
     var showHelpDialog by remember { mutableStateOf(false) }
-    var showPageEditDialog by remember { mutableStateOf(false) }
     var showCreateNoteDialog by remember { mutableStateOf(false) }
     var renameWorkspace by remember { mutableStateOf<WorkspaceRow?>(null) }
     var deleteWorkspace by remember { mutableStateOf<WorkspaceRow?>(null) }
     var renameNote by remember { mutableStateOf<PageEntity?>(null) }
     var deleteNote by remember { mutableStateOf<PageEntity?>(null) }
+    var inlineEditorPageSlug by remember { mutableStateOf<String?>(null) }
+    var inlineEditorValue by remember { mutableStateOf(TextFieldValue("")) }
     val workspaceArrowRotation by animateFloatAsState(
         targetValue = if (showWorkspaceMenu) 180f else 0f,
         label = "workspace-menu-arrow",
@@ -199,6 +201,11 @@ fun WikiScreen(
             pendingShareUrl = shareUrl
             showIngestDialog = true
         }
+    }
+
+    LaunchedEffect(uiState.activePage?.slug) {
+        showActiveNoteMenu = false
+        inlineEditorPageSlug = null
     }
 
     LaunchedEffect(uiState.signedOut) {
@@ -516,6 +523,8 @@ fun WikiScreen(
                             }
                         } else {
                             val editablePage = uiState.activePage?.takeIf { isHumanEditablePage(it) && uiState.pageContent != null }
+                            val activeNote = uiState.activePage?.takeIf { it.zone == "notes" && it.slug != "notes/guide.md" }
+                            val isInlineEditing = inlineEditorPageSlug == editablePage?.slug
                             IconButton(onClick = { wikiViewModel.toggleSearch() }) {
                                 Icon(Icons.Default.Search, contentDescription = stringResource(R.string.wiki_search))
                             }
@@ -523,8 +532,67 @@ fun WikiScreen(
                                 Icon(Icons.Default.Add, contentDescription = stringResource(R.string.wiki_create_note))
                             }
                             if (editablePage != null) {
-                                IconButton(onClick = { showPageEditDialog = true }) {
-                                    Icon(Icons.Default.Edit, contentDescription = stringResource(R.string.action_edit))
+                                if (isInlineEditing) {
+                                    IconButton(onClick = {
+                                        inlineEditorPageSlug = null
+                                        inlineEditorValue = TextFieldValue(uiState.pageContent.orEmpty())
+                                    }) {
+                                        Icon(Icons.Default.Close, contentDescription = stringResource(R.string.action_cancel))
+                                    }
+                                    IconButton(
+                                        onClick = {
+                                            wikiViewModel.savePageContent(editablePage.slug, inlineEditorValue.text) { success ->
+                                                if (success) {
+                                                    inlineEditorPageSlug = null
+                                                    scope.launch {
+                                                        snackbarHostState.showSnackbar(
+                                                            context.getString(R.string.wiki_page_saved)
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        enabled = !uiState.pageSaveLoading,
+                                    ) {
+                                        if (uiState.pageSaveLoading) {
+                                            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                                        } else {
+                                            Icon(Icons.Default.Check, contentDescription = stringResource(R.string.action_save))
+                                        }
+                                    }
+                                } else {
+                                    IconButton(onClick = {
+                                        inlineEditorPageSlug = editablePage.slug
+                                        inlineEditorValue = TextFieldValue(uiState.pageContent.orEmpty())
+                                    }) {
+                                        Icon(Icons.Default.Edit, contentDescription = stringResource(R.string.action_edit))
+                                    }
+                                }
+                            }
+                            if (activeNote != null && !isInlineEditing) {
+                                Box {
+                                    IconButton(onClick = { showActiveNoteMenu = true }) {
+                                        Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.workspace_actions))
+                                    }
+                                    DropdownMenu(
+                                        expanded = showActiveNoteMenu,
+                                        onDismissRequest = { showActiveNoteMenu = false },
+                                    ) {
+                                        DropdownMenuItem(
+                                            text = { Text(stringResource(R.string.wiki_rename_note)) },
+                                            onClick = {
+                                                showActiveNoteMenu = false
+                                                renameNote = activeNote
+                                            },
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text(stringResource(R.string.wiki_delete_note)) },
+                                            onClick = {
+                                                showActiveNoteMenu = false
+                                                deleteNote = activeNote
+                                            },
+                                        )
+                                    }
                                 }
                             }
                             if (uiState.contentLoading) {
@@ -633,6 +701,16 @@ fun WikiScreen(
                             Modifier.weight(1f).fillMaxWidth(),
                             contentAlignment = Alignment.Center,
                         ) { CircularProgressIndicator() }
+                        inlineEditorPageSlug == uiState.activePage?.slug &&
+                            uiState.pageContent != null &&
+                            uiState.activePage?.let(::isHumanEditablePage) == true -> InlinePageEditor(
+                            value = inlineEditorValue,
+                            onValueChange = { inlineEditorValue = it },
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                        )
                         uiState.pageContent != null -> MarkdownViewer(
                             markdown = uiState.pageContent!!,
                             onWikiLinkClick = { slug -> wikiViewModel.selectPageBySlug(slug) },
@@ -772,33 +850,6 @@ fun WikiScreen(
                 }
             },
         )
-    }
-
-    if (showPageEditDialog) {
-        val activePage = uiState.activePage
-        val content = uiState.pageContent
-        if (activePage != null && content != null && isHumanEditablePage(activePage)) {
-            PageEditDialog(
-                title = localizedSystemPageLabel(activePage.slug) ?: activePage.title ?: activePage.slug,
-                initialContent = content,
-                isLoading = uiState.pageSaveLoading,
-                onDismiss = { showPageEditDialog = false },
-                onConfirm = { updated ->
-                    wikiViewModel.savePageContent(activePage.slug, updated) { success ->
-                        if (success) {
-                            showPageEditDialog = false
-                            scope.launch {
-                                snackbarHostState.showSnackbar(
-                                    context.getString(R.string.wiki_page_saved)
-                                )
-                            }
-                        }
-                    }
-                },
-            )
-        } else {
-            showPageEditDialog = false
-        }
     }
 
     renameWorkspace?.let { workspace ->
@@ -1529,14 +1580,11 @@ private fun IngestInputDialog(
 }
 
 @Composable
-private fun PageEditDialog(
-    title: String,
-    initialContent: String,
-    isLoading: Boolean,
-    onDismiss: () -> Unit,
-    onConfirm: (String) -> Unit,
+private fun InlinePageEditor(
+    value: TextFieldValue,
+    onValueChange: (TextFieldValue) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    var value by remember(initialContent) { mutableStateOf(TextFieldValue(initialContent)) }
     val toolbarActions = remember {
         listOf(
             MarkdownToolbarAction("H1") { applyLinePrefix(it, "# ", "Heading") },
@@ -1550,58 +1598,32 @@ private fun PageEditDialog(
         )
     }
 
-    AlertDialog(
-        onDismissRequest = {
-            if (!isLoading) onDismiss()
-        },
-        title = { Text(title) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+    Column(
+        modifier = modifier.verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            toolbarActions.forEach { action ->
+                SmallFloatingActionButton(
+                    onClick = { onValueChange(action.apply(value)) },
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                    modifier = Modifier.size(36.dp),
                 ) {
-                    toolbarActions.forEach { action ->
-                        SmallFloatingActionButton(
-                            onClick = { value = action.apply(value) },
-                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                            modifier = Modifier.size(36.dp),
-                        ) {
-                            Text(action.label, style = MaterialTheme.typography.labelSmall)
-                        }
-                    }
-                }
-                OutlinedTextField(
-                    value = value,
-                    onValueChange = { value = it },
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 280.dp),
-                    maxLines = 18,
-                )
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = { onConfirm(value.text) },
-                enabled = !isLoading,
-            ) {
-                if (isLoading) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(16.dp),
-                        strokeWidth = 2.dp,
-                        color = MaterialTheme.colorScheme.onPrimary,
-                    )
-                } else {
-                    Text(stringResource(R.string.action_save))
+                    Text(action.label, style = MaterialTheme.typography.labelSmall)
                 }
             }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss, enabled = !isLoading) {
-                Text(stringResource(R.string.action_cancel))
-            }
-        },
-    )
+        }
+        OutlinedTextField(
+            value = value,
+            onValueChange = onValueChange,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 420.dp),
+            maxLines = 24,
+        )
+    }
 }
 
 @Composable

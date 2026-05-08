@@ -17,9 +17,12 @@ import com.llmwiki.data.SupabaseClientProvider
 import com.llmwiki.data.ThemeMode
 import io.github.jan.supabase.auth.auth
 import io.ktor.client.request.delete
+import io.ktor.client.request.get
 import io.ktor.client.request.header
+import io.ktor.client.request.patch
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
+import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
@@ -31,6 +34,9 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 
 data class SettingsUiState(
@@ -42,6 +48,9 @@ data class SettingsUiState(
     val accountId: String = "",
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     val language: AppLanguage = AppLanguage.SYSTEM,
+    val ruleDrafts: Map<String, String> = emptyMap(),
+    val ruleLoadingSlug: String? = null,
+    val ruleSavingSlug: String? = null,
 )
 
 private val settingsJson = Json { ignoreUnknownKeys = true }
@@ -196,6 +205,120 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    fun loadRule(workspaceId: String, slug: String) {
+        if (settingsState.value.ruleDrafts.containsKey(slug)) return
+
+        viewModelScope.launch {
+            settingsState.update { it.copy(ruleLoadingSlug = slug, error = null) }
+            try {
+                val response = sendAuthorizedRequest { accessToken ->
+                    AndroidHttpClient.instance.get(webApiUrl("/api/pages/$workspaceId/${slug.encodePathSegments()}")) {
+                        header("Authorization", "Bearer $accessToken")
+                    }
+                } ?: run {
+                    settingsState.update { it.copy(ruleLoadingSlug = null, error = unauthorizedMessage()) }
+                    return@launch
+                }
+
+                val text = response.bodyAsText()
+                if (response.status.value !in 200..299 || !isJsonObject(text)) {
+                    settingsState.update {
+                        it.copy(
+                            ruleLoadingSlug = null,
+                            error = parseApiError(text, "Failed to load rule"),
+                        )
+                    }
+                    return@launch
+                }
+
+                val content = settingsJson.parseToJsonElement(text)
+                    .jsonObject["content"]
+                    ?.jsonPrimitive
+                    ?.contentOrNull
+                    ?: ""
+
+                settingsState.update {
+                    it.copy(
+                        ruleDrafts = it.ruleDrafts + (slug to content),
+                        ruleLoadingSlug = null,
+                        error = null,
+                    )
+                }
+            } catch (e: Exception) {
+                settingsState.update {
+                    it.copy(
+                        ruleLoadingSlug = null,
+                        error = e.toUserFacingMessage("Failed to load rule"),
+                    )
+                }
+            }
+        }
+    }
+
+    fun updateRuleDraft(slug: String, content: String) {
+        settingsState.update { it.copy(ruleDrafts = it.ruleDrafts + (slug to content)) }
+    }
+
+    fun saveRule(workspaceId: String, slug: String, onDone: (Boolean) -> Unit = {}) {
+        val draft = settingsState.value.ruleDrafts[slug] ?: run {
+            onDone(false)
+            return
+        }
+
+        viewModelScope.launch {
+            settingsState.update { it.copy(ruleSavingSlug = slug, error = null) }
+            try {
+                val bodyJson = buildJsonObject { put("content", draft) }.toString()
+                val response = sendAuthorizedRequest { accessToken ->
+                    AndroidHttpClient.instance.patch(webApiUrl("/api/pages/$workspaceId/${slug.encodePathSegments()}")) {
+                        header("Authorization", "Bearer $accessToken")
+                        contentType(ContentType.Application.Json)
+                        setBody(bodyJson)
+                    }
+                } ?: run {
+                    settingsState.update { it.copy(ruleSavingSlug = null, error = unauthorizedMessage()) }
+                    onDone(false)
+                    return@launch
+                }
+
+                val text = response.bodyAsText()
+                if (response.status.value !in 200..299 || !isJsonObject(text)) {
+                    settingsState.update {
+                        it.copy(
+                            ruleSavingSlug = null,
+                            error = parseApiError(text, "Failed to save rule"),
+                        )
+                    }
+                    onDone(false)
+                    return@launch
+                }
+
+                val content = settingsJson.parseToJsonElement(text)
+                    .jsonObject["content"]
+                    ?.jsonPrimitive
+                    ?.contentOrNull
+                    ?: draft
+
+                settingsState.update {
+                    it.copy(
+                        ruleDrafts = it.ruleDrafts + (slug to content),
+                        ruleSavingSlug = null,
+                        error = null,
+                    )
+                }
+                onDone(true)
+            } catch (e: Exception) {
+                settingsState.update {
+                    it.copy(
+                        ruleSavingSlug = null,
+                        error = e.toUserFacingMessage("Failed to save rule"),
+                    )
+                }
+                onDone(false)
+            }
+        }
+    }
+
     private fun parseApiError(raw: String, fallback: String): String {
         if (raw.isBlank()) return fallback
         if (isHtmlResponse(raw)) return nonJsonApiMessage(fallback)
@@ -241,4 +364,23 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     }
 
     private fun webApiUrl(path: String) = BuildConfig.WEB_API_BASE_URL.trimEnd('/') + path
+
+    private fun String.encodePathSegments(): String =
+        split('/').joinToString("/") { segment ->
+            java.net.URLEncoder.encode(segment, "UTF-8").replace("+", "%20")
+        }
+
+    private suspend fun sendAuthorizedRequest(
+        request: suspend (String) -> HttpResponse,
+    ): HttpResponse? {
+        var accessToken = supabase.requireAccessToken(forceRefresh = false)
+            ?: supabase.requireAccessToken(forceRefresh = true)
+            ?: return null
+        var response = request(accessToken)
+        if (response.status.value == 401) {
+            accessToken = supabase.requireAccessToken(forceRefresh = true) ?: return response
+            response = request(accessToken)
+        }
+        return response
+    }
 }

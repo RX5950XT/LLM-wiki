@@ -121,10 +121,6 @@ fun LlmWikiNavGraph(
             SettingsScreen(
                 onBack = { navController.popBackStack() },
                 workspaceId = settingsWorkspaceId,
-                onOpenRule = { slug ->
-                    val encodedSlug = java.net.URLEncoder.encode(slug, "UTF-8").replace("+", "%20")
-                    navController.navigate("wiki?workspaceId=${settingsWorkspaceId.orEmpty()}&page=$encodedSlug")
-                },
             )
         }
     }

@@ -89,6 +89,12 @@ bun run typecheck    # Turborepo 全套型別檢查
 bun run build        # 建置
 ```
 
+## 交付流程
+
+- 每次完成任何修改後，必須額外執行一次 Android APK 建置：`.\gradlew.bat :app:assembleDebug`（工作目錄：`apps/android`）
+- 每次完成任何修改後，必須提交並推送目前分支到遠端；不可只停留在本機工作樹
+- 上述兩件事屬於固定收尾流程，更新 `CLAUDE.md` / `AGENTS.md` / 程式碼時都一樣要做
+
 ## 環境變數（.env.local）
 
 ```

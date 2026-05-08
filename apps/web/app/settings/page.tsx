@@ -1,11 +1,12 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
-import { ArrowLeft, FileText } from 'lucide-react';
+import { ArrowLeft } from 'lucide-react';
 import { createClient } from '@/lib/supabase/server';
 import { ProfileList } from '@/components/settings/profile-list';
 import { ProfileForm } from '@/components/settings/profile-form';
 import { LocaleSwitcher } from '@/components/settings/locale-switcher';
+import { RulesPanel } from '@/components/settings/rules-panel';
 import { ThemeSwitcher } from '@/components/settings/theme-switcher';
 import { fetchOrderedWorkspaces } from '@/lib/workspaces/queries';
 
@@ -117,19 +118,7 @@ export default async function SettingsPage() {
             <h2 className="text-sm font-medium uppercase tracking-wider" style={{ color: 'var(--fg-muted)' }}>
               {t('settings.rules')}
             </h2>
-            <div className="overflow-hidden rounded-xl border" style={{ borderColor: 'var(--border)' }}>
-              {(rulePages ?? []).map((page) => (
-                <Link
-                  key={page.slug}
-                  href={`/w/${workspaceId}?page=${encodeURIComponent(page.slug)}`}
-                  className="flex items-center gap-3 border-b px-4 py-3 text-sm transition-opacity last:border-b-0 hover:opacity-75"
-                  style={{ borderColor: 'var(--border)', color: 'var(--fg)' }}
-                >
-                  <FileText size={15} style={{ color: 'var(--fg-muted)' }} />
-                  <span>{page.title ?? page.slug}</span>
-                </Link>
-              ))}
-            </div>
+            <RulesPanel workspaceId={workspaceId} pages={rulePages ?? []} />
           </section>
         )}
       </div>

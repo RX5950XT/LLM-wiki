@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -80,12 +81,12 @@ private val providerPresets = listOf(
 fun SettingsScreen(
     onBack: () -> Unit,
     workspaceId: String? = null,
-    onOpenRule: (String) -> Unit = {},
     settingsViewModel: SettingsViewModel = viewModel(),
 ) {
     val uiState by settingsViewModel.uiState.collectAsState()
     var showCreateDialog by remember { mutableStateOf(false) }
     var profileToDelete by remember { mutableStateOf<LlmProfile?>(null) }
+    var expandedRuleSlug by remember { mutableStateOf<String?>(null) }
 
     Scaffold(
         topBar = {
@@ -195,17 +196,47 @@ fun SettingsScreen(
                 item {
                     SettingsSection(title = stringResource(R.string.settings_rules)) {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            RuleRow(
+                            RuleEditorCard(
                                 title = stringResource(R.string.wiki_schema_ingest),
-                                onClick = { onOpenRule("_schema/ingest.md") },
+                                expanded = expandedRuleSlug == "_schema/ingest.md",
+                                content = uiState.ruleDrafts["_schema/ingest.md"],
+                                isLoading = uiState.ruleLoadingSlug == "_schema/ingest.md",
+                                isSaving = uiState.ruleSavingSlug == "_schema/ingest.md",
+                                onToggle = {
+                                    val nextSlug = if (expandedRuleSlug == "_schema/ingest.md") null else "_schema/ingest.md"
+                                    expandedRuleSlug = nextSlug
+                                    if (nextSlug != null) settingsViewModel.loadRule(workspaceId, nextSlug)
+                                },
+                                onValueChange = { settingsViewModel.updateRuleDraft("_schema/ingest.md", it) },
+                                onSave = { settingsViewModel.saveRule(workspaceId, "_schema/ingest.md") },
                             )
-                            RuleRow(
+                            RuleEditorCard(
                                 title = stringResource(R.string.wiki_schema_query),
-                                onClick = { onOpenRule("_schema/query.md") },
+                                expanded = expandedRuleSlug == "_schema/query.md",
+                                content = uiState.ruleDrafts["_schema/query.md"],
+                                isLoading = uiState.ruleLoadingSlug == "_schema/query.md",
+                                isSaving = uiState.ruleSavingSlug == "_schema/query.md",
+                                onToggle = {
+                                    val nextSlug = if (expandedRuleSlug == "_schema/query.md") null else "_schema/query.md"
+                                    expandedRuleSlug = nextSlug
+                                    if (nextSlug != null) settingsViewModel.loadRule(workspaceId, nextSlug)
+                                },
+                                onValueChange = { settingsViewModel.updateRuleDraft("_schema/query.md", it) },
+                                onSave = { settingsViewModel.saveRule(workspaceId, "_schema/query.md") },
                             )
-                            RuleRow(
+                            RuleEditorCard(
                                 title = stringResource(R.string.wiki_schema_lint),
-                                onClick = { onOpenRule("_schema/lint.md") },
+                                expanded = expandedRuleSlug == "_schema/lint.md",
+                                content = uiState.ruleDrafts["_schema/lint.md"],
+                                isLoading = uiState.ruleLoadingSlug == "_schema/lint.md",
+                                isSaving = uiState.ruleSavingSlug == "_schema/lint.md",
+                                onToggle = {
+                                    val nextSlug = if (expandedRuleSlug == "_schema/lint.md") null else "_schema/lint.md"
+                                    expandedRuleSlug = nextSlug
+                                    if (nextSlug != null) settingsViewModel.loadRule(workspaceId, nextSlug)
+                                },
+                                onValueChange = { settingsViewModel.updateRuleDraft("_schema/lint.md", it) },
+                                onSave = { settingsViewModel.saveRule(workspaceId, "_schema/lint.md") },
                             )
                         }
                     }
@@ -261,27 +292,73 @@ fun SettingsScreen(
 }
 
 @Composable
-private fun RuleRow(
+private fun RuleEditorCard(
     title: String,
-    onClick: () -> Unit,
+    expanded: Boolean,
+    content: String?,
+    isLoading: Boolean,
+    isSaving: Boolean,
+    onToggle: () -> Unit,
+    onValueChange: (String) -> Unit,
+    onSave: () -> Unit,
 ) {
     Surface(
         color = MaterialTheme.colorScheme.surfaceVariant,
         shape = MaterialTheme.shapes.medium,
-        modifier = Modifier.clickable(onClick = onClick),
+        modifier = Modifier.clickable(onClick = onToggle),
     ) {
-        Row(
+        Column(
             modifier = Modifier.fillMaxWidth().padding(12.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment = Alignment.CenterVertically,
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Icon(
-                Icons.Default.Description,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(18.dp),
-            )
-            Text(title, style = MaterialTheme.typography.bodyMedium)
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.Default.Description,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(18.dp),
+                )
+                Text(title, style = MaterialTheme.typography.bodyMedium)
+            }
+
+            if (expanded) {
+                when {
+                    isLoading -> Box(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                    }
+
+                    content != null -> Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        OutlinedTextField(
+                            value = content,
+                            onValueChange = onValueChange,
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 220.dp),
+                            maxLines = 14,
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End,
+                        ) {
+                            Button(onClick = onSave, enabled = !isSaving) {
+                                if (isSaving) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(16.dp),
+                                        strokeWidth = 2.dp,
+                                        color = MaterialTheme.colorScheme.onPrimary,
+                                    )
+                                } else {
+                                    Text(stringResource(R.string.action_save))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
