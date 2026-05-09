@@ -316,9 +316,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun selectPageBySlug(slug: String) {
-        val normalized = normalizeWikiSlug(slug)
-        val page = pages.value.find { it.slug == normalized }
-            ?: pages.value.find { it.slug == slug }
+        val page = resolvePageSlug(slug)
             ?: return
         selectPage(page)
     }
@@ -1075,9 +1073,13 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private suspend fun selectPageBySlugFromDb(wsId: String, slug: String) {
+        val resolvedSlug = resolvePageSlug(slug)?.slug
         val normalized = normalizeWikiSlug(slug)
-        val page = db.pageDao().getPage(wsId, accountName, normalized)
-            ?: db.pageDao().getPage(wsId, accountName, slug)
+        val page = listOfNotNull(resolvedSlug, normalized, slug)
+            .distinct()
+            .firstNotNullOfOrNull { candidate ->
+                db.pageDao().getPage(wsId, accountName, candidate)
+            }
         if (page != null) {
             selectPage(page)
         } else {
@@ -1126,6 +1128,35 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
         if (trimmed.endsWith(".md")) return trimmed
         return "$trimmed.md"
     }
+
+    private fun resolvePageSlug(rawSlug: String): PageEntity? {
+        val normalized = normalizeWikiSlug(rawSlug)
+        return pages.value.find { it.slug == normalized }
+            ?: pages.value.find { it.slug == rawSlug }
+            ?: pages.value.find { page -> matchesWikiAlias(page, rawSlug) }
+    }
+
+    private fun matchesWikiAlias(page: PageEntity, rawSlug: String): Boolean {
+        val target = canonicalWikiAlias(rawSlug)
+        if (target.isBlank()) return false
+        val pageSlug = page.slug.removeSuffix(".md")
+        val slugBasename = pageSlug.substringAfterLast('/')
+        val title = page.title.orEmpty()
+        return canonicalWikiAlias(pageSlug) == target ||
+            canonicalWikiAlias(slugBasename) == target ||
+            canonicalWikiAlias(title) == target
+    }
+
+    private fun canonicalWikiAlias(value: String): String =
+        value
+            .trim()
+            .removePrefix("/")
+            .substringBefore("#")
+            .removeSuffix(".md")
+            .substringAfterLast('/')
+            .lowercase()
+            .replace("&", "and")
+            .replace(Regex("[\\s_\\-()]+"), "")
 
     private fun unauthorizedMessage(): String =
         getApplication<Application>().getString(R.string.error_unauthorized)

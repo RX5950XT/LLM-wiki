@@ -92,12 +92,29 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
       });
   }, [locale, workspaceId]);
 
+  const resolvePageSlug = useCallback((rawSlug: string) => {
+    const normalized = normalizeWikiTarget(rawSlug);
+    const exact = pages.find((page) => page.slug === normalized) ?? pages.find((page) => page.slug === rawSlug);
+    if (exact) return exact.slug;
+
+    const targetAlias = canonicalWikiAlias(rawSlug);
+    const aliasMatch = pages.find((page) => {
+      const pageSlug = page.slug.replace(/\.md$/i, '');
+      const base = pageSlug.split('/').at(-1) ?? pageSlug;
+      return canonicalWikiAlias(pageSlug) === targetAlias ||
+        canonicalWikiAlias(base) === targetAlias ||
+        canonicalWikiAlias(page.title ?? '') === targetAlias;
+    });
+    return aliasMatch?.slug ?? normalized;
+  }, [pages]);
+
   const selectPage = useCallback((slug: string, anchor?: string) => {
-    setActivePage(slug);
+    const resolvedSlug = resolvePageSlug(slug);
+    setActivePage(resolvedSlug);
     setActiveAnchor(anchor ?? null);
     const hash = anchor ? `#${encodeURIComponent(anchor)}` : '';
-    window.history.replaceState(null, '', `/w/${workspaceId}?page=${encodeURIComponent(slug)}${hash}`);
-  }, [workspaceId]);
+    window.history.replaceState(null, '', `/w/${workspaceId}?page=${encodeURIComponent(resolvedSlug)}${hash}`);
+  }, [resolvePageSlug, workspaceId]);
 
   const handlePageWritten = useCallback(
     (slug: string) => {
@@ -844,6 +861,25 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
 
 function encodeSlugPath(slug: string): string {
   return slug.split('/').map(encodeURIComponent).join('/');
+}
+
+function normalizeWikiTarget(slug: string): string {
+  const trimmed = decodeURIComponent(slug).trim().replace(/^\//, '').split('#')[0] ?? '';
+  if (!trimmed) return trimmed;
+  return trimmed.endsWith('.md') ? trimmed : `${trimmed}.md`;
+}
+
+function canonicalWikiAlias(value: string): string {
+  return value
+    .trim()
+    .replace(/^\//, '')
+    .split('#')[0]!
+    .replace(/\.md$/i, '')
+    .split('/')
+    .at(-1)!
+    .toLowerCase()
+    .replace(/&/g, 'and')
+    .replace(/[\s_\-()]+/g, '');
 }
 
 function WorkspaceRenameDialog({
