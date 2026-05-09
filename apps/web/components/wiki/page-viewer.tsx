@@ -52,6 +52,9 @@ function parseInternalHref(href: string): { slug: string; anchor?: string } | nu
 
   if (href.startsWith('#')) return null;
 
+  const resolved = parseWorkspaceRouteHref(href);
+  if (resolved) return resolved;
+
   if (/^(https?:|mailto:|tel:)/i.test(href)) return null;
 
   const [slug = '', anchor] = href.replace(/^\//, '').split('#');
@@ -59,6 +62,29 @@ function parseInternalHref(href: string): { slug: string; anchor?: string } | nu
     slug: normalizeWikiSlug(slug),
     anchor: anchor ? decodeURIComponent(anchor) : undefined,
   };
+}
+
+function parseWorkspaceRouteHref(href: string): { slug: string; anchor?: string } | null {
+  const base = typeof window !== 'undefined' ? window.location.origin : 'https://llm-wiki.local';
+  const url = runSafeUrl(href, base);
+  if (!url || !/^\/w\/[^/]+$/i.test(url.pathname)) return null;
+
+  const params = url.searchParams;
+  const rawPage = params.get('page');
+  if (!rawPage) return null;
+
+  return {
+    slug: normalizeWikiSlug(decodeURIComponent(rawPage)),
+    anchor: url.hash ? decodeURIComponent(url.hash.slice(1)) : undefined,
+  };
+}
+
+function runSafeUrl(href: string, base: string): URL | null {
+  try {
+    return new URL(href, base);
+  } catch {
+    return null;
+  }
 }
 
 function normalizeWikiSlug(slug: string): string {
@@ -110,6 +136,7 @@ interface PageViewerProps {
   anchor?: string | null;
   onWikiLinkClick?: (slug: string, anchor?: string) => void;
   onPageSaved?: () => void;
+  onPageLoaded?: (page: PageData) => void;
   /** Increment to force re-fetch (e.g. on Realtime update) */
   refreshKey?: number;
 }
@@ -131,6 +158,7 @@ export function PageViewer({
   anchor,
   onWikiLinkClick,
   onPageSaved,
+  onPageLoaded,
   refreshKey,
 }: PageViewerProps) {
   const t = useTranslations();
@@ -158,11 +186,12 @@ export function PageViewer({
           setPage(data);
           setDraft(data.content);
           setEditing(false);
+          onPageLoaded?.(data);
         })
         .catch((e) => setError(String(e)))
         .finally(() => setLoading(false));
     },
-    [workspaceId, slug],
+    [onPageLoaded, workspaceId, slug],
   );
 
   // Fetch on slug change
@@ -227,13 +256,14 @@ export function PageViewer({
       setDraft(data.content);
       setEditing(false);
       setStale(false);
+      onPageLoaded?.(data);
       onPageSaved?.();
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : 'Failed to save page');
     } finally {
       setSavePending(false);
     }
-  }, [draft, onPageSaved, page, workspaceId]);
+  }, [draft, onPageLoaded, onPageSaved, page, workspaceId]);
 
   const editorActions: EditorAction[] = [
     { id: 'h1', label: t('wiki.editorHeading'), apply: (input) => prefixSelectedLines(input, '# ', 'Heading') },

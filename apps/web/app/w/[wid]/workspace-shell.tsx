@@ -61,10 +61,12 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
   const [leftWidth, setLeftWidth] = useState(240);
   const [rightWidth, setRightWidth] = useState(384);
   const [draggingWorkspaceId, setDraggingWorkspaceId] = useState<string | null>(null);
+  const [graphRefreshKey, setGraphRefreshKey] = useState(0);
   const dragging = useRef<{ side: 'left' | 'right'; startX: number; startWidth: number } | null>(null);
   const dragFrame = useRef<number | null>(null);
   const pendingLeftWidth = useRef<number | null>(null);
   const pendingRightWidth = useRef<number | null>(null);
+  const activePageVersionRef = useRef<number | null>(null);
 
   const [showSearch, setShowSearch] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -82,7 +84,12 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
       headers: { 'x-llm-wiki-locale': locale },
     })
       .then((r) => r.json())
-      .then((d) => d.pages && setPages(d.pages));
+      .then((d) => {
+        if (d.pages) {
+          setPages(d.pages);
+          setGraphRefreshKey((key) => key + 1);
+        }
+      });
   }, [locale, workspaceId]);
 
   const selectPage = useCallback((slug: string, anchor?: string) => {
@@ -101,10 +108,10 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
   );
 
   const handleRealtimeChange = useCallback(
-    ({ slug }: PageChangedEvent) => {
+    ({ slug, version }: PageChangedEvent) => {
       refreshPageList();
       setActivePage((current) => {
-        if (current === slug) {
+        if (current === slug && version > (activePageVersionRef.current ?? 0)) {
           setViewerRefreshKey((k) => k + 1);
         }
         return current;
@@ -221,7 +228,7 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
   const runLint = useCallback(async () => {
     setLintRunning(true);
     try {
-      await fetch('/api/lint', {
+      const res = await fetch('/api/lint', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -229,9 +236,15 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
         },
         body: JSON.stringify({ workspace_id: workspaceId }),
       });
+      const data = await res.json().catch(() => null) as { error?: string } | null;
+      if (!res.ok) {
+        throw new Error(data?.error ?? 'Lint failed');
+      }
       refreshPageList();
-      const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      const today = new Date().toISOString().slice(0, 10);
       selectPage(`_lint/${today}.md`);
+    } catch (error) {
+      setWorkspaceActionError(error instanceof Error ? error.message : 'Lint failed');
     } finally {
       setLintRunning(false);
     }
@@ -396,6 +409,8 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
     current.splice(toIndex, 0, moved);
     void persistWorkspaceOrder(current);
   }, [persistWorkspaceOrder, workspaceList]);
+
+  const activeNote = pages.find((page) => page.slug === activePage && page.zone === 'notes' && page.slug !== 'notes/guide.md') ?? null;
 
   return (
     <div
@@ -595,6 +610,37 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
             )}
           </div>
 
+          {activeNote && (
+            <>
+              <button
+                type="button"
+                onClick={() => {
+                  setWorkspaceActionError(null);
+                  setRenamingNote(activeNote);
+                }}
+                className="rounded p-1 transition-all duration-100 hover:opacity-70 active:scale-90"
+                style={{ color: 'var(--fg-muted)' }}
+                aria-label={t('wiki.renameNote')}
+                title={t('wiki.renameNote')}
+              >
+                <Pencil size={16} />
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setWorkspaceActionError(null);
+                  setDeletingNote(activeNote);
+                }}
+                className="rounded p-1 transition-all duration-100 hover:opacity-70 active:scale-90"
+                style={{ color: 'oklch(65% 0.18 30)' }}
+                aria-label={t('wiki.deleteNote')}
+                title={t('wiki.deleteNote')}
+              >
+                <Trash2 size={16} />
+              </button>
+            </>
+          )}
+
           {/* Graph view toggle */}
           <button
             onClick={() => setShowGraph((g) => !g)}
@@ -705,6 +751,7 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
             <GraphView
               workspaceId={workspaceId}
               activePage={activePage}
+              refreshKey={graphRefreshKey}
               onNodeClick={(slug) => {
                 selectPage(slug);
                 setShowGraph(false);
@@ -716,6 +763,9 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
               slug={activePage}
               anchor={activeAnchor}
               onWikiLinkClick={selectPage}
+              onPageLoaded={(page) => {
+                activePageVersionRef.current = page.version;
+              }}
               onPageSaved={refreshPageList}
               refreshKey={viewerRefreshKey}
             />

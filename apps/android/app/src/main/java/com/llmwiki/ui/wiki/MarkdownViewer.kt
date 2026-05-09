@@ -35,8 +35,17 @@ private fun parseInternalWikiLink(link: String): String? {
         return normalizeWikiSlug(Uri.decode(link.removePrefix("wiki://").substringBefore("#")))
     }
     if (link.startsWith("#")) return null
+    parseWorkspaceRouteLink(link)?.let { return it }
     if (link.startsWith("http://") || link.startsWith("https://") || link.startsWith("mailto:")) return null
     return normalizeWikiSlug(link.removePrefix("/").substringBefore("#"))
+}
+
+private fun parseWorkspaceRouteLink(link: String): String? {
+    val uri = runCatching { Uri.parse(link) }.getOrNull() ?: return null
+    val path = uri.path.orEmpty().trim()
+    if (!Regex("""^/?w/[^/]+$""").matches(path)) return null
+    val page = uri.getQueryParameter("page") ?: return null
+    return normalizeWikiSlug(Uri.decode(page).substringBefore("#"))
 }
 
 private fun normalizeWikiSlug(raw: String): String? {

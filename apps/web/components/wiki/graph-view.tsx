@@ -24,11 +24,12 @@ interface GraphViewProps {
   workspaceId: string;
   activePage?: string;
   onNodeClick?: (slug: string) => void;
+  refreshKey?: number;
 }
 
 // react-force-graph-2d is ESM-only and uses window, so we load it dynamically
 // to avoid Next.js SSR issues.
-export function GraphView({ workspaceId, activePage, onNodeClick }: GraphViewProps) {
+export function GraphView({ workspaceId, activePage, onNodeClick, refreshKey = 0 }: GraphViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [graphData, setGraphData] = useState<GraphData>({ nodes: [], links: [] });
   const [loading, setLoading] = useState(true);
@@ -75,7 +76,7 @@ export function GraphView({ workspaceId, activePage, onNodeClick }: GraphViewPro
 
     load();
     return () => { cancelled = true; };
-  }, [workspaceId]);
+  }, [workspaceId, refreshKey]);
 
   // Dynamically load and mount react-force-graph-2d
   useEffect(() => {
