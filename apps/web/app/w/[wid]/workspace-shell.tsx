@@ -18,7 +18,11 @@ interface PageEntry {
   title: string | null;
   kind: string;
   zone: string;
+  updated_at?: string;
+  version?: number;
 }
+
+const PAGE_LIST_LIMIT = 2000;
 
 interface WorkspaceEntry {
   id: string;
@@ -67,6 +71,7 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
   const pendingLeftWidth = useRef<number | null>(null);
   const pendingRightWidth = useRef<number | null>(null);
   const activePageVersionRef = useRef<number | null>(null);
+  const graphRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [showSearch, setShowSearch] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -124,20 +129,87 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
     [selectPage, refreshPageList],
   );
 
+  const debouncedGraphRefresh = useCallback(() => {
+    if (graphRefreshTimer.current) {
+      clearTimeout(graphRefreshTimer.current);
+    }
+    graphRefreshTimer.current = setTimeout(() => {
+      setGraphRefreshKey((k) => k + 1);
+    }, 2000);
+  }, []);
+
   const handleRealtimeChange = useCallback(
-    ({ slug, version }: PageChangedEvent) => {
-      refreshPageList();
-      setActivePage((current) => {
-        if (current === slug && version > (activePageVersionRef.current ?? 0)) {
-          setViewerRefreshKey((k) => k + 1);
+    (event: PageChangedEvent) => {
+      setPages((prev) => {
+        if (event.eventType === 'DELETE') {
+          return prev.filter((p) => p.slug !== event.slug);
         }
-        return current;
+
+        const idx = prev.findIndex((p) => p.slug === event.slug);
+
+        if (event.eventType === 'UPDATE' && idx >= 0) {
+          const existing = prev[idx]!;
+          if ((existing.version ?? 0) >= event.version) return prev;
+          const next = [...prev];
+          next[idx] = {
+            ...existing,
+            ...(event.title !== undefined ? { title: event.title } : {}),
+            ...(event.kind !== undefined ? { kind: event.kind } : {}),
+            ...(event.zone !== undefined ? { zone: event.zone } : {}),
+            ...(event.updatedAt !== undefined ? { updated_at: event.updatedAt } : {}),
+            version: event.version,
+          };
+          return next.sort(
+            (a, b) => new Date(b.updated_at ?? '').getTime() - new Date(a.updated_at ?? '').getTime(),
+          );
+        }
+
+        if (event.eventType === 'INSERT' || (event.eventType === 'UPDATE' && idx < 0)) {
+          const inserted = {
+            slug: event.slug,
+            title: event.title ?? '',
+            kind: event.kind ?? 'wiki',
+            zone: event.zone ?? 'wiki',
+            updated_at: event.updatedAt ?? new Date().toISOString(),
+            version: event.version,
+          };
+          return [...prev, inserted]
+            .sort(
+              (a, b) => new Date(b.updated_at ?? '').getTime() - new Date(a.updated_at ?? '').getTime(),
+            )
+            .slice(0, PAGE_LIST_LIMIT);
+        }
+
+        return prev;
       });
+
+      if (event.eventType === 'DELETE') {
+        setActivePage((current) => (current === event.slug ? 'index.md' : current));
+      }
+
+      if (event.eventType !== 'DELETE') {
+        setActivePage((current) => {
+          if (current === event.slug && event.version > (activePageVersionRef.current ?? 0)) {
+            setViewerRefreshKey((k) => k + 1);
+          }
+          return current;
+        });
+      }
+
+      debouncedGraphRefresh();
     },
-    [refreshPageList],
+    [debouncedGraphRefresh],
   );
 
   useRealtimePages(workspaceId, handleRealtimeChange);
+
+  useEffect(() => {
+    return () => {
+      if (graphRefreshTimer.current) {
+        clearTimeout(graphRefreshTimer.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     setWorkspaceList(workspaces);

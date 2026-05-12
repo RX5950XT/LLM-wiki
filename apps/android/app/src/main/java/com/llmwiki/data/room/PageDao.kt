@@ -41,4 +41,10 @@ interface PageDao {
 
     @Query("DELETE FROM pages")
     suspend fun deleteAll()
+
+    @Query("SELECT cached_revision FROM workspace_cache_state WHERE workspace_id = :workspaceId AND account_name = :accountName")
+    suspend fun getCachedRevision(workspaceId: String, accountName: String): Long?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun setCachedRevision(state: WorkspaceCacheStateEntity)
 }

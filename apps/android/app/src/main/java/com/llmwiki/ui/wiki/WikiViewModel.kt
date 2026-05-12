@@ -131,7 +131,12 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
         loadProfiles()
     }
 
+    private var lastForegroundSyncAt = 0L
+
     fun refreshAfterForeground() {
+        val now = System.currentTimeMillis()
+        if (now - lastForegroundSyncAt < 15 * 60 * 1000L) return
+        lastForegroundSyncAt = now
         loadProfiles()
         refreshWorkspaces(syncSelected = true)
     }

@@ -74,7 +74,7 @@ async function runLint(workspaceId: string, userId: string, locale: string = 'zh
 
   const { data: profile } = await admin
     .from('llm_profiles')
-    .select('*')
+    .select('id, name, base_url, model, api_key_encrypted, extra_headers, owner_id')
     .eq('id', profileId)
     .eq('owner_id', userId)
     .single();

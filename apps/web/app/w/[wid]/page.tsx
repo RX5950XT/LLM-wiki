@@ -50,9 +50,10 @@ export default async function WorkspacePage({ params, searchParams }: WorkspaceP
 
   const { data: pages } = await supabase
     .from('pages')
-    .select('slug, title, kind, zone')
+    .select('slug, title, kind, zone, updated_at, version')
     .eq('workspace_id', wid)
-    .order('updated_at', { ascending: false });
+    .order('updated_at', { ascending: false })
+    .limit(2000);
 
   const workspaceEntries = (workspaces ?? []).map((item) => ({
     id: item.id,

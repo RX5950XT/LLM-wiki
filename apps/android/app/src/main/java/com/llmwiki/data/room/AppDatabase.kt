@@ -7,7 +7,7 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [PageEntity::class], version = 4, exportSchema = false)
+@Database(entities = [PageEntity::class, WorkspaceCacheStateEntity::class], version = 5, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
 
     abstract fun pageDao(): PageDao
@@ -25,6 +25,21 @@ abstract class AppDatabase : RoomDatabase() {
             override fun migrate(database: SupportSQLiteDatabase) {
                 database.execSQL(
                     "ALTER TABLE pages ADD COLUMN zone TEXT NOT NULL DEFAULT 'wiki'"
+                )
+            }
+        }
+
+        private val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    """
+                    CREATE TABLE workspace_cache_state (
+                        workspace_id TEXT NOT NULL,
+                        account_name TEXT NOT NULL,
+                        cached_revision INTEGER NOT NULL,
+                        PRIMARY KEY(workspace_id, account_name)
+                    )
+                    """.trimIndent()
                 )
             }
         }
@@ -95,7 +110,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "llmwiki.db",
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                     .fallbackToDestructiveMigration()
                     .build()
                     .also { instance = it }

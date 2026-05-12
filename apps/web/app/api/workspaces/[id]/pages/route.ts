@@ -36,10 +36,16 @@ export async function GET(
 
   const { data: pages, error } = await supabase
     .from('pages')
-    .select('slug, title, kind, zone, updated_at')
+    .select('slug, title, kind, zone, updated_at, version')
     .eq('workspace_id', id)
-    .order('updated_at', { ascending: false });
+    .order('updated_at', { ascending: false })
+    .limit(2000); // TODO P2: cursor pagination
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  console.log('[egress:pages-api]', {
+    workspaceId: id,
+    rows: pages?.length ?? 0,
+    bytes: Buffer.byteLength(JSON.stringify(pages ?? [])),
+  });
   return NextResponse.json({ pages });
 }

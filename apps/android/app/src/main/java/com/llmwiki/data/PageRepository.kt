@@ -1,9 +1,13 @@
 package com.llmwiki.data
 
+import android.util.Log
+import androidx.room.withTransaction
 import com.llmwiki.BuildConfig
 import com.llmwiki.data.room.AppDatabase
 import com.llmwiki.data.room.PageEntity
+import com.llmwiki.data.room.WorkspaceCacheStateEntity
 import io.github.jan.supabase.postgrest.from
+import io.github.jan.supabase.postgrest.query.Columns
 import io.github.jan.supabase.postgrest.query.Order
 import io.ktor.client.request.get
 import io.ktor.client.request.header
@@ -11,6 +15,7 @@ import io.ktor.client.request.post
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
 import kotlinx.coroutines.flow.Flow
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
@@ -24,11 +29,40 @@ class PageRepository(
     fun observePages(workspaceId: String, accountName: String): Flow<List<PageEntity>> =
         db.pageDao().observePages(workspaceId, accountName)
 
+    @Serializable
+    private data class WorkspaceSyncStateDto(
+        @SerialName("pages_revision") val pagesRevision: Long,
+    )
+
     suspend fun syncPages(workspaceId: String, accountName: String, locale: String) {
         ensureSystemPages(workspaceId, locale)
+
+        val serverRevision: Long? = runCatching {
+            supabase.from("workspace_sync_state")
+                .select(columns = Columns.raw("pages_revision")) {
+                    filter { eq("workspace_id", workspaceId) }
+                    limit(1)
+                }
+                .decodeSingle<WorkspaceSyncStateDto>()
+                .pagesRevision
+        }.getOrElse { e ->
+            Log.w("SyncPages", "manifest check failed, fallback to full sync", e)
+            null
+        }
+
+        val localRevision = db.pageDao().getCachedRevision(workspaceId, accountName) ?: -1L
+
+        if (serverRevision != null && serverRevision <= localRevision) {
+            Log.d("SyncPages", "skip: server=$serverRevision local=$localRevision")
+            return
+        }
+
         val rows = withSupabaseRetry {
             supabase.from("pages")
-                .select {
+                .select(columns = Columns.raw(
+                    "id,workspace_id,slug,kind,zone,title,drive_file_id,content_hash," +
+                    "version,updated_at,updated_by,locked_by_human"
+                )) {
                     filter { eq("workspace_id", workspaceId) }
                     order("updated_at", order = Order.DESCENDING)
                 }
@@ -52,12 +86,23 @@ class PageRepository(
                 lockedByHuman = row.lockedByHuman,
             )
         }
-        if (entities.isEmpty()) {
-            db.pageDao().deleteByWorkspace(workspaceId, accountName)
-            return
+
+        db.withTransaction {
+            if (entities.isEmpty()) {
+                db.pageDao().deleteByWorkspace(workspaceId, accountName)
+            } else {
+                db.pageDao().deleteMissingPages(workspaceId, accountName, entities.map { it.slug })
+                db.pageDao().upsertAll(entities)
+            }
+
+            if (serverRevision != null) {
+                db.pageDao().setCachedRevision(
+                    WorkspaceCacheStateEntity(workspaceId, accountName, serverRevision)
+                )
+            }
         }
-        db.pageDao().deleteMissingPages(workspaceId, accountName, entities.map { it.slug })
-        db.pageDao().upsertAll(entities)
+
+        Log.i("SyncPages", "synced: ${entities.size} rows, revision $localRevision → $serverRevision")
     }
 
     suspend fun loadPageContent(workspaceId: String, accountName: String, slug: String): String? {
