@@ -59,8 +59,8 @@ grant execute on function public.search_pages(uuid, text) to authenticated;
 grant execute on function public.search_pages(uuid, text) to service_role;
 grant execute on function public.owns_workspace(uuid) to authenticated;
 grant execute on function public.owns_workspace(uuid) to service_role;
-grant execute on function public.broadcast_changes() to authenticated;
-grant execute on function public.broadcast_changes() to service_role;
+grant execute on function public.broadcast_page_metadata_change() to authenticated;
+grant execute on function public.broadcast_page_metadata_change() to service_role;
 
 -- =========================================================================
 -- Schema-level GRANT (future-proof: ensures default privileges apply to
