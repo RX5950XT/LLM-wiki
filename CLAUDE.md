@@ -334,7 +334,9 @@ Conversation panel 輸入框左側有模型選擇按鈕（`Bot` icon），從 `/
 - `CREATE INDEX pages_fts_idx USING GIN (...)`
 - `CREATE OR REPLACE FUNCTION search_pages(p_workspace_id UUID, p_query TEXT)`
 
-若本地無法連接 PostgreSQL port，可透過臨時部署的 `/api/migrate` endpoint（已於部署後移除）執行。
+### Data API GRANT 規範（參考全域 CLAUDE.md Supabase 資料庫規範）
+
+本專案已統一透過 migration `0011_data_api_grants.sql` 為所有表補上 Data API GRANT，並設置 `ALTER DEFAULT PRIVILEGES` 預防未來疏漏。往後新增表或 function 時請同步補上 GRANT，否則 PostgREST 會回 `42501`。
 
 ## 其他注意事項
 
