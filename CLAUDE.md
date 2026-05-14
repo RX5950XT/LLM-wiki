@@ -289,11 +289,14 @@ Conversation panel 輸入框左側有模型選擇按鈕（`Bot` icon），從 `/
 ## 筆記／規則
 
 - 工作區建立與頁面列表讀取時，會自動補齊 `notes/guide.md` 與 `_schema/{ingest,query,lint}.md` 的 metadata，避免「筆記／規則」看起來是空白壞掉
+- 設定頁若發現 `schema` zone 缺少系統規則頁，會先做 DB count pre-check，再呼叫 `ensureWorkspaceSystemPages()` 補齊後重新查詢，避免規則區空白
 - `notes/guide.md`、`_schema/*.md` 會依目前 UI 語系自動本地化預設內容；內容變更時需同步 bump `version`，讓 Android Room cache 重新載入
 - Web 與 Android 現在都可新增、重新命名、刪除 `notes/*.md` 頁面，且筆記／規則頁都用內建 Markdown 工具列編輯；LLM 仍只讀 `notes/`、不會主動改寫
 - `_schema/*.md` 入口搬到設定頁，仍顯示為「匯入規則 / 查詢規則 / 健康檢查規則」；不要再把規則當成一般 Wiki 側欄區塊
 - Web `PageViewer` 與 Android `MarkdownViewer` 都會把 wiki 內部連結留在同一個 App / 視窗內跳轉，不再強制另開新視窗
 - Android 頁面內容讀取優先走 Web `/api/pages/{workspaceId}/{slug}`，避免手機端 Google Drive `drive.file` scope 與 Web 匯入檔案歸屬不同造成空內容
+- `/api/pages/[workspaceId]/[...slug]` 的 GET 現在固定回 JSON；成功時 `content` 必須是字串，失敗時回 `{ error: { code, message, requestId, ...publicMeta } }`，不可把 Drive 內部 metadata 洩漏給 client
+- `readDriveFile()` 會先查 Drive metadata 再依 MIME type 分流：`text/markdown` / `text/plain` 直接讀、Google Docs 走 export、`application/octet-stream` 先過 binary guard；讀不到就 throw `DriveReadError`，不可 silent fallback 成空字串
 
 ## 工作區排序
 

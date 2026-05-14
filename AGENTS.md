@@ -150,11 +150,14 @@ Query API 文字串流結尾附加 `\x00CITATIONS\x00["entities/karpathy.md",...
 
 ### 筆記／規則
 - 工作區建立與頁面列表讀取時，會自動補齊 `notes/guide.md` 與 `_schema/{ingest,query,lint}.md` 的 metadata，避免「筆記／規則」區看起來像空白故障
+- 設定頁若偵測 `schema` zone 缺少系統規則頁，會先做 DB count pre-check，再呼叫 `ensureWorkspaceSystemPages()` 補齊後重新查詢，避免規則區空白
 - `notes/guide.md` 與 `_schema/*.md` 的預設內容會跟著目前 UI 語系切換；若內容仍是預設模板，切語言時要同步改成對應語言並 bump `version`，讓 Android Room cache 重新載入
 - Web 與 Android 都可新增、重新命名、刪除新的 `notes/*.md` 頁面，且筆記／規則頁都用內建 Markdown 工具列編輯；LLM 仍只讀 `notes/`，不會主動改寫
 - `_schema/*.md` 入口搬到設定頁，仍顯示為「匯入規則 / 查詢規則 / 健康檢查規則」；不要再把規則當成一般 Wiki 側欄區塊
 - Web 與 Android 的 markdown 內部連結都應留在同一個 App / 視窗內跳轉，不另開新視窗
 - Android 頁面內容讀取優先走 Web `/api/pages/{workspaceId}/{slug}`，避免手機端 Google Drive `drive.file` scope 與 Web 匯入檔案歸屬不同造成空內容
+- `/api/pages/[workspaceId]/[...slug]` 的 GET 現在固定回 JSON；成功時 `content` 必須是字串，失敗時回 `{ error: { code, message, requestId, ...publicMeta } }`，不可把 Drive 內部 metadata 洩漏給 client
+- `readDriveFile()` 會先查 Drive metadata 再依 MIME type 分流：`text/markdown` / `text/plain` 直接讀、Google Docs 走 export、`application/octet-stream` 先過 binary guard；讀不到就 throw `DriveReadError`，不可 silent fallback 成空字串
 
 ### 工作區排序
 - `workspaces.sort_order`（`0005_workspace_sort_order.sql`）保存使用者自訂順序

@@ -26,7 +26,7 @@ type PageSeed = {
   promptKind?: PromptKind;
 };
 
-const SYSTEM_PAGE_SEEDS: PageSeed[] = [
+export const SYSTEM_PAGE_SEEDS: PageSeed[] = [
   {
     key: 'index',
     slug: 'index.md',

@@ -181,14 +181,31 @@ export function PageViewer({
       setStale(false);
 
       fetch(`/api/pages/${workspaceId}/${encodeSlugPath(target)}`)
-        .then((r) => (r.ok ? r.json() : Promise.reject(r.statusText)))
+        .then(async (response) => {
+          const data = await response.json().catch(() => null) as
+            | {
+              content?: unknown;
+              error?: { code?: string; message?: string; requestId?: string };
+            }
+            | null;
+          if (!response.ok) {
+            const code = data?.error?.code ?? 'UNKNOWN';
+            const message = data?.error?.message ?? response.statusText;
+            const requestId = data?.error?.requestId;
+            throw new Error(`[${code}] ${message}${requestId ? ` (req: ${requestId})` : ''}`);
+          }
+          if (!data || typeof data.content !== 'string') {
+            throw new Error('Invalid page response');
+          }
+          return data as PageData;
+        })
         .then((data: PageData) => {
           setPage(data);
           setDraft(data.content);
           setEditing(false);
           onPageLoaded?.(data);
         })
-        .catch((e) => setError(String(e)))
+        .catch((e) => setError(e instanceof Error ? e.message : String(e)))
         .finally(() => setLoading(false));
     },
     [onPageLoaded, workspaceId, slug],

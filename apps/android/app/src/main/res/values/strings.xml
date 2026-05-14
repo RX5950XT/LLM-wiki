@@ -132,4 +132,14 @@
     <string name="error_unauthorized">Session expired. Please sign in again.</string>
     <string name="error_api_not_json">The server returned a web page instead of API JSON. Update the web backend and try again.</string>
     <string name="error_network_timeout">The network request took too long or was interrupted. Check your connection and try again.</string>
+    <string name="error_page_not_found">Page not found.</string>
+    <string name="error_drive_reconnect_required">Reconnect Google Drive to load this page.</string>
+    <string name="error_drive_permission_denied">Google Drive denied access to this page.</string>
+    <string name="error_drive_file_not_found">The Google Drive file for this page was not found.</string>
+    <string name="error_drive_file_trashed">The Google Drive file for this page is in trash.</string>
+    <string name="error_drive_rate_limited">Google Drive is rate limiting requests. Try again later.</string>
+    <string name="error_drive_unsupported_mime">This page uses an unsupported Google Drive file type.</string>
+    <string name="error_drive_empty_response">Google Drive returned an invalid empty response.</string>
+    <string name="error_api_invalid_response">The server returned an invalid page response.</string>
+    <string name="error_internal_server">The server failed to load the page.</string>
 </resources>

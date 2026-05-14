@@ -57,7 +57,14 @@ export function RulesPanel({ workspaceId, pages }: RulesPanelProps) {
           className="overflow-hidden rounded-2xl border"
           style={{ borderColor: 'var(--border)', minHeight: 420 }}
         >
-          <PageViewer workspaceId={workspaceId} slug={activeSlug} />
+          <PageViewer
+            workspaceId={workspaceId}
+            slug={activeSlug}
+            onWikiLinkClick={(slug, anchor) => {
+              const hash = anchor ? `#${encodeURIComponent(anchor)}` : '';
+              window.location.href = `/w/${workspaceId}?page=${encodeURIComponent(slug)}${hash}`;
+            }}
+          />
         </div>
       )}
     </div>

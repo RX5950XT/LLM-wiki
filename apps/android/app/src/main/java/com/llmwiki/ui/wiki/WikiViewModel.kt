@@ -12,6 +12,8 @@ import com.llmwiki.data.DriveClient
 import com.llmwiki.data.LlmProfileRepository
 import com.llmwiki.data.LlmProfile
 import com.llmwiki.data.PageRepository
+import com.llmwiki.data.PageLoadResult
+import com.llmwiki.data.PageErrorCodes
 import com.llmwiki.data.ProfileAuthRequiredException
 import com.llmwiki.data.requireAccessToken
 import com.llmwiki.data.SearchResult
@@ -86,6 +88,7 @@ data class WikiUiState(
     val profiles: List<LlmProfile> = emptyList(),
     val selectedProfileId: String? = null,
     val driveReconnectUrl: String? = null,
+    val lastErrorRequestId: String? = null,
     val workspaceActionLoading: Boolean = false,
     val ingestLoading: Boolean = false,
     val pageSaveLoading: Boolean = false,
@@ -511,8 +514,41 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 val wsId = workspaceId.value ?: return@launch
                 val repo = PageRepository(db, driveClient)
-                val content = repo.loadPageContent(wsId, accountName, page.slug)
-                _uiState.update { it.copy(pageContent = content, contentLoading = false, syncError = null) }
+                when (val result = repo.loadPageContent(wsId, accountName, page.slug)) {
+                    is PageLoadResult.Success -> {
+                        _uiState.update {
+                            it.copy(
+                                pageContent = result.content,
+                                contentLoading = false,
+                                syncError = null,
+                                driveReconnectUrl = null,
+                                lastErrorRequestId = null,
+                            )
+                        }
+                    }
+                    is PageLoadResult.Failure -> {
+                        if (result.reconnectRequired) {
+                            val message = mapPageLoadError(result)
+                            _uiState.update {
+                                it.copy(
+                                    pageContent = null,
+                                    contentLoading = false,
+                                    lastErrorRequestId = result.requestId,
+                                )
+                            }
+                            requestDriveReconnect("page-load", message)
+                        } else {
+                            _uiState.update {
+                                it.copy(
+                                    pageContent = null,
+                                    contentLoading = false,
+                                    syncError = mapPageLoadError(result),
+                                    lastErrorRequestId = result.requestId,
+                                )
+                            }
+                        }
+                    }
+                }
             } catch (e: Exception) {
                 _uiState.update { it.copy(contentLoading = false, syncError = e.toUserFacingMessage("Failed to load page")) }
             }
@@ -1097,8 +1133,29 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
             it.copy(
                 syncError = message,
                 driveReconnectUrl = buildDriveReconnectUrl(source),
+                lastErrorRequestId = null,
             )
         }
+    }
+
+    private fun mapPageLoadError(result: PageLoadResult.Failure): String {
+        val app = getApplication<Application>()
+        val base = when (result.code) {
+            PageErrorCodes.AUTH_REQUIRED -> app.getString(R.string.error_unauthorized)
+            PageErrorCodes.PAGE_NOT_FOUND,
+            PageErrorCodes.PAGE_NOT_FOUND_LOCAL -> app.getString(R.string.error_page_not_found)
+            PageErrorCodes.DRIVE_RECONNECT_REQUIRED -> app.getString(R.string.error_drive_reconnect_required)
+            PageErrorCodes.DRIVE_PERMISSION_DENIED -> app.getString(R.string.error_drive_permission_denied)
+            PageErrorCodes.DRIVE_FILE_NOT_FOUND -> app.getString(R.string.error_drive_file_not_found)
+            PageErrorCodes.DRIVE_FILE_TRASHED -> app.getString(R.string.error_drive_file_trashed)
+            PageErrorCodes.DRIVE_RATE_LIMITED -> app.getString(R.string.error_drive_rate_limited)
+            PageErrorCodes.UNSUPPORTED_MIME_TYPE -> app.getString(R.string.error_drive_unsupported_mime)
+            PageErrorCodes.EMPTY_DRIVE_RESPONSE -> app.getString(R.string.error_drive_empty_response)
+            PageErrorCodes.API_INVALID_RESPONSE -> app.getString(R.string.error_api_invalid_response)
+            PageErrorCodes.INTERNAL_ERROR -> app.getString(R.string.error_internal_server)
+            else -> result.userMessage.ifBlank { app.getString(R.string.error_internal_server) }
+        }
+        return if (result.requestId.isNullOrBlank()) base else "$base (req: ${result.requestId})"
     }
 
     private fun parseApiError(raw: String, fallback: String): String {

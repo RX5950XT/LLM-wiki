@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { getTranslations } from 'next-intl/server';
+import { getLocale, getTranslations } from 'next-intl/server';
 import { ArrowLeft } from 'lucide-react';
 import { createClient } from '@/lib/supabase/server';
 import { ProfileList } from '@/components/settings/profile-list';
@@ -8,12 +8,15 @@ import { ProfileForm } from '@/components/settings/profile-form';
 import { LocaleSwitcher } from '@/components/settings/locale-switcher';
 import { RulesPanel } from '@/components/settings/rules-panel';
 import { ThemeSwitcher } from '@/components/settings/theme-switcher';
+import { ensureWorkspaceSystemPages, SYSTEM_PAGE_SEEDS } from '@/lib/drive/system-pages';
+import { createDriveClientForUser } from '@/lib/google/drive-auth';
 import { fetchOrderedWorkspaces } from '@/lib/workspaces/queries';
 
 export default async function SettingsPage() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');
+  const locale = await getLocale();
 
   const [{ data: profiles }, { data: workspaces }] = await Promise.all([
     supabase
@@ -30,6 +33,32 @@ export default async function SettingsPage() {
 
   const backHref = workspaces && workspaces.length > 0 ? `/w/${workspaces[0]!.id}` : '/w';
   const workspaceId = workspaces?.[0]?.id;
+  const expectedSchemaCount = SYSTEM_PAGE_SEEDS.filter((seed) => seed.zone === 'schema').length;
+  if (workspaceId) {
+    const { count } = await supabase
+      .from('pages')
+      .select('id', { count: 'exact', head: true })
+      .eq('workspace_id', workspaceId)
+      .eq('zone', 'schema');
+
+    if ((count ?? 0) < expectedSchemaCount) {
+      try {
+        const drive = await createDriveClientForUser(user.id);
+        const { data: workspace } = await supabase
+          .from('workspaces')
+          .select('drive_folder_id')
+          .eq('id', workspaceId)
+          .eq('owner_id', user.id)
+          .single();
+
+        if (workspace?.drive_folder_id) {
+          await ensureWorkspaceSystemPages(drive, workspaceId, workspace.drive_folder_id, locale);
+        }
+      } catch (error) {
+        console.warn('[settings] schema backfill skipped', error);
+      }
+    }
+  }
   const { data: rulePages } = workspaceId
     ? await supabase
         .from('pages')

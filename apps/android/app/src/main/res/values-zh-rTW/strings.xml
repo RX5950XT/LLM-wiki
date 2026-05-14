@@ -132,4 +132,14 @@
     <string name="error_unauthorized">登入狀態已失效，請重新登入。</string>
     <string name="error_api_not_json">後端回傳網頁而不是 API JSON。請更新並部署網頁版後再試。</string>
     <string name="error_network_timeout">網路請求等太久或連線中斷，請確認連線後再試一次。</string>
+    <string name="error_page_not_found">找不到頁面。</string>
+    <string name="error_drive_reconnect_required">需要重新連線 Google Drive 才能載入此頁面。</string>
+    <string name="error_drive_permission_denied">Google Drive 拒絕存取此頁面。</string>
+    <string name="error_drive_file_not_found">此頁面的 Google Drive 檔案不存在。</string>
+    <string name="error_drive_file_trashed">此頁面的 Google Drive 檔案已在垃圾桶。</string>
+    <string name="error_drive_rate_limited">Google Drive 目前限流中，請稍後再試。</string>
+    <string name="error_drive_unsupported_mime">此頁面對應的 Google Drive 檔案格式不支援。</string>
+    <string name="error_drive_empty_response">Google Drive 回傳了無效的空內容。</string>
+    <string name="error_api_invalid_response">後端回傳了無效的頁面內容。</string>
+    <string name="error_internal_server">伺服器載入頁面失敗。</string>
 </resources>

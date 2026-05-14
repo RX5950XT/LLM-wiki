@@ -19,6 +19,31 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
+sealed class PageLoadResult {
+    data class Success(val content: String) : PageLoadResult()
+    data class Failure(
+        val code: String,
+        val userMessage: String,
+        val reconnectRequired: Boolean,
+        val requestId: String? = null,
+    ) : PageLoadResult()
+}
+
+object PageErrorCodes {
+    const val AUTH_REQUIRED = "AUTH_REQUIRED"
+    const val PAGE_NOT_FOUND = "PAGE_NOT_FOUND"
+    const val DRIVE_RECONNECT_REQUIRED = "DRIVE_RECONNECT_REQUIRED"
+    const val DRIVE_PERMISSION_DENIED = "DRIVE_PERMISSION_DENIED"
+    const val DRIVE_FILE_NOT_FOUND = "DRIVE_FILE_NOT_FOUND"
+    const val DRIVE_FILE_TRASHED = "DRIVE_FILE_TRASHED"
+    const val DRIVE_RATE_LIMITED = "DRIVE_RATE_LIMITED"
+    const val UNSUPPORTED_MIME_TYPE = "UNSUPPORTED_MIME_TYPE"
+    const val EMPTY_DRIVE_RESPONSE = "EMPTY_DRIVE_RESPONSE"
+    const val API_INVALID_RESPONSE = "API_INVALID_RESPONSE"
+    const val INTERNAL_ERROR = "INTERNAL_ERROR"
+    const val PAGE_NOT_FOUND_LOCAL = "PAGE_NOT_FOUND_LOCAL"
+}
+
 class PageRepository(
     private val db: AppDatabase,
     private val driveClient: DriveClient?,
@@ -105,14 +130,20 @@ class PageRepository(
         Log.i("SyncPages", "synced: ${entities.size} rows, revision $localRevision → $serverRevision")
     }
 
-    suspend fun loadPageContent(workspaceId: String, accountName: String, slug: String): String? {
-        val entity = db.pageDao().getPage(workspaceId, accountName, slug) ?: return null
-        if (entity.content != null) return entity.content
-        val content = loadPageContentFromApi(workspaceId, slug)
-            ?: driveClient?.readFile(entity.driveFileId)
-            ?: return null
-        db.pageDao().updateContent(workspaceId, accountName, slug, content)
-        return content
+    suspend fun loadPageContent(workspaceId: String, accountName: String, slug: String): PageLoadResult {
+        val entity = db.pageDao().getPage(workspaceId, accountName, slug)
+            ?: return PageLoadResult.Failure(
+                PageErrorCodes.PAGE_NOT_FOUND_LOCAL,
+                "Page missing locally",
+                false,
+            )
+        if (entity.content != null) return PageLoadResult.Success(entity.content)
+
+        val apiResult = loadPageContentFromApi(workspaceId, slug)
+        if (apiResult is PageLoadResult.Success) {
+            db.pageDao().updateContent(workspaceId, accountName, slug, apiResult.content)
+        }
+        return apiResult
     }
 
     suspend fun getWorkspaces(): List<WorkspaceRow> {
@@ -160,21 +191,72 @@ class PageRepository(
             header("x-llm-wiki-locale", locale)
         }
 
-    private suspend fun loadPageContentFromApi(workspaceId: String, slug: String): String? {
+    private suspend fun loadPageContentFromApi(workspaceId: String, slug: String): PageLoadResult {
         var accessToken = supabase.requireAccessToken(forceRefresh = false)
             ?: supabase.requireAccessToken(forceRefresh = true)
-            ?: return null
+            ?: return PageLoadResult.Failure(
+                PageErrorCodes.AUTH_REQUIRED,
+                "Authentication required",
+                false,
+            )
 
         var response = getPageContentResponse(accessToken, workspaceId, slug)
         if (response.status.value == 401) {
-            accessToken = supabase.requireAccessToken(forceRefresh = true) ?: return null
+            accessToken = supabase.requireAccessToken(forceRefresh = true)
+                ?: return PageLoadResult.Failure(
+                    PageErrorCodes.AUTH_REQUIRED,
+                    "Authentication required",
+                    false,
+                )
             response = getPageContentResponse(accessToken, workspaceId, slug)
         }
 
-        if (response.status.value !in 200..299) return null
         val raw = response.bodyAsText()
-        if (!raw.trimStart().startsWith("{")) return null
-        return runCatching { json.decodeFromString<PageContentResponse>(raw).content }.getOrNull()
+        if (!raw.trimStart().startsWith("{")) {
+            return PageLoadResult.Failure(
+                PageErrorCodes.API_INVALID_RESPONSE,
+                "Server returned non-JSON",
+                false,
+            )
+        }
+
+        if (response.status.value in 200..299) {
+            return runCatching {
+                val parsed = json.decodeFromString<PageContentResponse>(raw)
+                val content = parsed.content
+                if (content == null) {
+                    PageLoadResult.Failure(
+                        PageErrorCodes.EMPTY_DRIVE_RESPONSE,
+                        "Empty content",
+                        false,
+                    )
+                } else {
+                    PageLoadResult.Success(content)
+                }
+            }.getOrElse {
+                PageLoadResult.Failure(
+                    PageErrorCodes.API_INVALID_RESPONSE,
+                    "Failed to parse content",
+                    false,
+                )
+            }
+        }
+
+        return runCatching {
+            val error = json.decodeFromString<ApiErrorEnvelope>(raw).error
+            PageLoadResult.Failure(
+                error.code,
+                error.message,
+                error.reconnectRequired,
+                error.requestId,
+            )
+        }.getOrElse {
+            PageLoadResult.Failure(
+                "HTTP_${response.status.value}",
+                "Server error",
+                false,
+            )
+        }
     }
 
     private suspend fun getPageContentResponse(accessToken: String, workspaceId: String, slug: String): HttpResponse =
@@ -210,5 +292,18 @@ class PageRepository(
 
 @Serializable
 private data class PageContentResponse(
-    val content: String,
+    val content: String? = null,
+)
+
+@Serializable
+private data class ApiErrorEnvelope(
+    val error: ApiErrorBody,
+)
+
+@Serializable
+private data class ApiErrorBody(
+    val code: String,
+    val message: String,
+    val requestId: String? = null,
+    val reconnectRequired: Boolean = false,
 )

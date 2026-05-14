@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { randomUUID } from 'crypto';
 import { z } from 'zod';
 import { readDriveFile, writeDriveFile } from '@/lib/drive/client';
+import { DriveReadError } from '@/lib/drive/errors';
 import { getRequestUser } from '@/lib/supabase/request';
 import {
   createDriveClientForUser,
@@ -12,40 +14,81 @@ const LockSchema = z.object({ locked_by_human: z.boolean() });
 const ContentSchema = z.object({ content: z.string() });
 const RenameSchema = z.object({ title: z.string().min(1).max(120) });
 
+export const runtime = 'nodejs';
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ workspaceId: string; slug: string[] }> }
 ) {
-  const { workspaceId, slug } = await params;
-  const slugStr = slug.join('/');
+  const requestId = randomUUID();
+  let workspaceId = 'unknown';
+  let slugStr = 'unknown';
 
-  const { supabase, user } = await getRequestUser(request);
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
-  const { data: page } = await supabase
-    .from('pages')
-    .select('slug, title, kind, zone, drive_file_id, updated_by, locked_by_human, version')
-    .eq('workspace_id', workspaceId)
-    .eq('slug', slugStr)
-    .single();
-
-  if (!page) return NextResponse.json({ error: 'Not found' }, { status: 404 });
-
-  let drive: Awaited<ReturnType<typeof createDriveClientForUser>>;
   try {
-    drive = await createDriveClientForUser(user.id);
+    const { workspaceId: rawWorkspaceId, slug } = await params;
+    workspaceId = rawWorkspaceId;
+    slugStr = slug.join('/');
+
+    const { supabase, user } = await getRequestUser(request);
+    if (!user) {
+      return jsonError(401, 'AUTH_REQUIRED', 'Authentication required', requestId);
+    }
+
+    const { data: page } = await supabase
+      .from('pages')
+      .select('slug, title, kind, zone, drive_file_id, updated_by, locked_by_human, version')
+      .eq('workspace_id', workspaceId)
+      .eq('slug', slugStr)
+      .single();
+
+    if (!page) {
+      return jsonError(404, 'PAGE_NOT_FOUND', 'Page not found', requestId);
+    }
+
+    let drive: Awaited<ReturnType<typeof createDriveClientForUser>>;
+    try {
+      drive = await createDriveClientForUser(user.id);
+    } catch (error) {
+      if (isGoogleDriveAuthError(error)) {
+        return jsonError(
+          403,
+          'DRIVE_RECONNECT_REQUIRED',
+          'Reconnect Google Drive required',
+          requestId,
+          { reconnectRequired: true },
+        );
+      }
+      throw error;
+    }
+
+    const content = await readDriveFile(drive, page.drive_file_id);
+    return NextResponse.json({ ...page, content });
   } catch (error) {
-    if (isGoogleDriveAuthError(error)) {
-      return NextResponse.json(
-        { error: error.message || GOOGLE_DRIVE_REAUTH_MESSAGE },
-        { status: 403 },
+    if (error instanceof DriveReadError) {
+      console.error('[GET /api/pages] drive read failed', {
+        requestId,
+        workspaceId,
+        slug: slugStr,
+        code: error.code,
+        ...error.logMeta,
+      });
+      return jsonError(
+        error.statusCode,
+        error.code,
+        error.publicMessage,
+        requestId,
+        error.publicMeta,
       );
     }
-    throw error;
-  }
-  const content = await readDriveFile(drive, page.drive_file_id);
 
-  return NextResponse.json({ ...page, content });
+    console.error('[GET /api/pages] unexpected error', {
+      requestId,
+      workspaceId,
+      slug: slugStr,
+      error,
+    });
+    return jsonError(500, 'INTERNAL_ERROR', 'Failed to load page content', requestId);
+  }
 }
 
 export async function PATCH(
@@ -315,4 +358,24 @@ function renameNoteContent(content: string, title: string): string {
 
 function escapeYamlTitle(value: string): string {
   return value.replace(/"/g, '\\"');
+}
+
+function jsonError(
+  status: number,
+  code: string,
+  message: string,
+  requestId: string,
+  publicMeta: Record<string, unknown> = {},
+) {
+  return NextResponse.json(
+    {
+      error: {
+        code,
+        message,
+        requestId,
+        ...publicMeta,
+      },
+    },
+    { status },
+  );
 }
