@@ -5,6 +5,7 @@ import { Pencil, Lock, Unlock, RefreshCw, AlertTriangle, Check, X } from 'lucide
 import { useTranslations } from 'next-intl';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { reconnectGoogleDrive } from '@/lib/google/drive-reconnect';
 
 function stripFrontmatterAndWikilinks(content: string): string {
   let result = content;
@@ -170,6 +171,7 @@ export function PageViewer({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
   const [savePending, setSavePending] = useState(false);
+  const [reconnectPending, setReconnectPending] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   const fetchPage = useCallback(
@@ -329,12 +331,34 @@ export function PageViewer({
   }
 
   if (error || !page) {
+    const reconnectRequired = Boolean(error?.includes('DRIVE_RECONNECT_REQUIRED'));
     return (
       <div
-        className="flex h-full items-center justify-center"
+        className="flex h-full items-center justify-center px-6"
         style={{ color: 'var(--fg-muted)' }}
       >
-        <p className="text-sm">{error ?? t('wiki.pageNotFound')}</p>
+        <div className="space-y-3 text-center">
+          <p className="text-sm">{error ?? t('wiki.pageNotFound')}</p>
+          {reconnectRequired && (
+            <button
+              type="button"
+              onClick={async () => {
+                setReconnectPending(true);
+                try {
+                  const target = `/w/${workspaceId}?page=${encodeURIComponent(slug)}`;
+                  await reconnectGoogleDrive(target);
+                } finally {
+                  setReconnectPending(false);
+                }
+              }}
+              disabled={reconnectPending}
+              className="rounded-lg px-3 py-2 text-sm font-medium transition-opacity hover:opacity-80 disabled:opacity-50"
+              style={{ background: 'var(--color-accent)', color: 'oklch(10% 0.015 250)' }}
+            >
+              {reconnectPending ? t('common.reconnectingDrive') : t('auth.driveAccessRequired')}
+            </button>
+          )}
+        </div>
       </div>
     );
   }

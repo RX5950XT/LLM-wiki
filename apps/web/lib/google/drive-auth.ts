@@ -25,8 +25,7 @@ export async function createDriveClientForUser(userId: string): Promise<drive_v3
   try {
     const accessToken = await getAccessToken(refreshToken);
     return createDriveClient(accessToken);
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : 'refresh token failed';
-    throw new GoogleDriveAuthError(`${GOOGLE_DRIVE_REAUTH_MESSAGE} (${detail})`);
+  } catch {
+    throw new GoogleDriveAuthError();
   }
 }
