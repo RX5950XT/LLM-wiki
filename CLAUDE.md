@@ -297,6 +297,7 @@ Conversation panel 輸入框左側有模型選擇按鈕（`Bot` icon），從 `/
 - Android 頁面內容讀取優先走 Web `/api/pages/{workspaceId}/{slug}`，避免手機端 Google Drive `drive.file` scope 與 Web 匯入檔案歸屬不同造成空內容
 - `/api/pages/[workspaceId]/[...slug]` 的 GET 現在固定回 JSON；成功時 `content` 必須是字串，失敗時回 `{ error: { code, message, requestId, ...publicMeta } }`，不可把 Drive 內部 metadata 洩漏給 client
 - `readDriveFile()` 會先查 Drive metadata 再依 MIME type 分流：`text/markdown` / `text/plain` 直接讀、Google Docs 走 export、`application/octet-stream` 先過 binary guard；讀不到就 throw `DriveReadError`，不可 silent fallback 成空字串
+- Web `PageViewer` 若收到 `DRIVE_RECONNECT_REQUIRED`，必須顯示可直接觸發 OAuth 重授權的按鈕；不能只顯示錯誤文字讓使用者自己猜
 
 ## 工作區排序
 

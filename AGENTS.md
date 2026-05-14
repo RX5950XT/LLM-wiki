@@ -158,6 +158,7 @@ Query API 文字串流結尾附加 `\x00CITATIONS\x00["entities/karpathy.md",...
 - Android 頁面內容讀取優先走 Web `/api/pages/{workspaceId}/{slug}`，避免手機端 Google Drive `drive.file` scope 與 Web 匯入檔案歸屬不同造成空內容
 - `/api/pages/[workspaceId]/[...slug]` 的 GET 現在固定回 JSON；成功時 `content` 必須是字串，失敗時回 `{ error: { code, message, requestId, ...publicMeta } }`，不可把 Drive 內部 metadata 洩漏給 client
 - `readDriveFile()` 會先查 Drive metadata 再依 MIME type 分流：`text/markdown` / `text/plain` 直接讀、Google Docs 走 export、`application/octet-stream` 先過 binary guard；讀不到就 throw `DriveReadError`，不可 silent fallback 成空字串
+- Web `PageViewer` 若收到 `DRIVE_RECONNECT_REQUIRED`，必須顯示可直接觸發 OAuth 重授權的按鈕；不能只顯示錯誤文字讓使用者自己猜
 
 ### 工作區排序
 - `workspaces.sort_order`（`0005_workspace_sort_order.sql`）保存使用者自訂順序
@@ -237,80 +238,80 @@ Query API 文字串流結尾附加 `\x00CITATIONS\x00["entities/karpathy.md",...
 <claude-mem-context>
 # Memory Context
 
-# [LLM-wiki] recent context, 2026-05-09 5:00pm GMT+8
+# [LLM-wiki] recent context, 2026-05-14 7:55pm GMT+8
 
 Legend: 🎯session 🔴bugfix 🟣feature 🔄refactor ✅change 🔵discovery ⚖️decision 🚨security_alert 🔐security_note
 Format: ID TIME TYPE TITLE
 Fetch details: get_observations([IDs]) | Search: mem-search skill
 
-Stats: 50 obs (10,929t read) | 3,732,959t work | 100% savings
+Stats: 50 obs (22,633t read) | 769,081t work | 97% savings
 
-### Apr 28, 2026
-S27 Google Drive 重連按鈕仍無效（第二輪修復）：深入調查環境變數與 token 儲存靜默失敗問題 (Apr 28, 7:49 PM)
-S29 修復 LLM-wiki 兩個 UI Bug：Google Drive 重連按鈕無效 + 新建 LLM 設定檔按鈕卡在載入狀態 (Apr 28, 7:49 PM)
-S30 修復 Google Drive 重連失敗與新建 LLM 設定檔卡住問題，並處理本機開發缺少 SUPABASE_SERVICE_ROLE_KEY 的設定 (Apr 28, 8:28 PM)
 ### Apr 29, 2026
-S31 修復本機開發環境缺少 SUPABASE_SERVICE_ROLE_KEY，排除 Google Drive reconnect 失敗與 LLM 設定檔建立卡住的共同後端阻塞。 (Apr 29, 4:48 AM)
-S32 補齊本機開發缺少的 SUPABASE_SERVICE_ROLE_KEY，解除 Google Drive reconnect 與 LLM 設定檔建立流程的後端阻塞，並準備進入重啟與驗證階段。 (Apr 29, 4:50 AM)
 S33 Fix Google Drive OAuth redirect loop in workspace creation and chat flows; remove redundant manual reconnect button (Apr 29, 4:57 AM)
 ### May 3, 2026
 S34 Debug `invalid_client` Google OAuth error after redirect loop fix — GCP OAuth client credentials mismatch (May 3, 5:11 PM)
 S35 繼續 LLM-wiki 開發 — 升級 PageViewer 支援 Markdown 渲染並恢復 Realtime 監聽 (May 3, 5:12 PM)
 ### May 5, 2026
 S36 修復 .env.vercel.tmp 未排除問題、更新文件、從工作紀錄萃取可複用 Skills (May 5, 12:45 AM)
-S37 修復 .env.vercel.tmp gitignore、更新文件、從工作紀錄萃取 Skills 並同步至正確目錄 (May 5, 1:44 AM)
-### May 6, 2026
-608 6:51a 🔵 Android App 功能完整稽核報告
-609 " 🔵 後端 API 契約確認：搜尋與 LLM Profile 端點
-617 7:34a 🔵 工作區功能缺陷與 UI 問題清單確認
-616 " 🔵 Claude 的瀏覽器為無頭瀏覽器，使用者不可見
-618 7:36a 🔵 Android app still hitting HTML 404 for workspace API routes post-deploy
-### May 7, 2026
-619 5:08a 🔵 Wiki 介面多項問題彙整（繁中模式）
-620 5:09a 🔵 Wiki 頁面導航依賴 React State 而非 URL 路由
-621 " 🔵 PageTree 定義三個 Zone：wiki、notes、schema
-622 " 🔵 Android WikiScreen 側邊欄缺少 Zone 分組，導致筆記／結構條目不顯示
-623 " 🔵 zh-TW.json：wiki.index 與 wiki.log 已有中文翻譯，但 zoneWiki 仍為英文
-624 " 🔵 PageViewer：[[wikilink]] 轉換為 wiki:// 協定，點擊觸發 setActivePage 而非 URL 跳轉
-625 5:10a 🔵 Wiki Index 與 Log 初始內容硬編碼為英文，儲存於 drive-schema 套件
-626 " 🔵 工作區 Drive 資料夾結構與頁面 Zone 分配
-627 5:11a 🔵 Android PageEntity 缺少 zone 欄位，無法在本地資料庫實作 Zone 分組
-628 " 🔵 Workspace 頁面查詢包含 zone 欄位，頁面依 updated_at 降序排列（最多 200 筆）
-629 5:12a 🔵 Android Room 資料庫版本 3，新增 zone 欄位需要 MIGRATION_3_4
-630 5:13a 🔵 Android PageRow 已有 zone 欄位，但 syncPages() 轉換時丟棄 zone 值
-631 5:14a 🔵 Android strings.xml 為英文預設資源，尚無 zh-TW 翻譯資源目錄
-632 " 🔵 Android values-zh-rTW/strings.xml 已存在且完整，wiki_index/wiki_log 均已翻譯
-633 5:15a ✅ INITIAL_INDEX_CONTENT 與 INITIAL_LOG_CONTENT 改為繁體中文
-634 5:16a ✅ 工作區建立 API 新增 title 欄位，zh-TW 翻譯更新索引與日誌名稱
-635 " 🟣 PageTree 重構：index.md 與 log.md 固定置頂，獨立於 Zone 分組之外
-636 " 🟣 Workspace 頁面新增 ?page= query string 支援，實現 URL 路由初始化
-637 6:03a 🟣 Page navigation syncs URL query param via selectPage
-638 " 🟣 Android Room DB: zone field added to pages table (migration v3→v4)
-639 " 🟣 Android WikiScreen drawer: zone-based page grouping with pinned index/log
-640 " 🟣 Production deployment to Vercel succeeded with all zone/URL routing changes
-641 6:22a 🔵 「筆記」與「結構」Zone 空白問題根因確認
-642 " 🟣 Wiki 工作區 URL 路由支援（?page= query string）
-643 " 🟣 Wiki 初始內容與索引名稱全面繁體中文化
-644 " 🟣 PageTree 重構：Index 與 Log 固定置頂，獨立於 Zone 分組
-645 " 🟣 Android Room DB 遷移 v3→v4：新增 zone 欄位
-646 " 🟣 Vercel 生產環境部署成功（Zone 路由 + URL 路由全功能版）
-647 6:23a 🔵 「筆記」與「結構」Zone 空白的根本原因：初始頁面播種僅覆蓋 wiki Zone
-648 " 🟣 新增 ensureWorkspaceSystemPages：三個 Zone 的冪等系統頁面播種
-649 " 🟣 工作區排序支援：sort_order 欄位 + 拖移排序（Web）+ 上下移動（Android）
-650 " 🟣 PageViewer 全面升級：heading anchors、[[slug#anchor]] 支援、當前視窗導航
-651 " 🟣 PageTree 新增 Zone 使用說明提示與空狀態文字
-652 " 🟣 新增多個後端端點支援系統頁面補齊與工作區排序
-653 6:42a 🔴 Android Sidebar Layout Regression
-654 6:44a 🟣 Android Markdown Viewer — Internal Wiki Link Routing
-655 " 🔴 Web — Google Drive Auth Error No Longer Crashes Workspace Load
-656 " 🔴 Web TypeScript — Nullable Slug Destructuring Fixed in page-viewer.tsx
-657 " 🔴 Web workspace-shell.tsx — Null Guard on splice Result in moveWorkspace
-658 " 🔴 Android Build Fix — Missing Ktor post/header Imports in PageRepository
-659 " 🟣 Android — Workspace Sort Order Support with Move Up/Down UI
-660 " 🔴 Android PageRepository — Robust Token Refresh and ensureSystemPages Error Isolation
-661 " 🔵 Live Device — "Session Expired" Error Confirmed via UI Tree Dump
-662 " 🔵 Development Environment — adb Not in PATH; Full Path Required Each Session
-663 " ✅ Documentation — CLAUDE.md, AGENTS.md, README.md Updated for Phase 12 Features
+S37 修復 .env.vercel.tmp gitignore、更新文件、從工作紀錄萃取 Skills 並同步至正確目錄 (May 5, 1:41 AM)
+S38 Investigate and fix Supabase project "llm-wiki" 504 MIDDLEWARE_INVOCATION_TIMEOUT error, Disk IO budget exhaustion, and Security Advisor warnings (May 5, 1:44 AM)
+### May 10, 2026
+S48 Reduce Supabase egress costs by 60-75% across Android and web clients in LLM-wiki monorepo (May 10, 4:53 AM)
+### May 13, 2026
+S49 整理接下來要做的事情詳細一點 — Detailed deployment checklist for Supabase Realtime egress optimization (May 13, 1:40 AM)
+S51 Supabase Data API 預設 GRANT 政策變更影響評估與因應 — LLM-wiki 專案 (May 13, 1:50 AM)
+833 10:58p 🔵 LLM-wiki Migrations Have No Table GRANT Statements
+834 " 🔵 LLM-wiki Init Migration Creates 7 Tables With RLS But No Table GRANTs
+839 11:01p 🔵 Migration 0009 Revokes RPC Execute on Internal Trigger Functions
+842 " 🔵 google_oauth_tokens Table Uses Deny-All RLS — Server-Side Access Only
+843 " 🔵 Migration 0007 Adds workspace_sync_state Table — Also Missing GRANT
+844 " 🔵 Migration 0006 Switched search_pages from SECURITY DEFINER to SECURITY INVOKER
+845 " 🔵 Pages Realtime Switched from postgres_changes to Supabase Broadcast
+846 " 🔵 Migration 0010 Revokes PUBLIC Execute on All Internal Functions
+848 11:02p 🔵 Complete Audit: 9 Tables and 1 RPC Function Need GRANT Review for Supabase Change
+851 " 🟣 Migration 0011 Created to Add Explicit Data API GRANTs for All Tables
+854 11:03p 🔵 LLM-wiki Deployed on Vercel as Project "llm-wiki" Under Hobby Plan
+856 11:04p 🔵 Production Supabase Project Identified; SUPABASE_SERVICE_ROLE_KEY Is Empty
+859 " 🔵 SUPABASE_SERVICE_ROLE_KEY Missing from Both Local and Production Env Files
+861 11:06p 🔵 SUPABASE_SERVICE_ROLE_KEY IS Set in Vercel Production — Local Pull Was Stale
+862 11:07p 🔵 Service Role Key Found in .env.vercel.tmp at Project Root
+863 11:08p 🔵 Data API Test Returned 401 Due to Unexpanded PowerShell Env Vars
+864 " 🔵 Data API Currently Works for Existing Tables — Old Implicit Grant Still Active
+865 " 🚨 Anthropic API Key Exposed in Primary Session
+866 11:09p 🔵 Production Database Has Live Data — Service Role Key Confirmed Working
+867 " 🔵 Supabase Projects Inventory for LLM-wiki Workspace
+868 " 🔵 Supabase CLI Non-TTY Login Requires --token Flag
+877 11:13p 🚨 Supabase Data API Default Grant Behavior Changing May 30 / Oct 30 2026
+878 " 🔵 Supabase Management API Rejects service_role JWT for Database Queries
+899 11:24p 🔐 Supabase Data API Public Schema Grant Policy Change
+900 11:25p 🔵 owns_workspace RPC: anon 拒絕 (42501)，service_role 返回 false
+901 " 🟣 Migration 0011: Data API GRANTs + ALTER DEFAULT PRIVILEGES
+906 11:27p ✅ Migration 0011 committed and pushed to GitHub master
+### May 14, 2026
+935 1:12a 🚨 Supabase Data API Public Schema Grant Requirement — Breaking Change
+936 " ✅ Supabase Data API GRANT Policy Documented in CLAUDE.md
+937 1:15a 🚨 Supabase Data API Default Grant Policy Change
+S52 Supabase Data API GRANT policy change — assess impact and update project/global documentation (May 14, 1:15 AM)
+958 6:49p 🔵 Tracing "Failed to load page" Errors Across Android and Web
+959 6:50p 🔵 Root Cause Analysis: Page Content Loading Architecture and Three Failure Paths
+960 6:51p 🔵 Settings Rules Panel Missing Backfill Trigger — Schema Pages Never Auto-Populated
+961 " 🔵 Egress Optimization Created Drive File Orphan Risk — Pages Table Can Reference Deleted Drive Files
+962 " 🔵 Wiki Internal Link Navigation Works — Failure Limited to RulesPanel Context
+963 6:59p 🔵 Three Independent Bugs Identified for Android/Web/Settings Failures
+964 " ⚖️ Fix Strategy: Diagnose Android API Response Before Code Changes
+965 7:05p 🔵 Root cause analysis: Three distinct bugs in page loading, navigation, and settings
+966 7:11p ⚖️ LLM-Wiki 頁面載入失敗三合一修復計畫 v2 — Diagnostic 優先策略
+970 7:16p ⚖️ LLM-Wiki 頁面載入失敗修復計畫 v3：六階段全端修復架構
+971 7:33p ⚖️ Wiki App Bug Fix Plan v3: Page Load / Settings / Wikilink Failures
+972 " 🟣 DriveReadError: Dual-Layer Error Metadata with TypeScript Union Codes
+973 " 🔴 readDriveFile: MIME-Branched Reading with Binary Guard and Google Docs Fallback
+974 " 🔴 Android PageRepository: Sealed Result Type Replaces Silent Drive Fallback
+975 " 🔴 Settings Page Schema Backfill with DB Pre-Check
+976 " 🔴 Wikilink Fix: onWikiLinkClick Prop and PageViewer Content Type Validation
+977 7:34p 🔵 P0 Diagnostic: Root Cause of Blank Content Confirmed in readDriveFile
+978 " 🔵 Existing Drive Auth Error Handling Uses String-Matched Error Messages, Not Structured Codes
+979 7:35p 🔴 P1+P2 Implemented: DriveReadError, readDriveFile MIME Branching, and Structured API Errors
+980 " 🔴 P4+P5 Web: Settings Backfill, RulesPanel onWikiLinkClick, PageViewer Content Validation
 
-Access 3733k tokens of past work via get_observations([IDs]) or mem-search skill.
+Access 769k tokens of past work via get_observations([IDs]) or mem-search skill.
 </claude-mem-context>
