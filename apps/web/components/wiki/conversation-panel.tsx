@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Send, Bookmark, Loader2, CheckCircle, ChevronRight, Plus, Bot } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
@@ -54,6 +54,10 @@ function parseInternalWikiHref(href: string): string | null {
   if (/^(https?:|mailto:|tel:|#)/i.test(href)) return null;
   if (!href.endsWith('.md')) return null;
   return href.replace(/^\//, '').split('#')[0] ?? null;
+}
+
+function preserveWikiUrlTransform(url: string): string {
+  return url.startsWith('wiki:') ? url : defaultUrlTransform(url);
 }
 
 export function ConversationPanel({
@@ -561,6 +565,7 @@ export function ConversationPanel({
               {m.role === 'assistant' ? (
                 <ReactMarkdown
                   remarkPlugins={[remarkGfm]}
+                  urlTransform={preserveWikiUrlTransform}
                   components={{
                     img: () => null,
                     a: ({ children, href, ...props }) => {

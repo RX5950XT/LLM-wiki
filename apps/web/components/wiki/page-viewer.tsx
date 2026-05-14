@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback, useRef, type ReactNode } from 'react';
 import { Pencil, Lock, Unlock, RefreshCw, AlertTriangle, Check, X } from 'lucide-react';
 import { useTranslations } from 'next-intl';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { reconnectGoogleDrive } from '@/lib/google/drive-reconnect';
 
@@ -21,6 +21,10 @@ function stripFrontmatterAndWikilinks(content: string): string {
     return `[${target}](wiki://${encodedSlug}${encodedAnchor})`;
   });
   return result;
+}
+
+function preserveWikiUrlTransform(url: string): string {
+  return url.startsWith('wiki:') ? url : defaultUrlTransform(url);
 }
 
 function slugifyHeading(text: string): string {
@@ -511,6 +515,7 @@ export function PageViewer({
           <article className="wiki-prose max-w-none">
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
+              urlTransform={preserveWikiUrlTransform}
               components={{
                 h1: ({ children }) => {
                   const id = slugifyHeading(getTextContent(children));

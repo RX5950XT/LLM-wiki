@@ -305,6 +305,7 @@ Conversation panel 輸入框左側有模型選擇按鈕（`Bot` icon），從 `/
 - Web 工作區選單支援 drag-and-drop 排序，經 `/api/workspaces/reorder`
 - Android 工作區選單支援上移 / 下移，走同一套排序 API，同步 Web / 手機順序
 - Web 端任何首頁導頁、登入回跳或工作區列表查詢，若遇到 production 尚未套用 `sort_order` / schema cache 未刷新，必須 fallback 至 `created_at`，不可誤顯示「建立工作區」
+- 若 production 出現「拖曳後又跳回原順序」，先查 `workspaces.sort_order` 是否存在；缺欄位時只執行 idempotent 的 `0005_workspace_sort_order.sql` 修 schema，不要用整批 `db push` 硬套舊 migration history
 
 ## 全文搜尋
 
@@ -344,7 +345,7 @@ Conversation panel 輸入框左側有模型選擇按鈕（`Bot` icon），從 `/
 
 ## 其他注意事項
 
-- **Markdown 渲染**：`page-viewer.tsx` 用 `react-markdown` + `remark-gfm`。YAML frontmatter 以 `stripFrontmatterAndWikilinks()` 手動 strip（不用 `remark-frontmatter`，那個不自動隱藏內容）。`[[slug]]` 轉成 `[slug](wiki://slug)` 供自訂 `<a>` renderer 攔截。
+- **Markdown 渲染**：`page-viewer.tsx` 用 `react-markdown` + `remark-gfm`。YAML frontmatter 以 `stripFrontmatterAndWikilinks()` 手動 strip（不用 `remark-frontmatter`，那個不自動隱藏內容）。`[[slug]]` 轉成 `[slug](wiki://slug)` 供自訂 `<a>` renderer 攔截；ReactMarkdown 必須設定 `urlTransform` 放行 `wiki:`，否則預設 sanitizer 會把 href 清空。
 - **`.env.vercel.tmp`**：`vercel env pull` 輸出的暫存檔，已加入 `.gitignore`，不應提交。
 - Lucide v3 已移除 icon 的 `title` prop，改用 `aria-label`
 - `packages/prompts` 的 `.md` import 需要 `markdown.d.ts` 宣告 + next.config webpack `asset/source` loader

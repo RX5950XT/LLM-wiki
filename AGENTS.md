@@ -165,6 +165,7 @@ Query API 文字串流結尾附加 `\x00CITATIONS\x00["entities/karpathy.md",...
 - Web 工作區選單支援 drag-and-drop 重排，API 為 `/api/workspaces/reorder`
 - Android 工作區選單支援上移 / 下移，走同一套排序 API
 - Web 首頁導頁、登入回跳與工作區列表查詢若遇到 production 尚未套用 `sort_order` 或 schema cache 未刷新，必須 fallback 至 `created_at`，不可誤判為沒有工作區
+- 若 production 出現「拖曳後又跳回原順序」，先查 `workspaces.sort_order` 是否存在；缺欄位時只執行 idempotent 的 `0005_workspace_sort_order.sql` 修 schema，不要用整批 `db push` 硬套舊 migration history
 
 ## 安全注意事項
 
@@ -223,7 +224,7 @@ Query API 文字串流結尾附加 `\x00CITATIONS\x00["entities/karpathy.md",...
 
 ## 其他
 
-- **Markdown 渲染**：`page-viewer.tsx` 用 `react-markdown` + `remark-gfm`。YAML frontmatter 以 `stripFrontmatterAndWikilinks()` 手動 strip（不用 `remark-frontmatter`，那個不自動隱藏內容）。`[[slug]]` 轉成 `[slug](wiki://slug)` 供自訂 `<a>` renderer 攔截。
+- **Markdown 渲染**：`page-viewer.tsx` 用 `react-markdown` + `remark-gfm`。YAML frontmatter 以 `stripFrontmatterAndWikilinks()` 手動 strip（不用 `remark-frontmatter`，那個不自動隱藏內容）。`[[slug]]` 轉成 `[slug](wiki://slug)` 供自訂 `<a>` renderer 攔截；ReactMarkdown 必須設定 `urlTransform` 放行 `wiki:`，否則預設 sanitizer 會把 href 清空。
 - **`.env.vercel.tmp`**：`vercel env pull` 輸出的暫存檔，已加入 `.gitignore`，不應提交。
 - Lucide v3 已移除 icon 的 `title` prop，改用 `aria-label`
 - `packages/prompts` 的 `.md` import 需要 `markdown.d.ts` + webpack `asset/source` loader
@@ -238,7 +239,7 @@ Query API 文字串流結尾附加 `\x00CITATIONS\x00["entities/karpathy.md",...
 <claude-mem-context>
 # Memory Context
 
-# [LLM-wiki] recent context, 2026-05-14 7:55pm GMT+8
+# [LLM-wiki] recent context, 2026-05-14 8:43pm GMT+8
 
 Legend: 🎯session 🔴bugfix 🟣feature 🔄refactor ✅change 🔵discovery ⚖️decision 🚨security_alert 🔐security_note
 Format: ID TIME TYPE TITLE
