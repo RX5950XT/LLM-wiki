@@ -77,6 +77,18 @@ android {
         buildConfig = true
     }
 
+    signingConfigs {
+        create("release") {
+            val storeFile = configValue("RELEASE_STORE_FILE")
+            if (storeFile.isNotBlank()) {
+                this.storeFile = rootProject.file(storeFile)
+                this.storePassword = configValue("RELEASE_STORE_PASSWORD")
+                this.keyAlias = configValue("RELEASE_KEY_ALIAS")
+                this.keyPassword = configValue("RELEASE_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
@@ -84,6 +96,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 

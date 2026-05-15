@@ -46,6 +46,7 @@ apps/android/captures/
 apps/android/.cxx/
 apps/android/app/release/
 *.keystore
+*.jks
 !debug.keystore
 apps/android/.kotlin/
 
