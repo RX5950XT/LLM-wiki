@@ -235,6 +235,7 @@ apps/android/app/src/main/java/com/llmwiki/
 - `GOOGLE_CLIENT_ID` 必須使用 **Web OAuth client ID**（非 Android client ID），`requestIdToken()` 需要它來取得 ID token
 - Web / Android 建立工作區 UI 不保留 description 欄位；Web `/w/create` 需提供返回 `/w` 的按鈕
 - 使用說明入口需在 Web top bar 與 Android drawer 同步提供，說明內容涵蓋工作區、匯入、對話、設定同步與 Drive 重授權
+- `ModalNavigationDrawer` 的 `gesturesEnabled` 必須設為 `drawerState.isOpen`，而非 `true`；Drawer 關閉時保留橫向手勢會與頁面垂直捲動產生競爭，導致上下滑動卡頓
 
 ## Graph View 注意事項
 
