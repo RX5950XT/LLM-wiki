@@ -59,10 +59,10 @@ class PageRepository(
         @SerialName("pages_revision") val pagesRevision: Long,
     )
 
-    suspend fun syncPages(workspaceId: String, accountName: String, locale: String) {
+    suspend fun syncPages(workspaceId: String, accountName: String, locale: String, forceSync: Boolean = false) {
         ensureSystemPages(workspaceId, locale)
 
-        val serverRevision: Long? = runCatching {
+        val serverRevision: Long? = if (forceSync) null else runCatching {
             supabase.from("workspace_sync_state")
                 .select(columns = Columns.raw("pages_revision")) {
                     filter { eq("workspace_id", workspaceId) }
@@ -75,9 +75,9 @@ class PageRepository(
             null
         }
 
-        val localRevision = db.pageDao().getCachedRevision(workspaceId, accountName) ?: -1L
+        val localRevision = if (forceSync) -1L else (db.pageDao().getCachedRevision(workspaceId, accountName) ?: -1L)
 
-        if (serverRevision != null && serverRevision <= localRevision) {
+        if (!forceSync && serverRevision != null && serverRevision <= localRevision) {
             Log.d("SyncPages", "skip: server=$serverRevision local=$localRevision")
             return
         }

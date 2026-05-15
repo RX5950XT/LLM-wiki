@@ -556,38 +556,55 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun toggleLock(slug: String, currentLocked: Boolean) {
+        val newLocked = !currentLocked
+        // Optimistic update — immediate visual feedback before network round-trip
+        _uiState.update { state ->
+            if (state.activePage?.slug == slug) {
+                state.copy(activePage = state.activePage.copy(lockedByHuman = newLocked))
+            } else state
+        }
         viewModelScope.launch {
-            val wsId = workspaceId.value ?: return@launch
+            val wsId = workspaceId.value ?: run {
+                // No workspace; revert the optimistic update
+                _uiState.update { state ->
+                    if (state.activePage?.slug == slug) {
+                        state.copy(activePage = state.activePage.copy(lockedByHuman = currentLocked))
+                    } else state
+                }
+                return@launch
+            }
+            db.pageDao().updateLock(wsId, accountName, slug, newLocked)
             try {
                 val response = sendAuthorizedRequest { accessToken ->
                     AndroidHttpClient.instance.patch(webApiUrl("/api/pages/$wsId/${slug.encodePathSegments()}")) {
                         header("Authorization", "Bearer $accessToken")
                         contentType(ContentType.Application.Json)
-                        setBody("""{"locked_by_human":${!currentLocked}}""")
+                        setBody("""{"locked_by_human":$newLocked}""")
                     }
-                } ?: return@launch
-                val text = response.bodyAsText()
-
-                if (response.status.value !in 200..299) {
-                    _uiState.update {
-                        it.copy(syncError = parseApiError(text, "Failed to update page lock"))
-                    }
-                    return@launch
                 }
-
-                db.pageDao().updateLock(wsId, accountName, slug, !currentLocked)
-                _uiState.update { state ->
-                    if (state.activePage?.slug == slug) {
-                        state.copy(
-                            activePage = state.activePage.copy(lockedByHuman = !currentLocked),
-                            syncError = null,
-                        )
-                    } else {
-                        state.copy(syncError = null)
+                if (response == null || response.status.value !in 200..299) {
+                    // Rollback Room and UI
+                    db.pageDao().updateLock(wsId, accountName, slug, currentLocked)
+                    _uiState.update { state ->
+                        val rolled = if (state.activePage?.slug == slug) {
+                            state.copy(activePage = state.activePage.copy(lockedByHuman = currentLocked))
+                        } else state
+                        if (response != null) {
+                            rolled.copy(syncError = parseApiError(response.bodyAsText(), "Failed to update page lock"))
+                        } else {
+                            rolled
+                        }
                     }
                 }
             } catch (e: Exception) {
-                _uiState.update { it.copy(syncError = e.toUserFacingMessage("Failed to update page lock")) }
+                // Rollback Room and UI
+                db.pageDao().updateLock(wsId, accountName, slug, currentLocked)
+                _uiState.update { state ->
+                    val rolled = if (state.activePage?.slug == slug) {
+                        state.copy(activePage = state.activePage.copy(lockedByHuman = currentLocked))
+                    } else state
+                    rolled.copy(syncError = e.toUserFacingMessage("Failed to update page lock"))
+                }
             }
         }
     }
@@ -1014,7 +1031,8 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
     ) {
         if (statusCode in 200..299) {
             _uiState.update { it.copy(syncError = null) }
-            syncPagesInternal(wsId)
+            // Force full sync and content reload so the UI reflects ingest results immediately
+            syncPagesInternal(wsId, forceSync = true)
             selectDefaultPageIfNeeded(wsId)
             onDone(true)
             return
@@ -1075,24 +1093,33 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private suspend fun syncPagesInternal(wsId: String) {
+    private suspend fun syncPagesInternal(wsId: String, forceSync: Boolean = false) {
         try {
             val repo = PageRepository(db, driveClient)
-            repo.syncPages(wsId, accountName, currentUiLocale())
+            repo.syncPages(wsId, accountName, currentUiLocale(), forceSync)
             val activeSlug = _uiState.value.activePage?.slug
             if (activeSlug != null) {
                 val updatedPage = db.pageDao().getPage(wsId, accountName, activeSlug)
                 if (updatedPage != null) {
-                    _uiState.update { state ->
-                        state.copy(
-                            activePage = updatedPage,
-                            pageContent = if (state.activePage?.version == updatedPage.version) state.pageContent else updatedPage.content,
-                            contentLoading = state.activePage?.version != updatedPage.version && updatedPage.content == null,
-                            syncError = null,
-                        )
-                    }
-                    if (updatedPage.content == null) {
+                    if (forceSync) {
+                        // Always reload active page content after ingest to reflect changes
+                        _uiState.update { state ->
+                            state.copy(activePage = updatedPage, contentLoading = true, syncError = null)
+                        }
+                        db.pageDao().clearContent(wsId, accountName, activeSlug)
                         loadContent(updatedPage)
+                    } else {
+                        _uiState.update { state ->
+                            state.copy(
+                                activePage = updatedPage,
+                                pageContent = if (state.activePage?.version == updatedPage.version) state.pageContent else updatedPage.content,
+                                contentLoading = state.activePage?.version != updatedPage.version && updatedPage.content == null,
+                                syncError = null,
+                            )
+                        }
+                        if (updatedPage.content == null) {
+                            loadContent(updatedPage)
+                        }
                     }
                 }
             } else {
