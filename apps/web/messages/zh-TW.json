@@ -142,7 +142,7 @@
     "open": "開啟使用說明",
     "close": "關閉使用說明",
     "workspaceTitle": "工作區與頁面",
-    "workspaceBody": "用 MyWiki 選單切換、排序或建立工作區。知識頁由 LLM 維護；筆記可新增、重新命名、刪除並用 Markdown 編輯。",
+    "workspaceBody": "用工作區選單切換、排序、新建工作區。知識頁由 LLM 維護。在筆記欄按「+」可新建自訂筆記，自訂筆記旁有鉛筆（重新命名）與垃圾桶（刪除）按鈕；notes/guide.md 為系統頁，不可刪除。每頁右上角的鎖頭可讓你保護該頁不被 LLM 覆寫。",
     "ingestTitle": "匯入內容",
     "ingestBody": "右側輸入列可貼上網址、文字或 Markdown，也可上傳 .txt / .md 檔案。匯入完成後 Wiki 會同步更新相關頁面。",
     "chatTitle": "對話與綜合頁",
@@ -150,6 +150,8 @@
     "settingsTitle": "設定與同步",
     "settingsBody": "設定頁可管理 LLM profile、語言、外觀與規則。規則是控制匯入、查詢與健康檢查的提示詞檔。",
     "driveTitle": "Google Drive 重新授權",
-    "driveBody": "若 Drive 權限失效，系統會要求重新授權。完成後回到 App 或網頁，工作區與設定檔會重新整理。"
+    "driveBody": "若 Drive 權限失效，系統會要求重新授權。完成後回到 App 或網頁，工作區與設定檔會重新整理。",
+    "toolsTitle": "搜尋、圖譜與健康檢查",
+    "toolsBody": "頂列放大鏡輸入 2 字以上即可全文搜尋 Wiki。GitFork 按鈕開啟知識圖譜：圓點是頁面、連線是 wikilink；孤立的灰點代表尚未被任何頁面引用的頁面，點擊節點可直接跳轉。燒杯按鈕觸發 Wiki 健康檢查：LLM 自動找出孤立頁面、斷連 wikilink、概念重疊等問題並修復，完成後跳轉至健檢報告（_lint/日期.md）。"
   }
 }

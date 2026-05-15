@@ -16,6 +16,7 @@ export function HelpDialog({ open, onClose }: HelpDialogProps) {
     ['workspace', t('workspaceTitle'), t('workspaceBody')],
     ['ingest', t('ingestTitle'), t('ingestBody')],
     ['chat', t('chatTitle'), t('chatBody')],
+    ['tools', t('toolsTitle'), t('toolsBody')],
     ['settings', t('settingsTitle'), t('settingsBody')],
     ['drive', t('driveTitle'), t('driveBody')],
   ] as const;

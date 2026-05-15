@@ -190,14 +190,28 @@ The Notes zone is your own writing space. The LLM may read it for context, but i
 - Personal judgement
 - Drafts that are not ready for the formal wiki
 
+## How to create, rename, and delete notes
+
+In the left sidebar, find the **Notes** section and click **+** to create a new note.
+Each custom note shows a pencil (rename) and trash (delete) icon next to its title.
+This guide page (notes/guide.md) is a system page and cannot be renamed or deleted.
+
 ## How to edit
 
-Notes can be edited directly in the app with a simple Markdown editor.
+Click a note to open it, then click the pencil icon in the top-right of the viewer to edit it with a Markdown toolbar.
+
+## The lock icon
+
+Every page has a lock icon in the top-right corner.
+- **Locked (filled)**: the LLM will not overwrite this page — safe for personal notes.
+- **Unlocked (outlined)**: the LLM may update this page during ingest or health checks.
+
+Click the lock icon to toggle. Notes are locked by default.
 
 ## How notes differ from the wiki
 
 - \`wiki/\`: LLM-maintained knowledge pages
-- \`notes/\`: Your own personal notes
+- \`notes/\`: Your own personal notes (LLM read-only)
 - \`_schema/\`: Rules and prompts that steer the LLM
 `;
   }
@@ -219,14 +233,28 @@ created: ${created}
 - 個人判斷
 - 尚未整理完成的草稿
 
+## 如何新建、重新命名、刪除筆記
+
+在左側欄「筆記」區標題旁，點「+」可新建筆記。
+每一個自訂筆記旁邊會顯示鉛筆（重新命名）與垃圾桶（刪除）按鈕。
+這份說明頁（notes/guide.md）是系統頁，無法重新命名或刪除。
+
 ## 如何編輯
 
-現在可以直接在 App 內用簡單的 Markdown 編輯器修改筆記。
+點選筆記開啟後，按右上角的鉛筆按鈕即可用內建 Markdown 工具列編輯。
+
+## 鎖頭是什麼
+
+每個頁面右上角都有一個鎖頭圖示：
+- **鎖定（實心鎖）**：LLM 不會覆寫這個頁面，適合個人筆記。
+- **未鎖定（空心鎖）**：LLM 在匯入或健康檢查時可能更新這個頁面。
+
+點鎖頭即可切換。筆記預設為鎖定狀態。
 
 ## 與 Wiki 的差別
 
 - \`wiki/\`：由 LLM 維護的知識頁
-- \`notes/\`：由你維護的個人筆記
+- \`notes/\`：由你維護的個人筆記（LLM 唯讀）
 - \`_schema/\`：控制 LLM 行為的規則與提示詞
 `;
 }

@@ -142,7 +142,7 @@
     "open": "Open help",
     "close": "Close help",
     "workspaceTitle": "Workspaces and pages",
-    "workspaceBody": "Use the MyWiki menu to switch, reorder, or create workspaces. Knowledge pages are LLM-maintained; notes can be created, renamed, deleted, and edited in Markdown.",
+    "workspaceBody": "Use the workspace menu to switch, reorder, or create workspaces. Knowledge pages are LLM-maintained. In the Notes section click \"+\" to create custom notes — pencil (rename) and trash (delete) buttons appear next to each custom note; notes/guide.md is a system page and cannot be deleted. The lock icon on each page lets you protect it from LLM overwrites.",
     "ingestTitle": "Import content",
     "ingestBody": "Paste a URL, text, or Markdown in the right panel, or upload .txt / .md files. The wiki updates related pages after ingest finishes.",
     "chatTitle": "Chat and synthesis",
@@ -150,6 +150,8 @@
     "settingsTitle": "Settings and sync",
     "settingsBody": "Settings manages LLM profiles, language, appearance, and rules. Rules are the prompt files that control ingest, query, and health checks.",
     "driveTitle": "Google Drive reconnect",
-    "driveBody": "If Drive access expires, reconnect when prompted. After returning to the app or web page, workspace and profile data refresh automatically."
+    "driveBody": "If Drive access expires, reconnect when prompted. After returning to the app or web page, workspace and profile data refresh automatically.",
+    "toolsTitle": "Search, graph, and health check",
+    "toolsBody": "Click the magnifying-glass icon and type 2+ characters to full-text search the wiki. The GitFork button opens the knowledge graph: nodes are pages, edges are wikilinks; isolated gray dots are orphaned pages not yet referenced by anything — click any node to navigate. The flask button runs a wiki health check: the LLM finds and fixes orphaned pages, broken wikilinks, and concept overlaps, then opens a lint report (_lint/date.md)."
   }
 }
