@@ -38,6 +38,11 @@
 | 3 — Android | ✅ | Kotlin + Compose、Room 離線快取、分享意圖、WorkManager 同步 |
 | 4 — Lint + Graph | ✅ | 力導向圖視圖、LLM wiki 健檢、每週定期任務 |
 | 5 — 介面優化 | ✅ | 完整繁體中文 i18n、可拖移側邊欄、個人資料頁、任意格式 ingest |
+| 6 — 多工作區 | ✅ | 多工作區切換、新建工作區、Drive token 失效重授權 |
+| 7 — Android 對齊 | ✅ | Android Chat/Query 串流、citations、synthesis、lock toggle、登出 |
+| 8 — 安全強化 | ✅ | P0/P1 安全漏洞修復、Android 帳號 Room cache 隔離 |
+| 9 — 批次攝取 + 搜尋 | ✅ | 多檔上傳/拖曳、PostgreSQL tsvector 全文搜尋、模型選擇器 |
+| 10 — AI 檔案操控 | ✅ | deletePage / movePage 工具（自動重寫 backlink）、工作區排序 |
 
 ## 快速開始
 
@@ -82,11 +87,14 @@ bun run dev
 3. **Ingest 來源** — 在右側面板貼上 URL、純文字或 Markdown，點「整合」，LLM 自動更新 wiki 頁面
 4. **查詢 Wiki** — 在對話欄輸入問題，回答底部顯示引用頁面，可一鍵存成 Synthesis 頁面
 5. **瀏覽 Wiki** — 左側頁面樹瀏覽知識頁與筆記，鎖定圖示可防止 LLM 覆寫特定頁面
-6. **理解頁面分工** — `wiki/` 是 LLM 維護的知識頁；`notes/` 是你自己寫的筆記；`_schema/` 是設定內的 ingest / query / lint 規則檔
-7. **管理筆記** — Web 與 Android 都可新增、重新命名、刪除 `notes/*.md` 頁面，並用內建 Markdown 工具列編輯
-8. **編輯規則** — 規則入口已搬到設定頁；若 `_schema/*.md` 仍是預設模板，切換語言時會跟著本地化
-9. **調整工作區順序** — Web 可直接拖移排序，Android 可在工作區選單調整上下順序
-9. **Graph View** — 頂列 GitFork 按鈕，查看頁面間的 wikilink 關係圖
+6. **搜尋** — 頂列 Search 按鈕展開搜尋框，輸入 2 字元以上自動全文搜尋，點擊結果直接跳轉
+7. **知識圖譜** — 頂列 GitFork 按鈕，查看頁面間的 wikilink 關係圖，點節點可直接跳轉
+8. **Wiki 健康檢查** — 頂列燒杯按鈕觸發 LLM 健檢，完成後自動跳轉至當日 lint 報告（`_lint/YYYY-MM-DD.md`）
+9. **批次匯入** — 拖曳或多選 `.md` / `.txt` 檔案到對話輸入框，即可批次上傳
+10. **理解頁面分工** — `wiki/` 是 LLM 維護的知識頁；`notes/` 是你自己寫的筆記；`_schema/` 是設定內的規則檔
+11. **管理筆記** — Web 與 Android 都可新增、重新命名、刪除 `notes/*.md` 頁面，並用內建 Markdown 工具列編輯
+12. **編輯規則** — 規則入口已搬到設定頁；若 `_schema/*.md` 仍是預設模板，切換語言時會跟著本地化
+13. **調整工作區順序** — Web 可直接拖移排序，Android 可在工作區選單調整上下順序
 
 ## 貢獻
 
