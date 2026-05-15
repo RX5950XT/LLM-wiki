@@ -246,7 +246,7 @@ fun WikiScreen(
 
     ModalNavigationDrawer(
         drawerState = drawerState,
-        gesturesEnabled = !showChatSheet && !showIngestDialog,
+        gesturesEnabled = drawerState.isOpen,
         modifier = modifier,
         drawerContent = {
             ModalDrawerSheet(
