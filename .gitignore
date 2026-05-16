@@ -65,3 +65,7 @@ supabase/.temp/
 .vercel
 
 llm-wiki-apk/
+
+# Android build outputs
+apps/android/*.apk
+apps/android/build-log*.txt
