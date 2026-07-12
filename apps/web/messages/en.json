@@ -13,7 +13,8 @@
     "noResults": "No results",
     "selectModel": "Select model",
     "reconnectingDrive": "Google Drive reconnecting...",
-    "untitled": "Untitled"
+    "untitled": "Untitled",
+    "close": "Close"
   },
   "auth": {
     "signIn": "Sign in with Google",
@@ -42,7 +43,8 @@
     "toggleConversation": "Toggle conversation",
     "graphView": "Graph view",
     "runLint": "Run wiki lint",
-    "lintRunning": "Lint running…"
+    "lintRunning": "Lint running…",
+    "initFailed": "Auto-setup failed. Please try creating your workspace manually."
   },
   "wiki": {
     "index": "Index",
@@ -83,7 +85,10 @@
     "editorTask": "Task",
     "editorQuote": "Quote",
     "editorCode": "Code",
-    "editorLink": "Link"
+    "editorLink": "Link",
+    "discardChangesConfirm": "You have unsaved changes. Discard them?",
+    "lockFailed": "Failed to update page lock",
+    "backlinks": "Backlinks"
   },
   "ingest": {
     "addSource": "Add source",
@@ -95,7 +100,7 @@
     "failed": "Failed",
     "queuePending": "Queued",
     "touchedPages": "{count} pages updated",
-    "placeholder": "Paste URL, text, or Markdown…",
+    "placeholder": "Paste a URL, text or Markdown, or drop files here (Ctrl+Enter to submit)",
     "button": "Ingest",
     "doneStatus": "Done — {status}",
     "savedSynthesis": "Saved as synthesis page",
@@ -113,7 +118,9 @@
     "sources": "Sources",
     "empty": "Ask your wiki anything…",
     "thinking": "Thinking…",
-    "searchWiki": "Search wiki..."
+    "searchWiki": "Search wiki...",
+    "stop": "Stop",
+    "fileBackFailed": "Failed to save synthesis page"
   },
   "settings": {
     "title": "Settings",
@@ -135,7 +142,9 @@
     "noProfiles": "No profiles yet. Add one below.",
     "default": "default",
     "deleteProfile": "Delete profile",
-    "saveFailed": "Failed to save profile"
+    "saveFailed": "Failed to save profile",
+    "confirmDeleteProfile": "Delete this LLM profile? Workspaces bound to it will fall back to the default profile.",
+    "deleteProfileFailed": "Failed to delete profile"
   },
   "help": {
     "title": "Help",
@@ -153,5 +162,13 @@
     "driveBody": "If Drive access expires, reconnect when prompted. After returning to the app or web page, workspace and profile data refresh automatically.",
     "toolsTitle": "Search, graph, and health check",
     "toolsBody": "Click the magnifying-glass icon and type 2+ characters to full-text search the wiki. The GitFork button opens the knowledge graph: nodes are pages, edges are wikilinks; isolated gray dots are orphaned pages not yet referenced by anything — click any node to navigate. The flask button runs a wiki health check: the LLM finds and fixes orphaned pages, broken wikilinks, and concept overlaps, then opens a lint report (_lint/date.md)."
+  },
+  "graph": {
+    "loading": "Loading graph…",
+    "empty": "No pages yet",
+    "legendEntity": "Entity",
+    "legendConcept": "Concept",
+    "legendSynthesis": "Synthesis",
+    "legendOther": "Other"
   }
 }

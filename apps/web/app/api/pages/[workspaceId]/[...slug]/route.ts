@@ -11,7 +11,8 @@ import {
 } from '@/lib/google/drive-auth';
 
 const LockSchema = z.object({ locked_by_human: z.boolean() });
-const ContentSchema = z.object({ content: z.string() });
+// Matches the 2 MB ingest cap and the web/Android client-side file limits
+const ContentSchema = z.object({ content: z.string().max(2 * 1024 * 1024) });
 const RenameSchema = z.object({ title: z.string().min(1).max(120) });
 
 export const runtime = 'nodejs';

@@ -3,6 +3,7 @@ package com.llmwiki.ui.wiki
 import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.animateFloatAsState
@@ -11,6 +12,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -60,6 +62,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -127,7 +130,9 @@ fun WikiScreen(
     initialPageSlug: String? = null,
     accountName: String,
     shareUrl: String? = null,
+    shareUrlToken: Long? = null,
     authReturnUri: String? = null,
+    authReturnToken: Long? = null,
     modifier: Modifier = Modifier,
     onNavigateToSettings: (String?) -> Unit = {},
     onNavigateToCreateWorkspace: () -> Unit = {},
@@ -139,19 +144,22 @@ fun WikiScreen(
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
 
-    var showIngestDialog by remember { mutableStateOf(false) }
-    var pendingShareUrl by remember { mutableStateOf<String?>(null) }
-    var showChatSheet by remember { mutableStateOf(false) }
+    // rememberSaveable so rotation / process death can't discard dialogs or unsaved edits
+    var showIngestDialog by rememberSaveable { mutableStateOf(false) }
+    var pendingShareUrl by rememberSaveable { mutableStateOf<String?>(null) }
+    var showChatSheet by rememberSaveable { mutableStateOf(false) }
     var showWorkspaceMenu by remember { mutableStateOf(false) }
     var showActiveNoteMenu by remember { mutableStateOf(false) }
-    var showHelpDialog by remember { mutableStateOf(false) }
-    var showCreateNoteDialog by remember { mutableStateOf(false) }
+    var showHelpDialog by rememberSaveable { mutableStateOf(false) }
+    var showCreateNoteDialog by rememberSaveable { mutableStateOf(false) }
     var renameWorkspace by remember { mutableStateOf<WorkspaceRow?>(null) }
     var deleteWorkspace by remember { mutableStateOf<WorkspaceRow?>(null) }
     var renameNote by remember { mutableStateOf<PageEntity?>(null) }
     var deleteNote by remember { mutableStateOf<PageEntity?>(null) }
-    var inlineEditorPageSlug by remember { mutableStateOf<String?>(null) }
-    var inlineEditorValue by remember { mutableStateOf(TextFieldValue("")) }
+    var inlineEditorPageSlug by rememberSaveable { mutableStateOf<String?>(null) }
+    var inlineEditorValue by rememberSaveable(stateSaver = TextFieldValue.Saver) {
+        mutableStateOf(TextFieldValue(""))
+    }
     val workspaceArrowRotation by animateFloatAsState(
         targetValue = if (showWorkspaceMenu) 180f else 0f,
         label = "workspace-menu-arrow",
@@ -196,11 +204,19 @@ fun WikiScreen(
         }
     }
 
-    LaunchedEffect(shareUrl) {
+    // Keyed on the event token too, so sharing the SAME url twice re-opens the dialog
+    LaunchedEffect(shareUrl, shareUrlToken) {
         if (!shareUrl.isNullOrBlank()) {
             pendingShareUrl = shareUrl
             showIngestDialog = true
         }
+    }
+
+    // System back closes search / the inline editor instead of exiting the app
+    BackHandler(enabled = uiState.showSearch) { wikiViewModel.clearSearch() }
+    BackHandler(enabled = inlineEditorPageSlug != null) {
+        inlineEditorPageSlug = null
+        inlineEditorValue = TextFieldValue(uiState.pageContent.orEmpty())
     }
 
     LaunchedEffect(uiState.activePage?.slug) {
@@ -224,7 +240,7 @@ fun WikiScreen(
         }
     }
 
-    LaunchedEffect(authReturnUri) {
+    LaunchedEffect(authReturnUri, authReturnToken) {
         val source = parseDriveReconnectSource(authReturnUri)
         if (source == "query" || source == "ingest" || source == "synthesis") {
             wikiViewModel.onDriveReconnectCompleted()
@@ -595,7 +611,7 @@ fun WikiScreen(
                                     }
                                 }
                             }
-                            if (uiState.contentLoading) {
+                            if (uiState.contentLoading || uiState.syncLoading) {
                                 CircularProgressIndicator(
                                     modifier = Modifier.size(24.dp).padding(end = 4.dp),
                                     strokeWidth = 2.dp,
@@ -643,12 +659,24 @@ fun WikiScreen(
             Column(Modifier.fillMaxSize().padding(innerPadding)) {
                 uiState.syncError?.let { error ->
                     Surface(color = MaterialTheme.colorScheme.errorContainer) {
-                        Text(
-                            text = error,
-                            color = MaterialTheme.colorScheme.onErrorContainer,
-                            style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.fillMaxWidth().padding(12.dp),
-                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = error,
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.weight(1f).padding(vertical = 12.dp),
+                            )
+                            IconButton(onClick = { wikiViewModel.clearSyncError() }) {
+                                Icon(
+                                    Icons.Default.Close,
+                                    contentDescription = stringResource(R.string.action_dismiss),
+                                    tint = MaterialTheme.colorScheme.onErrorContainer,
+                                )
+                            }
+                        }
                     }
                 }
 
@@ -765,6 +793,8 @@ fun WikiScreen(
         ChatBottomSheet(
             messages = uiState.chatMessages,
             isLoading = uiState.chatLoading,
+            errorMessage = uiState.syncError,
+            onDismissError = { wikiViewModel.clearSyncError() },
             synthesisSavedSlug = uiState.synthesisSavedSlug,
             profiles = uiState.profiles,
             selectedProfileId = uiState.selectedProfileId,
@@ -1281,6 +1311,8 @@ private fun isHumanEditablePage(page: PageEntity): Boolean =
 private fun ChatBottomSheet(
     messages: List<ChatMessage>,
     isLoading: Boolean,
+    errorMessage: String?,
+    onDismissError: () -> Unit,
     synthesisSavedSlug: String?,
     profiles: List<LlmProfile>,
     selectedProfileId: String?,
@@ -1353,6 +1385,28 @@ private fun ChatBottomSheet(
                         }
                     }
                     item { Spacer(Modifier.height(4.dp)) }
+                }
+            }
+
+            // Query failures must be visible INSIDE the full-screen sheet — the
+            // scaffold banner renders behind it
+            errorMessage?.let { message ->
+                Surface(color = MaterialTheme.colorScheme.errorContainer) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text(
+                            message,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            modifier = Modifier.weight(1f).padding(vertical = 10.dp),
+                        )
+                        TextButton(onClick = onDismissError) {
+                            Text(stringResource(R.string.action_dismiss))
+                        }
+                    }
                 }
             }
 
@@ -1545,7 +1599,7 @@ private fun IngestInputDialog(
     onDismiss: () -> Unit,
     onConfirm: (String) -> Unit,
 ) {
-    var text by remember(initialText) { mutableStateOf(initialText) }
+    var text by rememberSaveable(initialText) { mutableStateOf(initialText) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1607,13 +1661,12 @@ private fun InlinePageEditor(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             toolbarActions.forEach { action ->
-                SmallFloatingActionButton(
+                // FilledTonalButton keeps the M3 48dp minimum touch target (36dp FABs failed a11y)
+                FilledTonalButton(
                     onClick = { onValueChange(action.apply(value)) },
-                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                    modifier = Modifier.size(36.dp),
+                    contentPadding = PaddingValues(horizontal = 14.dp),
                 ) {
-                    Text(action.label, style = MaterialTheme.typography.labelSmall)
+                    Text(action.label, style = MaterialTheme.typography.labelMedium)
                 }
             }
         }

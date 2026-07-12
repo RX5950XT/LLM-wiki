@@ -15,6 +15,16 @@ import { getDefaultPrompt } from '@llm-wiki/prompts';
 
 export const maxDuration = 120;
 
+const MessagesSchema = z
+  .array(
+    z.object({
+      role: z.enum(['user', 'assistant']),
+      content: z.string().max(100_000),
+    }),
+  )
+  .min(1)
+  .max(60);
+
 export async function POST(request: NextRequest) {
   const locale = resolveUiLocaleFromRequest(request);
   const { supabase, user } = await getRequestUser(request);
@@ -22,10 +32,11 @@ export async function POST(request: NextRequest) {
 
   const body = await request.json().catch(() => null);
   const workspaceIdResult = z.string().uuid().safeParse(body?.workspace_id);
-  const messages: ModelMessage[] = Array.isArray(body?.messages) ? body.messages : [];
-  if (!workspaceIdResult.success || messages.length === 0) {
+  const messagesResult = MessagesSchema.safeParse(body?.messages);
+  if (!workspaceIdResult.success || !messagesResult.success) {
     return new Response('Bad request', { status: 400 });
   }
+  const messages: ModelMessage[] = messagesResult.data;
   const workspace_id = workspaceIdResult.data;
   const lastUserMessage = [...messages].reverse().find((m) => m.role === 'user');
   const question =

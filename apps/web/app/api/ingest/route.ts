@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
 import { z } from 'zod';
 import { writeDriveFile, findFile, readDriveFile } from '@/lib/drive/client';
 import { getRequestUser } from '@/lib/supabase/request';
@@ -14,12 +14,19 @@ import { runIngestPipeline } from '@/lib/ai/ingest-pipeline';
 import { getDefaultPrompt } from '@llm-wiki/prompts';
 import { resolveUiLocaleFromRequest } from '@/lib/i18n/ui-locale';
 
+// Matches the 2 MB client-side caps on web and Android file ingest
+const MAX_TEXT_LENGTH = 2 * 1024 * 1024;
+
 const IngestSchema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('url'), url: z.string().url(), workspace_id: z.string().uuid() }),
+  z.object({
+    kind: z.literal('url'),
+    url: z.string().url().max(2048),
+    workspace_id: z.string().uuid(),
+  }),
   z.object({
     kind: z.literal('text'),
-    title: z.string().min(1),
-    content: z.string().min(1),
+    title: z.string().min(1).max(300),
+    content: z.string().min(1).max(MAX_TEXT_LENGTH),
     workspace_id: z.string().uuid(),
   }),
 ]);
@@ -87,12 +94,17 @@ export async function POST(request: NextRequest) {
   let sourceUrl: string | undefined;
 
   if (parsed.data.kind === 'url') {
-    const article = await urlToMarkdown(parsed.data.url).catch((err) => {
-      throw new Error(`Failed to fetch URL: ${(err as Error).message}`);
-    });
-    sourceContent = article.markdown;
-    sourceTitle = article.title;
-    sourceUrl = parsed.data.url;
+    try {
+      const article = await urlToMarkdown(parsed.data.url);
+      sourceContent = article.markdown;
+      sourceTitle = article.title;
+      sourceUrl = parsed.data.url;
+    } catch (err) {
+      return NextResponse.json(
+        { error: `Failed to fetch URL: ${err instanceof Error ? err.message : 'unknown error'}` },
+        { status: 422 },
+      );
+    }
   } else {
     sourceContent = parsed.data.content;
     sourceTitle = parsed.data.title;
@@ -112,15 +124,17 @@ export async function POST(request: NextRequest) {
     throw error;
   }
 
-  // Find sources/ folder
-  const sourcesFolderId = await findFile(
-    drive,
-    'sources',
-    workspace.drive_folder_id,
-    'application/vnd.google-apps.folder',
-  );
+  // Resolve Drive folders in parallel
+  const [sourcesFolderId, wikiFolderId, schemaFolderId] = await Promise.all([
+    findFile(drive, 'sources', workspace.drive_folder_id, 'application/vnd.google-apps.folder'),
+    findFile(drive, 'wiki', workspace.drive_folder_id, 'application/vnd.google-apps.folder'),
+    findFile(drive, '_schema', workspace.drive_folder_id, 'application/vnd.google-apps.folder'),
+  ]);
   if (!sourcesFolderId) {
     return NextResponse.json({ error: 'Drive sources folder not found' }, { status: 500 });
+  }
+  if (!wikiFolderId) {
+    return NextResponse.json({ error: 'Drive wiki folder not found' }, { status: 500 });
   }
 
   const sourceFileId = await writeDriveFile(drive, sourceContent, {
@@ -142,38 +156,7 @@ export async function POST(request: NextRequest) {
     .single();
   if (!source) return NextResponse.json({ error: 'Failed to create source record' }, { status: 500 });
 
-  // Create ingest job
-  const { data: job } = await supabase
-    .from('ingest_jobs')
-    .insert({
-      workspace_id,
-      source_id: source.id,
-      status: 'pending',
-      profile_id: profileId,
-    })
-    .select('id')
-    .single();
-  if (!job) return NextResponse.json({ error: 'Failed to create ingest job' }, { status: 500 });
-
-  // Find wiki folder for tool context
-  const wikiFolderId = await findFile(
-    drive,
-    'wiki',
-    workspace.drive_folder_id,
-    'application/vnd.google-apps.folder',
-  );
-  if (!wikiFolderId) {
-    return NextResponse.json({ error: 'Drive wiki folder not found' }, { status: 500 });
-  }
-
   // Load schema prompt from Drive _schema/ingest.md (user may have customized it)
-  const schemaFolderId = await findFile(
-    drive,
-    '_schema',
-    workspace.drive_folder_id,
-    'application/vnd.google-apps.folder',
-  );
-
   let systemPrompt = getDefaultPrompt('ingest', locale);
   if (schemaFolderId) {
     const ingestFileId = await findFile(drive, 'ingest.md', schemaFolderId);
@@ -182,43 +165,95 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // Mark job as running
-  await supabase
+  // Create ingest job already in 'running' state so a crash can never
+  // leave an unsweepable 'pending' row without started_at
+  const { data: job } = await supabase
     .from('ingest_jobs')
-    .update({ status: 'running', started_at: new Date().toISOString() })
-    .eq('id', job.id);
+    .insert({
+      workspace_id,
+      source_id: source.id,
+      status: 'running',
+      profile_id: profileId,
+      started_at: new Date().toISOString(),
+    })
+    .select('id')
+    .single();
+  if (!job) return NextResponse.json({ error: 'Failed to create ingest job' }, { status: 500 });
 
-  // Run pipeline (Vercel Fluid Compute — up to 300s)
-  try {
-    await runIngestPipeline({
-      supabase,
-      drive,
-      workspaceId: workspace_id,
-      wikiFolderId,
-      sourceContent,
-      sourceTitle,
-      systemPrompt,
-      profile: profile as Parameters<typeof runIngestPipeline>[0]['profile'],
-      jobId: job.id,
-    });
+  // Run the LLM pipeline AFTER responding — clients poll GET /api/ingest?job_id=
+  // instead of holding a connection open for up to 300s (Vercel Fluid Compute
+  // keeps the function alive until after() work completes).
+  after(async () => {
+    try {
+      await runIngestPipeline({
+        supabase,
+        drive,
+        workspaceId: workspace_id,
+        wikiFolderId,
+        sourceContent,
+        sourceTitle,
+        systemPrompt,
+        profile: profile as Parameters<typeof runIngestPipeline>[0]['profile'],
+        jobId: job.id,
+      });
 
-    await supabase
-      .from('sources')
-      .update({ ingested_at: new Date().toISOString() })
-      .eq('id', source.id);
+      await supabase
+        .from('sources')
+        .update({ ingested_at: new Date().toISOString() })
+        .eq('id', source.id);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      await supabase
+        .from('ingest_jobs')
+        .update({
+          status: 'failed',
+          error: message,
+          finished_at: new Date().toISOString(),
+        })
+        .eq('id', job.id);
+    }
+  });
 
-    return NextResponse.json({ jobId: job.id, status: 'done' });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown error';
+  return NextResponse.json({ jobId: job.id, status: 'running' }, { status: 202 });
+}
+
+// A running job older than this can no longer be alive (maxDuration 300s + buffer)
+const STALE_JOB_MS = 8 * 60 * 1000;
+
+export async function GET(request: NextRequest) {
+  const { supabase, user } = await getRequestUser(request);
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const jobIdParsed = z.string().uuid().safeParse(request.nextUrl.searchParams.get('job_id'));
+  if (!jobIdParsed.success) {
+    return NextResponse.json({ error: 'job_id query param required' }, { status: 400 });
+  }
+
+  // RLS scopes ingest_jobs to workspaces owned by the requesting user
+  const { data: job } = await supabase
+    .from('ingest_jobs')
+    .select('id, status, error, touched_pages, started_at, finished_at')
+    .eq('id', jobIdParsed.data)
+    .single();
+  if (!job) return NextResponse.json({ error: 'Job not found' }, { status: 404 });
+
+  if (
+    (job.status === 'running' || job.status === 'pending') &&
+    job.started_at &&
+    Date.now() - new Date(job.started_at).getTime() > STALE_JOB_MS
+  ) {
+    const error = 'Ingest timed out';
     await supabase
       .from('ingest_jobs')
-      .update({
-        status: 'failed',
-        error: message,
-        finished_at: new Date().toISOString(),
-      })
+      .update({ status: 'failed', error, finished_at: new Date().toISOString() })
       .eq('id', job.id);
-
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ jobId: job.id, status: 'failed', error, touched_pages: [] });
   }
+
+  return NextResponse.json({
+    jobId: job.id,
+    status: job.status,
+    error: job.error,
+    touched_pages: job.touched_pages ?? [],
+  });
 }

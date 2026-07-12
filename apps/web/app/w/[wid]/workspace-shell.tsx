@@ -77,7 +77,18 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<{ slug: string; title: string | null; kind: string }[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
+  const [searchActiveIdx, setSearchActiveIdx] = useState(0);
   const searchRef = useRef<HTMLDivElement>(null);
+
+  // Collapse side panels on small screens (once, after hydration, to avoid SSR mismatch)
+  useEffect(() => {
+    if (window.matchMedia('(max-width: 767px)').matches) {
+      setLeftOpen(false);
+      setRightOpen(false);
+    } else if (window.matchMedia('(max-width: 1023px)').matches) {
+      setRightOpen(false);
+    }
+  }, []);
   /**
    * Incremented each time Realtime notifies us that the *currently viewed* page
    * has been updated. PageViewer watches this to show the staleness banner.
@@ -118,8 +129,24 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
     setActivePage(resolvedSlug);
     setActiveAnchor(anchor ?? null);
     const hash = anchor ? `#${encodeURIComponent(anchor)}` : '';
-    window.history.replaceState(null, '', `/w/${workspaceId}?page=${encodeURIComponent(resolvedSlug)}${hash}`);
+    const nextUrl = `/w/${workspaceId}?page=${encodeURIComponent(resolvedSlug)}${hash}`;
+    const currentUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    // pushState so browser Back walks the wiki trail instead of leaving the workspace
+    if (currentUrl !== nextUrl) {
+      window.history.pushState({ page: resolvedSlug }, '', nextUrl);
+    }
   }, [resolvePageSlug, workspaceId]);
+
+  useEffect(() => {
+    const onPop = () => {
+      const params = new URLSearchParams(window.location.search);
+      const page = params.get('page');
+      setActivePage(page ?? initialPage);
+      setActiveAnchor(decodeURIComponent(window.location.hash.replace(/^#/, '')) || null);
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, [initialPage]);
 
   const handlePageWritten = useCallback(
     (slug: string) => {
@@ -234,6 +261,22 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
     return () => document.removeEventListener('mousedown', onClick);
   }, []);
 
+  // Ctrl/Cmd+K opens full-text search
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setShowSearch(true);
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
+
+  useEffect(() => {
+    setSearchActiveIdx(0);
+  }, [searchResults]);
+
   useEffect(() => {
     if (!showSearch || searchQuery.trim().length < 2) {
       setSearchResults([]);
@@ -268,7 +311,8 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
       }
     };
 
-    const onMove = (e: MouseEvent) => {
+    // Pointer events instead of mouse events so panel resize also works on touch
+    const onMove = (e: PointerEvent) => {
       if (!dragging.current) return;
       const { side, startX, startWidth } = dragging.current;
       const delta = e.clientX - startX;
@@ -293,19 +337,21 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
     };
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp);
+    document.addEventListener('pointercancel', onUp);
     return () => {
       if (dragFrame.current != null) {
         window.cancelAnimationFrame(dragFrame.current);
       }
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onUp);
+      document.removeEventListener('pointercancel', onUp);
     };
   }, []);
 
   const startDrag = useCallback(
-    (e: React.MouseEvent, side: 'left' | 'right') => {
+    (e: React.PointerEvent, side: 'left' | 'right') => {
       dragging.current = { side, startX: e.clientX, startWidth: side === 'left' ? leftWidth : rightWidth };
       document.body.style.cursor = 'col-resize';
       document.body.style.userSelect = 'none';
@@ -325,13 +371,13 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
         },
         body: JSON.stringify({ workspace_id: workspaceId }),
       });
-      const data = await res.json().catch(() => null) as { error?: string } | null;
+      const data = await res.json().catch(() => null) as { error?: string; reportSlug?: string | null } | null;
       if (!res.ok) {
         throw new Error(data?.error ?? 'Lint failed');
       }
       refreshPageList();
       const today = new Date().toISOString().slice(0, 10);
-      selectPage(`_lint/${today}.md`);
+      selectPage(data?.reportSlug ?? `_lint/${today}.md`);
     } catch (error) {
       setWorkspaceActionError(error instanceof Error ? error.message : 'Lint failed');
     } finally {
@@ -659,6 +705,25 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
                     autoFocus
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Escape') {
+                        setShowSearch(false);
+                        setSearchQuery('');
+                      } else if (e.key === 'ArrowDown') {
+                        e.preventDefault();
+                        setSearchActiveIdx((i) => Math.min(i + 1, Math.max(searchResults.length - 1, 0)));
+                      } else if (e.key === 'ArrowUp') {
+                        e.preventDefault();
+                        setSearchActiveIdx((i) => Math.max(i - 1, 0));
+                      } else if (e.key === 'Enter') {
+                        const r = searchResults[searchActiveIdx] ?? searchResults[0];
+                        if (r) {
+                          selectPage(r.slug);
+                          setShowSearch(false);
+                          setSearchQuery('');
+                        }
+                      }
+                    }}
                     placeholder={t('query.searchWiki')}
                     className="w-full rounded-md border px-3 py-1.5 text-sm outline-none"
                     style={{ background: 'var(--bg)', borderColor: 'var(--border)', color: 'var(--fg)' }}
@@ -671,7 +736,7 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
                 )}
                 {searchResults.length > 0 && (
                   <div className="max-h-60 overflow-y-auto">
-                    {searchResults.map((r) => (
+                    {searchResults.map((r, idx) => (
                       <button
                         key={r.slug}
                         onClick={() => {
@@ -679,8 +744,12 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
                           setShowSearch(false);
                           setSearchQuery('');
                         }}
+                        onMouseEnter={() => setSearchActiveIdx(idx)}
                         className="flex w-full flex-col px-3 py-2 text-left text-xs transition-opacity hover:opacity-70"
-                        style={{ color: 'var(--fg)' }}
+                        style={{
+                          color: 'var(--fg)',
+                          background: idx === searchActiveIdx ? 'var(--color-accent-glow)' : undefined,
+                        }}
                       >
                         <span className="font-medium">{r.title ?? r.slug}</span>
                         <span className="truncate" style={{ color: 'var(--fg-muted)' }}>
@@ -750,7 +819,7 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
             aria-label={t('workspace.runLint')}
             title={lintRunning ? t('workspace.lintRunning') : t('workspace.runLint')}
           >
-            <FlaskConical size={16} />
+            {lintRunning ? <Loader2 size={16} className="animate-spin" /> : <FlaskConical size={16} />}
           </button>
 
           <button
@@ -797,6 +866,28 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
         </div>
       </header>
 
+      {/* Global action error strip — dialogs render their own copy; this covers
+          failures (e.g. lint) that happen with no dialog open */}
+      {workspaceActionError && !renamingWorkspace && !deletingWorkspace && !creatingNote && !renamingNote && !deletingNote && (
+        <div
+          className="flex items-center justify-between gap-3 border-b px-4 py-2 text-xs"
+          style={{ borderColor: 'var(--border)', background: 'var(--bg-2)', color: 'oklch(65% 0.18 30)' }}
+          role="alert"
+        >
+          <span className="truncate">{workspaceActionError}</span>
+          <button
+            type="button"
+            onClick={() => setWorkspaceActionError(null)}
+            className="shrink-0 rounded p-1 transition-opacity hover:opacity-70"
+            style={{ color: 'var(--fg-muted)' }}
+            aria-label={t('common.close')}
+            title={t('common.close')}
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* Main three-panel layout */}
       <div className="flex flex-1 overflow-hidden">
         {/* Left: page tree */}
@@ -804,7 +895,7 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
           <>
             <div
               className="shrink-0 overflow-hidden"
-              style={{ width: leftWidth, borderRight: '1px solid var(--border)', background: 'var(--bg-2)' }}
+              style={{ width: leftWidth, maxWidth: '80vw', borderRight: '1px solid var(--border)', background: 'var(--bg-2)' }}
             >
               <PageTree
                 initialPages={pages}
@@ -826,8 +917,8 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
             </div>
             <div
               className="shrink-0 cursor-col-resize"
-              style={{ width: 4 }}
-              onMouseDown={(e) => startDrag(e, 'left')}
+              style={{ width: 4, touchAction: 'none' }}
+              onPointerDown={(e) => startDrag(e, 'left')}
               onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'var(--color-accent)'; (e.currentTarget as HTMLDivElement).style.opacity = '0.4'; }}
               onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = ''; (e.currentTarget as HTMLDivElement).style.opacity = ''; }}
             />
@@ -866,12 +957,12 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
           <>
             <div
               className="shrink-0 cursor-col-resize"
-              style={{ width: 4 }}
-              onMouseDown={(e) => startDrag(e, 'right')}
+              style={{ width: 4, touchAction: 'none' }}
+              onPointerDown={(e) => startDrag(e, 'right')}
               onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'var(--color-accent)'; (e.currentTarget as HTMLDivElement).style.opacity = '0.4'; }}
               onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = ''; (e.currentTarget as HTMLDivElement).style.opacity = ''; }}
             />
-            <div style={{ width: rightWidth }} className="shrink-0 overflow-hidden">
+            <div style={{ width: rightWidth, maxWidth: '80vw' }} className="shrink-0 overflow-hidden">
               <ConversationPanel
                 workspaceId={workspaceId}
                 onSourceAdded={refreshPageList}
@@ -954,6 +1045,43 @@ function canonicalWikiAlias(value: string): string {
     .replace(/[\s_\-()]+/g, '');
 }
 
+function ModalShell({
+  labelId,
+  onClose,
+  children,
+}: {
+  labelId: string;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={labelId}
+    >
+      <button
+        type="button"
+        className="absolute inset-0 cursor-default"
+        style={{ background: 'oklch(8% 0.01 250 / 0.55)' }}
+        onClick={onClose}
+        aria-hidden="true"
+        tabIndex={-1}
+      />
+      {children}
+    </div>
+  );
+}
+
 function WorkspaceRenameDialog({
   workspace,
   loading,
@@ -971,8 +1099,7 @@ function WorkspaceRenameDialog({
   const [name, setName] = useState(workspace.name);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <button className="absolute inset-0 cursor-default" style={{ background: 'oklch(8% 0.01 250 / 0.55)' }} onClick={onClose} />
+    <ModalShell labelId="ws-rename-title" onClose={onClose}>
       <form
         onSubmit={(event) => {
           event.preventDefault();
@@ -981,7 +1108,7 @@ function WorkspaceRenameDialog({
         className="relative w-full max-w-sm space-y-4 rounded-xl border p-5 shadow-2xl"
         style={{ background: 'var(--bg)', borderColor: 'var(--border)', color: 'var(--fg)' }}
       >
-        <h2 className="text-base font-semibold">{t('workspace.renameWorkspace')}</h2>
+        <h2 id="ws-rename-title" className="text-base font-semibold">{t('workspace.renameWorkspace')}</h2>
         <input
           value={name}
           onChange={(event) => setName(event.target.value)}
@@ -1005,7 +1132,7 @@ function WorkspaceRenameDialog({
           </button>
         </div>
       </form>
-    </div>
+    </ModalShell>
   );
 }
 
@@ -1025,19 +1152,19 @@ function WorkspaceDeleteDialog({
   const t = useTranslations();
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <button className="absolute inset-0 cursor-default" style={{ background: 'oklch(8% 0.01 250 / 0.55)' }} onClick={onClose} />
+    <ModalShell labelId="ws-delete-title" onClose={onClose}>
       <section
         className="relative w-full max-w-sm space-y-4 rounded-xl border p-5 shadow-2xl"
         style={{ background: 'var(--bg)', borderColor: 'var(--border)', color: 'var(--fg)' }}
       >
-        <h2 className="text-base font-semibold">{t('workspace.deleteWorkspace')}</h2>
+        <h2 id="ws-delete-title" className="text-base font-semibold">{t('workspace.deleteWorkspace')}</h2>
         <p className="text-sm leading-6" style={{ color: 'var(--fg-muted)' }}>
           {t('workspace.deleteWorkspaceConfirm', { name: workspace.name })}
         </p>
         {error && <p className="text-xs" style={{ color: 'oklch(65% 0.18 30)' }}>{error}</p>}
         <div className="flex justify-end gap-2">
-          <button type="button" onClick={onClose} className="rounded-md px-3 py-2 text-sm" style={{ color: 'var(--fg-muted)' }}>
+          {/* autoFocus Cancel so Enter can't accidentally destroy a workspace */}
+          <button type="button" autoFocus onClick={onClose} className="rounded-md px-3 py-2 text-sm" style={{ color: 'var(--fg-muted)' }}>
             {t('common.cancel')}
           </button>
           <button
@@ -1051,7 +1178,7 @@ function WorkspaceDeleteDialog({
           </button>
         </div>
       </section>
-    </div>
+    </ModalShell>
   );
 }
 
@@ -1070,8 +1197,7 @@ function NoteCreateDialog({
   const [title, setTitle] = useState('');
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <button className="absolute inset-0 cursor-default" style={{ background: 'oklch(8% 0.01 250 / 0.55)' }} onClick={onClose} />
+    <ModalShell labelId="note-create-title" onClose={onClose}>
       <form
         onSubmit={(event) => {
           event.preventDefault();
@@ -1080,7 +1206,7 @@ function NoteCreateDialog({
         className="relative w-full max-w-md rounded-2xl border p-5 shadow-2xl"
         style={{ background: 'var(--bg-2)', borderColor: 'var(--border)' }}
       >
-        <h2 className="text-sm font-semibold" style={{ color: 'var(--fg)' }}>
+        <h2 id="note-create-title" className="text-sm font-semibold" style={{ color: 'var(--fg)' }}>
           {t('wiki.createNote')}
         </h2>
         <p className="mt-1 text-xs" style={{ color: 'var(--fg-muted)' }}>
@@ -1113,13 +1239,13 @@ function NoteCreateDialog({
             type="submit"
             disabled={loading || !title.trim()}
             className="rounded-lg px-3 py-1.5 text-sm transition-opacity hover:opacity-70 disabled:opacity-40"
-            style={{ background: 'var(--color-accent)', color: 'white' }}
+            style={{ background: 'var(--color-accent)', color: 'oklch(10% 0.015 250)' }}
           >
             {loading ? t('common.loading') : t('common.save')}
           </button>
         </div>
       </form>
-    </div>
+    </ModalShell>
   );
 }
 
@@ -1140,8 +1266,7 @@ function NoteRenameDialog({
   const [title, setTitle] = useState(note.title ?? note.slug.replace(/^notes\//, '').replace(/\.md$/, ''));
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <button className="absolute inset-0 cursor-default" style={{ background: 'oklch(8% 0.01 250 / 0.55)' }} onClick={onClose} />
+    <ModalShell labelId="note-rename-title" onClose={onClose}>
       <form
         onSubmit={(event) => {
           event.preventDefault();
@@ -1150,7 +1275,7 @@ function NoteRenameDialog({
         className="relative w-full max-w-sm space-y-4 rounded-xl border p-5 shadow-2xl"
         style={{ background: 'var(--bg)', borderColor: 'var(--border)', color: 'var(--fg)' }}
       >
-        <h2 className="text-base font-semibold">{t('wiki.renameNote')}</h2>
+        <h2 id="note-rename-title" className="text-base font-semibold">{t('wiki.renameNote')}</h2>
         <input
           value={title}
           onChange={(event) => setTitle(event.target.value)}
@@ -1174,7 +1299,7 @@ function NoteRenameDialog({
           </button>
         </div>
       </form>
-    </div>
+    </ModalShell>
   );
 }
 
@@ -1194,19 +1319,19 @@ function NoteDeleteDialog({
   const t = useTranslations();
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <button className="absolute inset-0 cursor-default" style={{ background: 'oklch(8% 0.01 250 / 0.55)' }} onClick={onClose} />
+    <ModalShell labelId="note-delete-title" onClose={onClose}>
       <section
         className="relative w-full max-w-sm space-y-4 rounded-xl border p-5 shadow-2xl"
         style={{ background: 'var(--bg)', borderColor: 'var(--border)', color: 'var(--fg)' }}
       >
-        <h2 className="text-base font-semibold">{t('wiki.deleteNote')}</h2>
+        <h2 id="note-delete-title" className="text-base font-semibold">{t('wiki.deleteNote')}</h2>
         <p className="text-sm leading-6" style={{ color: 'var(--fg-muted)' }}>
           {t('wiki.deleteNoteConfirm', { title: note.title ?? note.slug })}
         </p>
         {error && <p className="text-xs" style={{ color: 'oklch(65% 0.18 30)' }}>{error}</p>}
         <div className="flex justify-end gap-2">
-          <button type="button" onClick={onClose} className="rounded-md px-3 py-2 text-sm" style={{ color: 'var(--fg-muted)' }}>
+          {/* autoFocus Cancel so Enter can't accidentally delete the note */}
+          <button type="button" autoFocus onClick={onClose} className="rounded-md px-3 py-2 text-sm" style={{ color: 'var(--fg-muted)' }}>
             {t('common.cancel')}
           </button>
           <button
@@ -1220,6 +1345,6 @@ function NoteDeleteDialog({
           </button>
         </div>
       </section>
-    </div>
+    </ModalShell>
   );
 }

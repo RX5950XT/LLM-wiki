@@ -15,14 +15,27 @@ interface Profile {
 export function ProfileList({ profiles }: { profiles: Profile[] }) {
   const t = useTranslations('settings');
   const [list, setList] = useState(profiles);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   useEffect(() => {
     setList(profiles);
   }, [profiles]);
 
   const handleDelete = async (id: string) => {
-    const res = await fetch(`/api/settings/profiles?id=${id}`, { method: 'DELETE' });
-    if (res.ok) setList((prev) => prev.filter((p) => p.id !== id));
+    // Deleting a profile removes a stored API-key config — confirm first
+    if (!window.confirm(t('confirmDeleteProfile'))) return;
+    setDeleteError(null);
+    try {
+      const res = await fetch(`/api/settings/profiles?id=${id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null) as { error?: string } | null;
+        setDeleteError(data?.error ?? t('deleteProfileFailed'));
+        return;
+      }
+      setList((prev) => prev.filter((p) => p.id !== id));
+    } catch {
+      setDeleteError(t('deleteProfileFailed'));
+    }
   };
 
   if (list.length === 0) {
@@ -34,6 +47,12 @@ export function ProfileList({ profiles }: { profiles: Profile[] }) {
   }
 
   return (
+    <div className="space-y-2">
+      {deleteError && (
+        <p className="text-xs" style={{ color: 'oklch(65% 0.18 30)' }} role="alert">
+          {deleteError}
+        </p>
+      )}
     <ul className="space-y-2">
       {list.map((p) => (
         <li
@@ -70,5 +89,6 @@ export function ProfileList({ profiles }: { profiles: Profile[] }) {
         </li>
       ))}
     </ul>
+    </div>
   );
 }

@@ -28,6 +28,11 @@ private val DarkColorScheme = darkColorScheme(
     surfaceVariant = Bg2,
     onSurfaceVariant = FgMuted,
     outline = BorderDark,
+    surfaceContainerLowest = SurfaceContainerLowestDark,
+    surfaceContainerLow = SurfaceContainerLowDark,
+    surfaceContainer = SurfaceContainerDark,
+    surfaceContainerHigh = SurfaceContainerHighDark,
+    surfaceContainerHighest = SurfaceContainerHighestDark,
 )
 
 private val LightColorScheme = lightColorScheme(
@@ -46,6 +51,11 @@ private val LightColorScheme = lightColorScheme(
     surfaceVariant = Bg2Light,
     onSurfaceVariant = FgMutedLight,
     outline = BorderLight,
+    surfaceContainerLowest = SurfaceContainerLowestLight,
+    surfaceContainerLow = SurfaceContainerLowLight,
+    surfaceContainer = SurfaceContainerLight,
+    surfaceContainerHigh = SurfaceContainerHighLight,
+    surfaceContainerHighest = SurfaceContainerHighestLight,
 )
 
 @Composable

@@ -6,6 +6,7 @@ import { useTranslations } from 'next-intl';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { reconnectGoogleDrive } from '@/lib/google/drive-reconnect';
+import { createClient } from '@/lib/supabase/client';
 
 function stripFrontmatterAndWikilinks(content: string): string {
   let result = content;
@@ -170,20 +171,64 @@ export function PageViewer({
   const [page, setPage] = useState<PageData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Non-fatal action failures (lock toggle, save) — shown inline, must NOT
+  // trip the full-page error screen or the open editor would be unmounted
+  const [actionError, setActionError] = useState<string | null>(null);
   const [stale, setStale] = useState(false);
   const [lockPending, setLockPending] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
   const [savePending, setSavePending] = useState(false);
   const [reconnectPending, setReconnectPending] = useState(false);
+  const [backlinks, setBacklinks] = useState<string[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  // Backlinks: pages whose [[wikilinks]] point at the current slug
+  useEffect(() => {
+    if (!slug) {
+      setBacklinks([]);
+      return;
+    }
+    const supabase = createClient();
+    let cancelled = false;
+    supabase
+      .from('page_links')
+      .select('from_slug')
+      .eq('workspace_id', workspaceId)
+      .eq('to_slug', slug)
+      .then(({ data }) => {
+        if (cancelled) return;
+        const unique = Array.from(new Set((data ?? []).map((row) => row.from_slug as string)));
+        setBacklinks(unique.sort());
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [slug, workspaceId, refreshKey]);
+  // Tracks unsaved editor changes so refresh / page-switch can't silently discard them
+  const dirtyRef = useRef(false);
+
+  useEffect(() => {
+    dirtyRef.current = editing && page != null && draft !== page.content;
+  }, [editing, draft, page]);
+
+  useEffect(() => {
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (dirtyRef.current) e.preventDefault();
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, []);
 
   const fetchPage = useCallback(
     (forceSlug?: string) => {
       const target = forceSlug ?? slug;
       if (!target) return;
+      if (dirtyRef.current && !window.confirm(t('wiki.discardChangesConfirm'))) return;
+      dirtyRef.current = false;
       setLoading(true);
       setError(null);
+      setActionError(null);
       setStale(false);
 
       fetch(`/api/pages/${workspaceId}/${encodeSlugPath(target)}`)
@@ -214,11 +259,13 @@ export function PageViewer({
         .catch((e) => setError(e instanceof Error ? e.message : String(e)))
         .finally(() => setLoading(false));
     },
-    [onPageLoaded, workspaceId, slug],
+    [onPageLoaded, workspaceId, slug, t],
   );
 
-  // Fetch on slug change
+  // Fetch on slug change (asking first if unsaved editor changes would be lost)
   useEffect(() => {
+    if (dirtyRef.current && !window.confirm(t('wiki.discardChangesConfirm'))) return;
+    dirtyRef.current = false;
     setPage(null);
     fetchPage();
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -245,7 +292,7 @@ export function PageViewer({
     if (!page) return;
     setLockPending(true);
     try {
-      await fetch(
+      const res = await fetch(
         `/api/pages/${workspaceId}/${encodeSlugPath(page.slug)}`,
         {
           method: 'PATCH',
@@ -253,18 +300,29 @@ export function PageViewer({
           body: JSON.stringify({ locked_by_human: !page.locked_by_human }),
         },
       );
+      if (!res.ok) {
+        const data = await res.json().catch(() => null) as { error?: { message?: string } | string } | null;
+        const message = typeof data?.error === 'string' ? data.error : data?.error?.message;
+        setActionError(message ?? t('wiki.lockFailed'));
+        return;
+      }
+      // Only reflect the lock in UI once the server accepted it — this flag is
+      // the "human owns this page" guarantee, a silent failure breaks trust
+      setActionError(null);
       setPage((prev) =>
         prev ? { ...prev, locked_by_human: !prev.locked_by_human } : prev,
       );
+    } catch {
+      setActionError(t('wiki.lockFailed'));
     } finally {
       setLockPending(false);
     }
-  }, [page, workspaceId]);
+  }, [page, workspaceId, t]);
 
   const savePage = useCallback(async () => {
     if (!page) return;
     setSavePending(true);
-    setError(null);
+    setActionError(null);
     try {
       const res = await fetch(`/api/pages/${workspaceId}/${encodeSlugPath(page.slug)}`, {
         method: 'PATCH',
@@ -275,6 +333,7 @@ export function PageViewer({
       if (!res.ok || !data) {
         throw new Error(data?.error ?? 'Failed to save page');
       }
+      dirtyRef.current = false;
       setPage(data);
       setDraft(data.content);
       setEditing(false);
@@ -282,7 +341,8 @@ export function PageViewer({
       onPageLoaded?.(data);
       onPageSaved?.();
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : 'Failed to save page');
+      // Inline error keeps the editor (and the unsaved draft) on screen
+      setActionError(saveError instanceof Error ? saveError.message : 'Failed to save page');
     } finally {
       setSavePending(false);
     }
@@ -369,12 +429,33 @@ export function PageViewer({
 
   return (
     <div className="flex h-full flex-col">
+      {/* Inline action error (lock/save failures) */}
+      {actionError && (
+        <div
+          className="flex items-center justify-between gap-3 border-b px-4 py-2 text-xs"
+          style={{ borderColor: 'var(--border)', background: 'var(--bg-2)', color: 'oklch(65% 0.18 30)' }}
+          role="alert"
+        >
+          <span className="truncate">{actionError}</span>
+          <button
+            type="button"
+            onClick={() => setActionError(null)}
+            className="shrink-0 rounded p-1 transition-opacity hover:opacity-70"
+            style={{ color: 'var(--fg-muted)' }}
+            aria-label={t('common.close')}
+            title={t('common.close')}
+          >
+            <X size={12} />
+          </button>
+        </div>
+      )}
+
       {/* Staleness banner */}
       {stale && (
         <div
           className="flex items-center justify-between px-4 py-2 text-xs"
           style={{
-            background: 'oklch(30% 0.05 295 / 0.4)',
+            background: 'var(--color-accent-glow)',
             borderBottom: '1px solid var(--border)',
             color: 'var(--color-accent)',
           }}
@@ -422,6 +503,8 @@ export function PageViewer({
             disabled={lockPending}
             className="flex items-center gap-0.5 rounded px-1.5 py-0.5 text-xs transition-opacity hover:opacity-70 disabled:opacity-40"
             style={{ color: page.locked_by_human ? 'var(--color-accent)' : 'var(--fg-muted)' }}
+            aria-pressed={page.locked_by_human}
+            aria-label={page.locked_by_human ? t('wiki.lockedTitle') : t('wiki.unlockedTitle')}
             title={
               page.locked_by_human
                 ? t('wiki.lockedTitle')
@@ -586,6 +669,35 @@ export function PageViewer({
             >
               {stripFrontmatterAndWikilinks(page.content)}
             </ReactMarkdown>
+
+            {backlinks.length > 0 && (
+              <nav
+                className="mt-10 border-t pt-4"
+                style={{ borderColor: 'var(--border)' }}
+                aria-label={t('wiki.backlinks')}
+              >
+                <p className="mb-2 text-xs font-medium" style={{ color: 'var(--fg-muted)' }}>
+                  {t('wiki.backlinks')}
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {backlinks.map((from) => (
+                    <button
+                      key={from}
+                      type="button"
+                      onClick={() => onWikiLinkClick?.(from)}
+                      className="rounded px-2 py-1 text-xs transition-opacity hover:opacity-70"
+                      style={{
+                        background: 'var(--bg-2)',
+                        border: '1px solid var(--border)',
+                        color: 'var(--color-accent)',
+                      }}
+                    >
+                      {from.replace(/\.md$/, '')}
+                    </button>
+                  ))}
+                </div>
+              </nav>
+            )}
           </article>
         )}
       </div>

@@ -6,9 +6,17 @@ import { getRequestUser } from '@/lib/supabase/request';
 const ProfileSchema = z.object({
   name: z.string().min(1).max(100),
   base_url: z.string().url(),
-  api_key: z.string().min(1),
-  model: z.string().min(1),
-  extra_headers: z.record(z.string()).optional().default({}),
+  api_key: z.string().min(1).max(2000),
+  model: z.string().min(1).max(200),
+  extra_headers: z
+    .record(z.string().max(2000))
+    .optional()
+    .default({})
+    // extra_headers are stored in plaintext; the bearer credential belongs in
+    // api_key (AES-256-GCM encrypted), which the LLM client sends as Authorization
+    .refine((headers) => !Object.keys(headers).some((k) => k.toLowerCase() === 'authorization'), {
+      message: 'Put the Authorization credential in the API key field instead of extra_headers',
+    }),
   is_default: z.boolean().optional().default(false),
 });
 

@@ -32,14 +32,18 @@ export async function POST(request: NextRequest) {
   return runLint(parsed.data.workspace_id, user.id, locale);
 }
 
-/** Called by the weekly cron. Iterates all workspaces. */
+/** Called directly by Vercel Cron (which injects Authorization: Bearer CRON_SECRET). */
 export async function GET(request: NextRequest) {
   const cronSecret = process.env.CRON_SECRET;
   if (!cronSecret) {
     return NextResponse.json({ error: 'Cron not configured' }, { status: 500 });
   }
-  const authHeader = request.headers.get('authorization');
-  if (authHeader !== `Bearer ${cronSecret}`) {
+  const authHeader = request.headers.get('authorization') ?? '';
+  const expected = `Bearer ${cronSecret}`;
+  const authBuf = Buffer.from(authHeader);
+  const expectedBuf = Buffer.from(expected);
+  const { timingSafeEqual } = await import('crypto');
+  if (authBuf.length !== expectedBuf.length || !timingSafeEqual(authBuf, expectedBuf)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
@@ -125,10 +129,16 @@ async function runLint(workspaceId: string, userId: string, locale: string = 'zh
 
   const model = createLLMClient(profile as Parameters<typeof createLLMClient>[0]);
 
+  const today = new Date().toISOString().slice(0, 10);
   await generateText({
     model,
     system: systemPrompt,
-    messages: [{ role: 'user', content: `Wiki index:\n\`\`\`\n${indexContent}\n\`\`\`` }],
+    messages: [
+      {
+        role: 'user',
+        content: `Today is ${today}.\n\nWiki index:\n\`\`\`\n${indexContent}\n\`\`\``,
+      },
+    ],
     tools,
     stopWhen: stepCountIs(20),
   });
@@ -140,5 +150,15 @@ async function runLint(workspaceId: string, userId: string, locale: string = 'zh
     payload: {},
   });
 
-  return NextResponse.json({ ok: true });
+  // Report slug is chosen by the LLM — look it up instead of letting clients guess
+  const { data: lintPage } = await admin
+    .from('pages')
+    .select('slug')
+    .eq('workspace_id', workspaceId)
+    .eq('kind', 'lint')
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  return NextResponse.json({ ok: true, reportSlug: lintPage?.slug ?? null });
 }

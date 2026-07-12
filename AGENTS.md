@@ -105,7 +105,7 @@ NEXT_PUBLIC_SITE_URL=       # 生產 URL，用於 OAuth callback 與 Android WEB
 ENCRYPTION_KEY=             # base64 32 bytes（openssl rand -base64 32）
 GOOGLE_OAUTH_CLIENT_ID=
 GOOGLE_OAUTH_CLIENT_SECRET=
-CRON_SECRET=                # /api/lint/cron 保護
+CRON_SECRET=                # /api/lint GET（Vercel Cron 自動帶 Bearer）驗證用
 ```
 
 ## 進度狀態
@@ -113,6 +113,7 @@ CRON_SECRET=                # /api/lint/cron 保護
 - **Phase 0-10b** ✅：MVP、Android、Graph、i18n、安全性強化、Room cache 隔離
 - **Phase 11** ✅：批次檔案攝取 + 全文搜尋 + AI 完整檔案操控（deletePage / movePage + backlink rewriting）
 - **Production 2026-04-29** ✅：`0004_fulltext_search.sql` 已套用至 Supabase production；臨時 `/api/migrate` route 已移除。
+- **Phase 12** ✅（2026-07-12）：全專案健檢——非同步 ingest（`202 { jobId }` + `GET /api/ingest?job_id=` 輪詢，手機匯入不再逾時、可背景執行）、P0 cron 漏洞（`/api/lint/cron` 已刪除）、SSRF 全面強化、tools 層 lock/zone 硬性防護、movePage 反向連結 regex 修復、Web/Android UX 大修、backlinks 面板、migration `0012` 已套用 production。細節見 CLAUDE.md「非同步 Ingest 協定」與「安全注意事項（Phase 12）」。
 
 ## 關鍵功能
 
@@ -140,7 +141,9 @@ CRON_SECRET=                # /api/lint/cron 保護
 | `searchPages` | `ilike` 搜尋 title + slug |
 | `listPages` | 列出 wiki 頁面，可選 kind 篩選 |
 | `deletePage` | 清理 `page_links`、刪除 Drive file、刪除 DB record |
-| `movePage` | 重命名/移動，自動重寫所有 incoming `[[wikilink]]` |
+| `movePage` | 重命名/移動，自動重寫所有 incoming `[[wikilink]]`（同時匹配帶/不帶 `.md` 的連結） |
+
+**工具層硬性防護（勿移除）**：`writePage`/`deletePage`/`movePage` 拒絕 `notes/`、`_schema/`、`sources/`、`..` slug 與 `locked_by_human` 頁面；`index.md`/`log.md` 不可刪除/移動；slug 自動補 `.md`。
 
 ### Citation 串流協定
 Query API 文字串流結尾附加 `\x00CITATIONS\x00["entities/karpathy.md",...]`，前端 `citation-parser.ts` 解析。
@@ -204,7 +207,8 @@ Query API 文字串流結尾附加 `\x00CITATIONS\x00["entities/karpathy.md",...
 - `lib/supabase/request.ts` 驗證 Android Bearer token 時需用 admin client `auth.getUser(token)`，再回傳 bearer Supabase client 給 RLS 查詢；只用 anon/bearer client 驗證會造成有效 token 被判定 Unauthorized
 - Workspace 管理需 Web / Android 對齊：`PATCH /api/workspaces/[id]` 更新名稱，`DELETE /api/workspaces/[id]` 刪除 workspace；刪除必須先成功 trash Google Drive folder 才能刪 DB，避免狀態不一致
 - Android 端 workspace 刪除只有在 API 回 `{ ok: true }` 後才能清本機 Room / UI 狀態；不可 optimistic remove，否則 production route 漏部署時會出現手機消失但 Web/Drive 仍存在
-- Android 共用 `AndroidHttpClient` 必須設定 Ktor timeout（connect 10s / socket 30s / request 60s），避免 API request 無限 loading；timeout / DNS / connection abort 要轉成本地化網路錯誤
+- Android 共用 `AndroidHttpClient` 必須設定 Ktor timeout（connect 10s / socket 310s / request 320s）；socket timeout 需涵蓋 `/api/lint` 這類完成前零輸出的同步呼叫（伺服器預算 300s）。timeout / DNS / connection abort 要轉成本地化網路錯誤
+- Ingest 走非同步協定：POST 立即回 `{ jobId, status: 'running' }`，Android `pollIngestJob()` 每 3s 輪詢 `GET /api/ingest?job_id=`；App 切頁/背景不影響伺服器端 job
 - Android 切換、新建或刪除後切到下一個 workspace 時，`syncPagesInternal()` 後需自動選中 `index.md`（fallback `log.md`），避免停在「從選單選擇一個頁面」
 - Android 匯入本機文字檔要限制大小（2 MB）並以串流文字讀取，不可直接 `readBytes()` 全讀進記憶體
 - Web 三欄拖曳改用 `requestAnimationFrame` 批次更新寬度，避免拖動卡頓
@@ -232,7 +236,7 @@ Query API 文字串流結尾附加 `\x00CITATIONS\x00["entities/karpathy.md",...
 - Google Drive scope 用 `drive.file`
 - i18n cookie-based（`NEXT_LOCALE`），`zh-TW`（預設）和 `en`
 - GraphView 動態 import `react-force-graph-2d` 避免 SSR 問題
-- Vercel Cron：每週一 03:00 UTC `GET /api/lint/cron`
+- Vercel Cron：每週一 03:00 UTC 直接 `GET /api/lint`（Vercel 自動帶 `Authorization: Bearer CRON_SECRET`；舊 `/api/lint/cron` 無驗證代理已因 P0 漏洞刪除，不可加回）
 - Supabase DB migration 若本機 5432/6543 被擋，可從 Vercel/serverless 走 pooler：`aws-1-ap-southeast-1.pooler.supabase.com:6543`，user 格式 `postgres.<project-ref>`
 
 

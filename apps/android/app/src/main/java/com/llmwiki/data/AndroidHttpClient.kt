@@ -9,8 +9,10 @@ object AndroidHttpClient {
         HttpClient(Android) {
             install(HttpTimeout) {
                 connectTimeoutMillis = 10_000
-                socketTimeoutMillis = 120_000
-                requestTimeoutMillis = 300_000
+                // Lint POST responds with zero bytes until the LLM pass finishes
+                // (server budget 300s) — the read timeout must cover that
+                socketTimeoutMillis = 310_000
+                requestTimeoutMillis = 320_000
             }
         }
     }

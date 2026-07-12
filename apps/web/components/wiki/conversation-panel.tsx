@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Send, Bookmark, Loader2, CheckCircle, ChevronRight, Plus, Bot } from 'lucide-react';
+import { Send, Bookmark, Loader2, CheckCircle, ChevronRight, Plus, Bot, Square } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import { parseCitations } from '@/lib/ai/citation-parser';
 import { isDriveReconnectError, reconnectGoogleDrive } from '@/lib/google/drive-reconnect';
@@ -84,7 +84,9 @@ export function ConversationPanel({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const [savedSlug, setSavedSlug] = useState<string | null>(null);
+  const [fileBackPendingId, setFileBackPendingId] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
@@ -170,6 +172,35 @@ export function ConversationPanel({
     [t],
   );
 
+  // Ingest now runs server-side as a background job; poll until it reaches a
+  // terminal state instead of holding one request open for minutes.
+  const pollIngestJob = useCallback(
+    async (jobId: string): Promise<{ ok: boolean; error?: string; touched?: number }> => {
+      const deadline = Date.now() + 6 * 60 * 1000; // server budget 300s + buffer
+      let consecutiveFailures = 0;
+      while (Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 3000));
+        try {
+          const res = await fetch(`/api/ingest?job_id=${encodeURIComponent(jobId)}`);
+          if (!res.ok) {
+            if (++consecutiveFailures >= 3) return { ok: false, error: t('ingest.failedGeneric') };
+            continue;
+          }
+          consecutiveFailures = 0;
+          const data = (await res.json()) as { status?: string; error?: string; touched_pages?: string[] };
+          if (data.status === 'done') return { ok: true, touched: data.touched_pages?.length ?? 0 };
+          if (data.status === 'failed') {
+            return { ok: false, error: data.error ?? t('ingest.failedGeneric') };
+          }
+        } catch {
+          if (++consecutiveFailures >= 3) return { ok: false, error: t('ingest.failedGeneric') };
+        }
+      }
+      return { ok: false, error: t('ingest.failedGeneric') };
+    },
+    [t],
+  );
+
   const ingestText = useCallback(
     async (title: string, content: string): Promise<{ ok: boolean; error?: string }> => {
       try {
@@ -190,10 +221,11 @@ export function ConversationPanel({
         });
         const raw = await res.text();
         let message = t('ingest.failedGeneric');
+        let parsedBody: { error?: unknown; jobId?: string; status?: string } = {};
         if (raw) {
           try {
-            const data = JSON.parse(raw) as { error?: unknown };
-            message = typeof data.error === 'string' ? data.error : message;
+            parsedBody = JSON.parse(raw) as typeof parsedBody;
+            message = typeof parsedBody.error === 'string' ? parsedBody.error : message;
           } catch {
             message = raw;
           }
@@ -206,12 +238,15 @@ export function ConversationPanel({
           return { ok: false, error: message };
         }
 
+        if (parsedBody.jobId && parsedBody.status !== 'done') {
+          return pollIngestJob(parsedBody.jobId);
+        }
         return { ok: true };
       } catch {
         return { ok: false, error: t('ingest.failedGeneric') };
       }
     },
-    [locale, workspaceId, selectedProfileId, startDriveReconnect, t],
+    [locale, workspaceId, selectedProfileId, startDriveReconnect, pollIngestJob, t],
   );
 
   const handleBatchIngest = useCallback(
@@ -280,6 +315,10 @@ export function ConversationPanel({
       setError(null);
       setSavedSlug(null);
 
+      const controller = new AbortController();
+      abortRef.current = controller;
+      let raw = '';
+
       try {
         const res = await fetch('/api/query', {
           method: 'POST',
@@ -292,6 +331,7 @@ export function ConversationPanel({
             workspace_id: workspaceId,
             profile_id: selectedProfileId,
           }),
+          signal: controller.signal,
         });
 
         if (!res.ok) {
@@ -306,7 +346,6 @@ export function ConversationPanel({
 
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
-        let raw = '';
 
         while (true) {
           const { done, value } = await reader.read();
@@ -332,14 +371,31 @@ export function ConversationPanel({
           ),
         );
       } catch (err) {
-        setError(err instanceof Error ? err : new Error('Unknown error'));
-        setMessages((prev) => prev.filter((m) => m.id !== assistantId));
+        if (err instanceof Error && err.name === 'AbortError') {
+          // User pressed Stop — keep the partial answer instead of discarding it
+          if (raw) {
+            const { text, citedSlugs } = parseCitations(raw);
+            setMessages((prev) =>
+              prev.map((m) => (m.id === assistantId ? { ...m, content: text, citedSlugs } : m)),
+            );
+          } else {
+            setMessages((prev) => prev.filter((m) => m.id !== assistantId));
+          }
+        } else {
+          setError(err instanceof Error ? err : new Error('Unknown error'));
+          setMessages((prev) => prev.filter((m) => m.id !== assistantId));
+        }
       } finally {
+        abortRef.current = null;
         setIsLoading(false);
       }
     },
     [input, isLoading, locale, messages, workspaceId, selectedProfileId, startDriveReconnect],
   );
+
+  const stopStreaming = useCallback(() => {
+    abortRef.current?.abort();
+  }, []);
 
   const handleIngest = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -370,6 +426,20 @@ export function ConversationPanel({
         if (res.status === 403 && isDriveReconnectError(message)) {
           await startDriveReconnect();
         }
+      } else if (data.jobId && data.status !== 'done') {
+        // Job accepted — clear the input right away, then poll to completion
+        setIngestInput('');
+        const result = await pollIngestJob(data.jobId);
+        if (result.ok) {
+          setIngestResult(
+            result.touched
+              ? t('ingest.touchedPages', { count: result.touched })
+              : t('ingest.doneStatus', { status: 'done' }),
+          );
+          onSourceAdded?.();
+        } else {
+          setIngestError(result.error ?? t('ingest.failedGeneric'));
+        }
       } else {
         setIngestResult(t('ingest.doneStatus', { status: data.status }));
         setIngestInput('');
@@ -384,29 +454,39 @@ export function ConversationPanel({
 
   const handleFileBack = useCallback(
     async (message: Message) => {
-      if (!message.citedSlugs) return;
+      if (!message.citedSlugs || fileBackPendingId) return;
       const lastUser = [...messages]
         .reverse()
         .find((m) => m.role === 'user' && messages.indexOf(m) < messages.indexOf(message));
       const question = lastUser?.content ?? 'Query';
 
-      const res = await fetch(`/api/workspaces/${workspaceId}/synthesis`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          question,
-          answer: message.content,
-          cited_slugs: message.citedSlugs,
-        }),
-      });
+      setFileBackPendingId(message.id);
+      setError(null);
+      try {
+        const res = await fetch(`/api/workspaces/${workspaceId}/synthesis`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            question,
+            answer: message.content,
+            cited_slugs: message.citedSlugs,
+          }),
+        });
 
-      if (res.ok) {
-        const { slug } = await res.json();
-        setSavedSlug(slug);
-        onPageWritten?.(slug);
+        const data = await res.json().catch(() => null) as { slug?: string; error?: unknown } | null;
+        if (!res.ok || !data?.slug) {
+          const errMessage = typeof data?.error === 'string' ? data.error : t('query.fileBackFailed');
+          throw new Error(errMessage);
+        }
+        setSavedSlug(data.slug);
+        onPageWritten?.(data.slug);
+      } catch (err) {
+        setError(err instanceof Error ? err : new Error(t('query.fileBackFailed')));
+      } finally {
+        setFileBackPendingId(null);
       }
     },
-    [messages, workspaceId, onPageWritten],
+    [messages, workspaceId, onPageWritten, fileBackPendingId, t],
   );
 
   return (
@@ -622,10 +702,16 @@ export function ConversationPanel({
             {m.role === 'assistant' && m.citedSlugs !== undefined && m.content.length > 0 && (
               <button
                 onClick={() => handleFileBack(m)}
-                className="flex items-center gap-1 text-xs transition-opacity hover:opacity-70"
+                disabled={fileBackPendingId !== null}
+                className="flex items-center gap-1 text-xs transition-opacity hover:opacity-70 disabled:opacity-40"
                 style={{ color: 'var(--fg-muted)' }}
               >
-                <Bookmark size={11} /> {t('query.fileBack')}
+                {fileBackPendingId === m.id ? (
+                  <Loader2 size={11} className="animate-spin" />
+                ) : (
+                  <Bookmark size={11} />
+                )}{' '}
+                {t('query.fileBack')}
               </button>
             )}
           </div>
@@ -725,16 +811,29 @@ export function ConversationPanel({
               borderColor: 'var(--border)',
               color: 'var(--fg)',
             }}
-            disabled={isLoading || driveReconnectPending}
+            disabled={driveReconnectPending}
           />
-          <button
-            type="submit"
-            disabled={isLoading || driveReconnectPending || !input.trim()}
-            className="rounded-md p-2 disabled:opacity-50"
-            style={{ background: 'var(--color-accent)', color: 'oklch(10% 0.015 250)' }}
-          >
-            <Send size={14} />
-          </button>
+          {isLoading ? (
+            <button
+              type="button"
+              onClick={stopStreaming}
+              className="rounded-md p-2"
+              style={{ background: 'var(--bg-2)', color: 'var(--fg)', border: '1px solid var(--border)' }}
+              aria-label={t('query.stop')}
+              title={t('query.stop')}
+            >
+              <Square size={14} />
+            </button>
+          ) : (
+            <button
+              type="submit"
+              disabled={driveReconnectPending || !input.trim()}
+              className="rounded-md p-2 disabled:opacity-50"
+              style={{ background: 'var(--color-accent)', color: 'oklch(10% 0.015 250)' }}
+            >
+              <Send size={14} />
+            </button>
+          )}
         </div>
       </form>
     </div>

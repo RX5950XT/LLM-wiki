@@ -29,3 +29,16 @@ val ErrorContainerDark = Color(0xFF5F1B16)
 val ErrorContainerLight = Color(0xFFFFDAD6)
 val ErrorOnContainerDark = Color(0xFFFFDAD6)
 val ErrorOnContainerLight = Color(0xFF410002)
+
+// surfaceContainer tones derived from Bg/Bg2 — without these, AlertDialog /
+// DropdownMenu / ModalBottomSheet fall back to baseline purple-tinted M3 neutrals
+val SurfaceContainerLowestDark = Color(0xFF0B0F14)
+val SurfaceContainerLowDark = Color(0xFF11171E)
+val SurfaceContainerDark = Color(0xFF161E26)
+val SurfaceContainerHighDark = Color(0xFF1B242E)
+val SurfaceContainerHighestDark = Color(0xFF212B36)
+val SurfaceContainerLowestLight = Color(0xFFFFFFFF)
+val SurfaceContainerLowLight = Color(0xFFF7F5F2)
+val SurfaceContainerLight = Color(0xFFF3F1EE)
+val SurfaceContainerHighLight = Color(0xFFEDEAE6)
+val SurfaceContainerHighestLight = Color(0xFFE7E4DF)

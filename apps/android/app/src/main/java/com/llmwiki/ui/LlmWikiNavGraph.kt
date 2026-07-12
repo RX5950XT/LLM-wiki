@@ -85,11 +85,17 @@ fun LlmWikiNavGraph(
                 initialPageSlug = backStackEntry.arguments?.getString("page"),
                 accountName = accountName,
                 shareUrl = shareUrlEvent?.value,
+                shareUrlToken = shareUrlEvent?.token,
                 authReturnUri = authReturnEvent?.value,
+                authReturnToken = authReturnEvent?.token,
                 onNavigateToSettings = { currentWorkspaceId ->
-                    navController.navigate("settings?workspaceId=${currentWorkspaceId.orEmpty()}")
+                    navController.navigate("settings?workspaceId=${currentWorkspaceId.orEmpty()}") {
+                        launchSingleTop = true
+                    }
                 },
-                onNavigateToCreateWorkspace = { navController.navigate("workspace-create") },
+                onNavigateToCreateWorkspace = {
+                    navController.navigate("workspace-create") { launchSingleTop = true }
+                },
                 onSignedOut = {
                     navController.navigate("auth") {
                         popUpTo(0) { inclusive = true }
@@ -146,7 +152,7 @@ private fun LaunchRoute(
             return@LaunchedEffect
         }
 
-        val workspaceId = runCatching {
+        val workspaceResult = runCatching {
             supabase.requireAccessToken(forceRefresh = false)
                 ?: supabase.requireAccessToken(forceRefresh = true)
             supabase.from("workspaces")
@@ -162,13 +168,14 @@ private fun LaunchRoute(
                 .decodeList<WorkspaceRow>()
                 .firstOrNull()
                 ?.id
-        }.getOrNull()
-
-        val route = if (workspaceId != null) {
-            "wiki?workspaceId=$workspaceId"
-        } else {
-            "workspace-create"
         }
+
+        // A network failure must NOT look like "no workspaces": route to the wiki so
+        // the Room offline cache is shown; reserve workspace-create for a real empty list.
+        val route = workspaceResult.fold(
+            onSuccess = { id -> if (id != null) "wiki?workspaceId=$id" else "workspace-create" },
+            onFailure = { "wiki" },
+        )
         onResolved(LaunchDestination(route = route, accountName = email))
     }
 

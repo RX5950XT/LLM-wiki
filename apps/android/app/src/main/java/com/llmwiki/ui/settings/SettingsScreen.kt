@@ -21,6 +21,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Refresh
@@ -31,6 +32,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -536,12 +538,7 @@ private fun ThemeOptionButton(
     selected: Boolean,
     onClick: () -> Unit,
 ) {
-    OutlinedButton(onClick = onClick) {
-        Text(
-            text = label,
-            color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
+    SelectableOptionChip(label = label, selected = selected, onClick = onClick)
 }
 
 @Composable
@@ -550,12 +547,31 @@ private fun LanguageOptionButton(
     selected: Boolean,
     onClick: () -> Unit,
 ) {
-    OutlinedButton(onClick = onClick) {
-        Text(
-            text = label,
-            color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
+    SelectableOptionChip(label = label, selected = selected, onClick = onClick)
+}
+
+// FilterChip carries selected semantics (TalkBack) plus a checkmark + container
+// fill — color-only selection cues fail color-blind users
+@Composable
+private fun SelectableOptionChip(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        label = { Text(label) },
+        leadingIcon = if (selected) {
+            {
+                Icon(
+                    Icons.Default.Check,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                )
+            }
+        } else null,
+    )
 }
 
 @OptIn(ExperimentalLayoutApi::class)

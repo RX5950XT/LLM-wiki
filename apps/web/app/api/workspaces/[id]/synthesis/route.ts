@@ -14,8 +14,9 @@ import {
 
 const SynthesisSchema = z.object({
   question: z.string().min(1).max(500),
-  answer: z.string().min(1),
-  cited_slugs: z.array(z.string()).optional(),
+  answer: z.string().min(1).max(2 * 1024 * 1024),
+  // Slug charset only — these get interpolated into YAML frontmatter and [[wikilinks]]
+  cited_slugs: z.array(z.string().max(200).regex(/^[\w/.-]+$/)).max(50).optional(),
 });
 
 function toSlug(text: string): string {
@@ -48,6 +49,7 @@ export async function POST(
     .from('workspaces')
     .select('id, drive_folder_id')
     .eq('id', workspaceId)
+    .eq('owner_id', user.id)
     .single();
   if (!workspace) return NextResponse.json({ error: 'Workspace not found' }, { status: 404 });
 

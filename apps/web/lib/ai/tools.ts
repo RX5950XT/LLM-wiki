@@ -14,7 +14,33 @@ interface ToolContext {
   onPageRead?: (slug: string) => void;
 }
 
+/** Slugs the LLM must never delete or move — the wiki would break without them. */
+const PROTECTED_SLUGS = new Set(['index.md', 'log.md']);
+
+/**
+ * LLM tools may only touch the wiki zone. notes/ is user-owned (LLM read-only
+ * conceptually, but these tools must not write it), _schema/ holds user rules.
+ * Returns an error string, or null if the slug is acceptable.
+ */
+function guardWikiSlug(slug: string): string | null {
+  const s = slug.trim();
+  if (!s || s.startsWith('/') || s.includes('..') || s.includes('\\')) {
+    return `Invalid slug: ${slug}`;
+  }
+  if (s.startsWith('notes/') || s.startsWith('_schema/') || s.startsWith('sources/')) {
+    return `Slug "${slug}" is outside the wiki zone. LLM tools may only modify wiki pages.`;
+  }
+  return null;
+}
+
+function normalizeSlug(slug: string): string {
+  const s = slug.trim();
+  return s.endsWith('.md') ? s : `${s}.md`;
+}
+
 export function buildWikiTools(ctx: ToolContext) {
+  // Drive folder lookups repeat for every nested write in one pipeline run — memoize
+  const folderCache = new Map<string, string>();
   return {
     readPage: tool({
       description: 'Read a wiki page by its slug (e.g. "index.md", "entities/karpathy.md")',
@@ -44,7 +70,7 @@ export function buildWikiTools(ctx: ToolContext) {
         title: z.string().optional(),
       }),
       execute: async ({
-        slug,
+        slug: rawSlug,
         content_md,
         kind,
         title,
@@ -54,15 +80,25 @@ export function buildWikiTools(ctx: ToolContext) {
         kind: 'entity' | 'concept' | 'summary' | 'synthesis' | 'index' | 'log' | 'lint';
         title?: string;
       }) => {
+        const guardError = guardWikiSlug(rawSlug);
+        if (guardError) return { error: guardError };
+        const slug = normalizeSlug(rawSlug);
+
         const { data: existing } = await ctx.supabase
           .from('pages')
-          .select('id, drive_file_id, version, title')
+          .select('id, drive_file_id, version, title, locked_by_human')
           .eq('workspace_id', ctx.workspaceId)
           .eq('slug', slug)
           .maybeSingle();
 
+        if (existing?.locked_by_human) {
+          return {
+            error: `Page "${slug}" is locked by the user and must not be modified. Note the needed change in log.md instead.`,
+          };
+        }
+
         const fileName = slug.split('/').at(-1) ?? slug;
-        const parentFolderId = await resolveParentFolder(ctx, slug);
+        const parentFolderId = await resolveParentFolder(ctx, slug, folderCache);
 
         const fileId = await writeDriveFile(ctx.drive, content_md, {
           fileId: existing?.drive_file_id,
@@ -130,12 +166,15 @@ export function buildWikiTools(ctx: ToolContext) {
 
         if (!error) return { pages: (pages ?? []).slice(0, limit) };
 
+        // Strip characters with meaning in PostgREST or-filter / like patterns
+        const safeQuery = query.replace(/[,()|%\\]/g, ' ').trim();
+        if (!safeQuery) return { pages: [] };
         const { data: fallbackPages } = await ctx.supabase
           .from('pages')
           .select('slug, title, kind, updated_at')
           .eq('workspace_id', ctx.workspaceId)
           .eq('zone', 'wiki')
-          .or(`slug.ilike.%${query}%,title.ilike.%${query}%`)
+          .or(`slug.ilike.%${safeQuery}%,title.ilike.%${safeQuery}%`)
           .order('updated_at', { ascending: false })
           .limit(limit);
         return { pages: fallbackPages ?? [] };
@@ -165,14 +204,24 @@ export function buildWikiTools(ctx: ToolContext) {
       inputSchema: z.object({
         slug: z.string().describe('Page slug to delete'),
       }),
-      execute: async ({ slug }: { slug: string }) => {
+      execute: async ({ slug: rawSlug }: { slug: string }) => {
+        const guardError = guardWikiSlug(rawSlug);
+        if (guardError) return { error: guardError };
+        const slug = normalizeSlug(rawSlug);
+        if (PROTECTED_SLUGS.has(slug)) {
+          return { error: `Page "${slug}" is a core wiki page and cannot be deleted.` };
+        }
+
         const { data: page } = await ctx.supabase
           .from('pages')
-          .select('id, drive_file_id')
+          .select('id, drive_file_id, locked_by_human')
           .eq('workspace_id', ctx.workspaceId)
           .eq('slug', slug)
           .single();
         if (!page) return { error: `Page not found: ${slug}` };
+        if (page.locked_by_human) {
+          return { error: `Page "${slug}" is locked by the user and cannot be deleted.` };
+        }
 
         const { error: outgoingLinksError } = await ctx.supabase
           .from('page_links')
@@ -208,14 +257,25 @@ export function buildWikiTools(ctx: ToolContext) {
         oldSlug: z.string().describe('Current slug'),
         newSlug: z.string().describe('Target slug'),
       }),
-      execute: async ({ oldSlug, newSlug }: { oldSlug: string; newSlug: string }) => {
+      execute: async ({ oldSlug: rawOldSlug, newSlug: rawNewSlug }: { oldSlug: string; newSlug: string }) => {
+        const guardError = guardWikiSlug(rawOldSlug) ?? guardWikiSlug(rawNewSlug);
+        if (guardError) return { error: guardError };
+        const oldSlug = normalizeSlug(rawOldSlug);
+        const newSlug = normalizeSlug(rawNewSlug);
+        if (PROTECTED_SLUGS.has(oldSlug)) {
+          return { error: `Page "${oldSlug}" is a core wiki page and cannot be moved.` };
+        }
+
         const { data: page } = await ctx.supabase
           .from('pages')
-          .select('id, drive_file_id, content_hash, title, kind, version, updated_by')
+          .select('id, drive_file_id, content_hash, title, kind, version, updated_by, locked_by_human')
           .eq('workspace_id', ctx.workspaceId)
           .eq('slug', oldSlug)
           .single();
         if (!page) return { error: `Page not found: ${oldSlug}` };
+        if (page.locked_by_human) {
+          return { error: `Page "${oldSlug}" is locked by the user and cannot be moved.` };
+        }
 
         const { data: target } = await ctx.supabase
           .from('pages')
@@ -241,15 +301,23 @@ export function buildWikiTools(ctx: ToolContext) {
             .single();
           if (fromPage) {
             const content = await readDriveFile(ctx.drive, fromPage.drive_file_id);
-            const updated = content.replace(
-              new RegExp(`\\[\\[${escapeRegExp(oldSlug)}([^\\]]*)\\]\\]`, 'g'),
-              `[[${newSlug}$1]]`,
+            // Wikilinks are usually written WITHOUT .md ([[entities/foo]]) but
+            // page_links stores them normalized with .md — match both forms,
+            // preserving any |display or #anchor suffix.
+            const oldBase = oldSlug.replace(/\.md$/, '');
+            const newBase = newSlug.replace(/\.md$/, '');
+            const linkPattern = new RegExp(
+              `\\[\\[${escapeRegExp(oldBase)}(?:\\.md)?([|#][^\\]]*)?\\]\\]`,
+              'g',
+            );
+            const updated = content.replace(linkPattern, (_m, rest: string | undefined) =>
+              `[[${newBase}${rest ?? ''}]]`,
             );
             if (updated !== content) {
               await writeDriveFile(ctx.drive, updated, {
                 fileId: fromPage.drive_file_id,
                 name: link.from_slug.split('/').at(-1) ?? link.from_slug,
-                parentId: await resolveParentFolder(ctx, link.from_slug),
+                parentId: await resolveParentFolder(ctx, link.from_slug, folderCache),
               });
               await updatePageRecord(ctx, fromPage.id, {
                 content_hash: await hashContent(updated),
@@ -262,7 +330,7 @@ export function buildWikiTools(ctx: ToolContext) {
         }
 
         const fileName = newSlug.split('/').at(-1) ?? newSlug;
-        const newParentId = await resolveParentFolder(ctx, newSlug);
+        const newParentId = await resolveParentFolder(ctx, newSlug, folderCache);
         const file = await ctx.drive.files.get({ fileId: page.drive_file_id, fields: 'parents' });
         const currentParents = file.data.parents ?? [];
         await ctx.drive.files.update({
@@ -300,13 +368,25 @@ export function buildWikiTools(ctx: ToolContext) {
   };
 }
 
-async function resolveParentFolder(ctx: ToolContext, slug: string): Promise<string> {
+async function resolveParentFolder(
+  ctx: ToolContext,
+  slug: string,
+  cache?: Map<string, string>,
+): Promise<string> {
   const parts = slug.split('/');
   if (parts.length === 1) return ctx.wikiFolderId;
 
   let parentId = ctx.wikiFolderId;
+  let path = '';
   for (const part of parts.slice(0, -1)) {
+    path = path ? `${path}/${part}` : part;
+    const cached = cache?.get(path);
+    if (cached) {
+      parentId = cached;
+      continue;
+    }
     parentId = await ensureFolder(ctx.drive, part, parentId);
+    cache?.set(path, parentId);
   }
   return parentId;
 }

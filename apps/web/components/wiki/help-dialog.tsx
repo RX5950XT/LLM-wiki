@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect } from 'react';
 import { HelpCircle, X } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 
@@ -10,6 +11,16 @@ interface HelpDialogProps {
 
 export function HelpDialog({ open, onClose }: HelpDialogProps) {
   const t = useTranslations('help');
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
+
   if (!open) return null;
 
   const sections = [

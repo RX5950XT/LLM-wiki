@@ -142,4 +142,20 @@
     <string name="error_drive_empty_response">Google Drive 回傳了無效的空內容。</string>
     <string name="error_api_invalid_response">後端回傳了無效的頁面內容。</string>
     <string name="error_internal_server">伺服器載入頁面失敗。</string>
+    <string name="error_op_rename_workspace">重新命名工作區失敗</string>
+    <string name="error_op_delete_workspace">刪除工作區失敗</string>
+    <string name="error_op_reorder_workspace">調整工作區順序失敗</string>
+    <string name="error_op_load_workspaces">載入工作區失敗</string>
+    <string name="error_op_create_note">建立筆記失敗</string>
+    <string name="error_op_rename_note">重新命名筆記失敗</string>
+    <string name="error_op_delete_note">刪除筆記失敗</string>
+    <string name="error_op_save_page">儲存頁面失敗</string>
+    <string name="error_op_load_page">載入頁面失敗</string>
+    <string name="error_op_search">搜尋失敗</string>
+    <string name="error_op_query">查詢失敗</string>
+    <string name="error_op_ingest">匯入失敗</string>
+    <string name="error_op_lint">健康檢查失敗</string>
+    <string name="error_op_sync">同步失敗</string>
+    <string name="error_op_lock">更新頁面鎖定失敗</string>
+    <string name="error_op_synthesis">儲存整合頁失敗</string>
 </resources>

@@ -92,6 +92,7 @@ data class WikiUiState(
     val workspaceActionLoading: Boolean = false,
     val ingestLoading: Boolean = false,
     val pageSaveLoading: Boolean = false,
+    val syncLoading: Boolean = false,
 )
 
 private val apiJson = Json { ignoreUnknownKeys = true }
@@ -188,7 +189,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                     _uiState.update {
                         it.copy(
                             workspaceActionLoading = false,
-                            syncError = parseApiError(text, "Failed to rename workspace"),
+                            syncError = parseApiError(text, str(R.string.error_op_rename_workspace)),
                         )
                     }
                     return@launch
@@ -197,7 +198,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                     _uiState.update {
                         it.copy(
                             workspaceActionLoading = false,
-                            syncError = nonJsonApiMessage("Failed to rename workspace"),
+                            syncError = nonJsonApiMessage(str(R.string.error_op_rename_workspace)),
                         )
                     }
                     return@launch
@@ -217,7 +218,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                 _uiState.update {
                     it.copy(
                         workspaceActionLoading = false,
-                        syncError = e.toUserFacingMessage("Failed to rename workspace"),
+                        syncError = e.toUserFacingMessage(str(R.string.error_op_rename_workspace)),
                     )
                 }
             }
@@ -241,7 +242,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                     _uiState.update {
                         it.copy(
                             workspaceActionLoading = false,
-                            syncError = parseApiError(text, "Failed to delete workspace"),
+                            syncError = parseApiError(text, str(R.string.error_op_delete_workspace)),
                         )
                     }
                     return@launch
@@ -255,7 +256,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                     _uiState.update {
                         it.copy(
                             workspaceActionLoading = false,
-                            syncError = nonJsonApiMessage("Failed to delete workspace"),
+                            syncError = nonJsonApiMessage(str(R.string.error_op_delete_workspace)),
                         )
                     }
                     return@launch
@@ -286,7 +287,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                 _uiState.update {
                     it.copy(
                         workspaceActionLoading = false,
-                        syncError = e.toUserFacingMessage("Failed to delete workspace"),
+                        syncError = e.toUserFacingMessage(str(R.string.error_op_delete_workspace)),
                     )
                 }
             }
@@ -364,7 +365,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                     _uiState.update {
                         it.copy(
                             pageSaveLoading = false,
-                            syncError = parseApiError(text, "Failed to create note"),
+                            syncError = parseApiError(text, str(R.string.error_op_create_note)),
                         )
                     }
                     onDone(false)
@@ -375,7 +376,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                     _uiState.update {
                         it.copy(
                             pageSaveLoading = false,
-                            syncError = nonJsonApiMessage("Failed to create note"),
+                            syncError = nonJsonApiMessage(str(R.string.error_op_create_note)),
                         )
                     }
                     onDone(false)
@@ -393,7 +394,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                 _uiState.update {
                     it.copy(
                         pageSaveLoading = false,
-                        syncError = e.toUserFacingMessage("Failed to create note"),
+                        syncError = e.toUserFacingMessage(str(R.string.error_op_create_note)),
                     )
                 }
                 onDone(false)
@@ -426,7 +427,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 val text = response.bodyAsText()
                 if (response.status.value !in 200..299) {
-                    _uiState.update { it.copy(pageSaveLoading = false, syncError = parseApiError(text, "Failed to rename note")) }
+                    _uiState.update { it.copy(pageSaveLoading = false, syncError = parseApiError(text, str(R.string.error_op_rename_note))) }
                     onDone(false)
                     return@launch
                 }
@@ -440,7 +441,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                 onDone(true)
             } catch (e: Exception) {
                 _uiState.update {
-                    it.copy(pageSaveLoading = false, syncError = e.toUserFacingMessage("Failed to rename note"))
+                    it.copy(pageSaveLoading = false, syncError = e.toUserFacingMessage(str(R.string.error_op_rename_note)))
                 }
                 onDone(false)
             }
@@ -468,7 +469,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 val text = response.bodyAsText()
                 if (response.status.value !in 200..299) {
-                    _uiState.update { it.copy(pageSaveLoading = false, syncError = parseApiError(text, "Failed to delete note")) }
+                    _uiState.update { it.copy(pageSaveLoading = false, syncError = parseApiError(text, str(R.string.error_op_delete_note))) }
                     onDone(false)
                     return@launch
                 }
@@ -483,7 +484,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                 onDone(true)
             } catch (e: Exception) {
                 _uiState.update {
-                    it.copy(pageSaveLoading = false, syncError = e.toUserFacingMessage("Failed to delete note"))
+                    it.copy(pageSaveLoading = false, syncError = e.toUserFacingMessage(str(R.string.error_op_delete_note)))
                 }
                 onDone(false)
             }
@@ -504,7 +505,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
             if (page != null) {
                 selectPage(page)
             } else {
-                _uiState.update { it.copy(syncError = "Page not found: $slug") }
+                _uiState.update { it.copy(syncError = str(R.string.error_page_not_found)) }
             }
         }
     }
@@ -550,7 +551,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
             } catch (e: Exception) {
-                _uiState.update { it.copy(contentLoading = false, syncError = e.toUserFacingMessage("Failed to load page")) }
+                _uiState.update { it.copy(contentLoading = false, syncError = e.toUserFacingMessage(str(R.string.error_op_load_page))) }
             }
         }
     }
@@ -590,7 +591,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                             state.copy(activePage = state.activePage.copy(lockedByHuman = currentLocked))
                         } else state
                         if (response != null) {
-                            rolled.copy(syncError = parseApiError(response.bodyAsText(), "Failed to update page lock"))
+                            rolled.copy(syncError = parseApiError(response.bodyAsText(), str(R.string.error_op_lock)))
                         } else {
                             rolled
                         }
@@ -603,7 +604,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                     val rolled = if (state.activePage?.slug == slug) {
                         state.copy(activePage = state.activePage.copy(lockedByHuman = currentLocked))
                     } else state
-                    rolled.copy(syncError = e.toUserFacingMessage("Failed to update page lock"))
+                    rolled.copy(syncError = e.toUserFacingMessage(str(R.string.error_op_lock)))
                 }
             }
         }
@@ -642,7 +643,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                     it.copy(
                         searchResults = emptyList(),
                         searchLoading = false,
-                        syncError = parseApiError(text, "Search failed"),
+                        syncError = parseApiError(text, str(R.string.error_op_search)),
                     )
                 }
                 return
@@ -657,7 +658,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                 )
             }
         } catch (e: Exception) {
-            _uiState.update { it.copy(searchLoading = false, syncError = e.toUserFacingMessage("Search failed")) }
+            _uiState.update { it.copy(searchLoading = false, syncError = e.toUserFacingMessage(str(R.string.error_op_search))) }
         }
     }
 
@@ -753,7 +754,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                 }
 
                 if (response.status.value !in 200..299) {
-                    val message = parseApiError(response.bodyAsText(), "Query failed")
+                    val message = parseApiError(response.bodyAsText(), str(R.string.error_op_query))
                     if (response.status.value == 403 && isDriveReconnectError(message)) {
                         requestDriveReconnect("query", message)
                     } else {
@@ -801,7 +802,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                     state.copy(
                         chatMessages = state.chatMessages.dropLast(1),
                         chatLoading = false,
-                        syncError = e.toUserFacingMessage("Query failed"),
+                        syncError = e.toUserFacingMessage(str(R.string.error_op_query)),
                     )
                 }
             }
@@ -827,7 +828,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                 val text = response.bodyAsText()
 
                 if (response.status.value !in 200..299) {
-                    val message = parseApiError(text, "Failed to save synthesis")
+                    val message = parseApiError(text, str(R.string.error_op_synthesis))
                     if (response.status.value == 403 && isDriveReconnectError(message)) {
                         requestDriveReconnect("synthesis", message)
                     } else {
@@ -841,7 +842,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                     _uiState.update { it.copy(synthesisSavedSlug = slug, syncError = null) }
                 }
             } catch (e: Exception) {
-                _uiState.update { it.copy(syncError = e.toUserFacingMessage("Failed to save synthesis")) }
+                _uiState.update { it.copy(syncError = e.toUserFacingMessage(str(R.string.error_op_synthesis))) }
             }
         }
     }
@@ -876,7 +877,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                     _uiState.update {
                         it.copy(
                             pageSaveLoading = false,
-                            syncError = parseApiError(text, "Failed to save page"),
+                            syncError = parseApiError(text, str(R.string.error_op_save_page)),
                         )
                     }
                     onDone(false)
@@ -899,7 +900,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                 _uiState.update {
                     it.copy(
                         pageSaveLoading = false,
-                        syncError = e.toUserFacingMessage("Failed to save page"),
+                        syncError = e.toUserFacingMessage(str(R.string.error_op_save_page)),
                     )
                 }
                 onDone(false)
@@ -928,7 +929,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 val text = response.bodyAsText()
                 if (response.status.value !in 200..299) {
-                    _uiState.update { it.copy(syncError = parseApiError(text, "Lint failed")) }
+                    _uiState.update { it.copy(syncError = parseApiError(text, str(R.string.error_op_lint))) }
                     onDone(false)
                     return@launch
                 }
@@ -936,7 +937,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                 syncPages()
                 onDone(true)
             } catch (e: Exception) {
-                _uiState.update { it.copy(syncError = e.toUserFacingMessage("Lint failed")) }
+                _uiState.update { it.copy(syncError = e.toUserFacingMessage(str(R.string.error_op_lint))) }
                 onDone(false)
             }
         }
@@ -984,7 +985,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                 val text = response.bodyAsText()
                 handleIngestResult(wsId, response.status.value, text, onDone)
             } catch (e: Exception) {
-                _uiState.update { it.copy(syncError = e.toUserFacingMessage("Ingest failed")) }
+                _uiState.update { it.copy(syncError = e.toUserFacingMessage(str(R.string.error_op_ingest))) }
                 onDone(false)
             } finally {
                 _uiState.update { it.copy(ingestLoading = false) }
@@ -1015,7 +1016,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                 val text = response.bodyAsText()
                 handleIngestResult(wsId, response.status.value, text, onDone)
             } catch (e: Exception) {
-                _uiState.update { it.copy(syncError = e.toUserFacingMessage("Ingest failed")) }
+                _uiState.update { it.copy(syncError = e.toUserFacingMessage(str(R.string.error_op_ingest))) }
                 onDone(false)
             } finally {
                 _uiState.update { it.copy(ingestLoading = false) }
@@ -1029,22 +1030,72 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
         raw: String,
         onDone: (Boolean) -> Unit,
     ) {
-        if (statusCode in 200..299) {
-            _uiState.update { it.copy(syncError = null) }
-            // Force full sync and content reload so the UI reflects ingest results immediately
-            syncPagesInternal(wsId, forceSync = true)
-            selectDefaultPageIfNeeded(wsId)
-            onDone(true)
+        if (statusCode !in 200..299) {
+            val message = parseApiError(raw, str(R.string.error_op_ingest))
+            if (statusCode == 403 && isDriveReconnectError(message)) {
+                requestDriveReconnect("ingest", message)
+            } else {
+                _uiState.update { it.copy(syncError = message) }
+            }
+            onDone(false)
             return
         }
 
-        val message = parseApiError(raw, "Ingest failed")
-        if (statusCode == 403 && isDriveReconnectError(message)) {
-            requestDriveReconnect("ingest", message)
-        } else {
-            _uiState.update { it.copy(syncError = message) }
+        // Async ingest protocol: server responds { jobId, status: "running" } right away
+        // and runs the LLM pipeline in the background. Poll until the job is terminal —
+        // the request no longer blocks for minutes, so backgrounding the app is safe.
+        val bodyJson = if (isJsonObject(raw)) {
+            runCatching { apiJson.parseToJsonElement(raw).jsonObject }.getOrNull()
+        } else null
+        val jobId = bodyJson?.get("jobId")?.jsonPrimitive?.contentOrNull
+        val initialStatus = bodyJson?.get("status")?.jsonPrimitive?.contentOrNull
+
+        if (jobId != null && initialStatus != "done") {
+            val error = pollIngestJob(jobId)
+            if (error != null) {
+                _uiState.update { it.copy(syncError = error) }
+                onDone(false)
+                return
+            }
         }
-        onDone(false)
+
+        _uiState.update { it.copy(syncError = null) }
+        // Force full sync and content reload so the UI reflects ingest results immediately
+        syncPagesInternal(wsId, forceSync = true)
+        selectDefaultPageIfNeeded(wsId)
+        onDone(true)
+    }
+
+    /** Polls the ingest job until done/failed. Returns null on success, error message otherwise. */
+    private suspend fun pollIngestJob(jobId: String): String? {
+        val deadline = System.currentTimeMillis() + 6 * 60 * 1000L // server budget 300s + buffer
+        var consecutiveFailures = 0
+        while (System.currentTimeMillis() < deadline) {
+            delay(3_000)
+            try {
+                val response = sendAuthorizedRequest { accessToken ->
+                    AndroidHttpClient.instance.get(webApiUrl("/api/ingest?job_id=$jobId")) {
+                        header("Authorization", "Bearer $accessToken")
+                    }
+                } ?: return unauthorizedMessage()
+                val text = response.bodyAsText()
+                if (response.status.value !in 200..299) {
+                    if (++consecutiveFailures >= 5) return parseApiError(text, str(R.string.error_op_ingest))
+                    continue
+                }
+                consecutiveFailures = 0
+                if (!isJsonObject(text)) continue
+                val obj = apiJson.parseToJsonElement(text).jsonObject
+                when (obj["status"]?.jsonPrimitive?.contentOrNull) {
+                    "done" -> return null
+                    "failed" -> return obj["error"]?.jsonPrimitive?.contentOrNull
+                        ?.takeIf { it.isNotBlank() } ?: str(R.string.error_op_ingest)
+                }
+            } catch (e: Exception) {
+                if (++consecutiveFailures >= 5) return e.toUserFacingMessage(str(R.string.error_op_ingest))
+            }
+        }
+        return getApplication<Application>().getString(R.string.error_network_timeout)
     }
 
     private fun refreshWorkspaces(
@@ -1088,12 +1139,17 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                     SyncWorker.schedule(getApplication(), accountName, targetId)
                 }
             } catch (e: Exception) {
-                _uiState.update { it.copy(syncError = e.toUserFacingMessage("Failed to load workspaces")) }
+                _uiState.update { it.copy(syncError = e.toUserFacingMessage(str(R.string.error_op_load_workspaces))) }
             }
         }
     }
 
+    fun clearSyncError() {
+        _uiState.update { it.copy(syncError = null) }
+    }
+
     private suspend fun syncPagesInternal(wsId: String, forceSync: Boolean = false) {
+        _uiState.update { it.copy(syncLoading = true) }
         try {
             val repo = PageRepository(db, driveClient)
             repo.syncPages(wsId, accountName, currentUiLocale(), forceSync)
@@ -1126,9 +1182,13 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                 _uiState.update { it.copy(syncError = null) }
             }
         } catch (e: Exception) {
-            _uiState.update { it.copy(syncError = e.toUserFacingMessage("Sync failed")) }
+            _uiState.update { it.copy(syncError = e.toUserFacingMessage(str(R.string.error_op_sync))) }
+        } finally {
+            _uiState.update { it.copy(syncLoading = false) }
         }
     }
+
+    private fun str(resId: Int): String = getApplication<Application>().getString(resId)
 
     private suspend fun selectDefaultPageIfNeeded(wsId: String) {
         val active = _uiState.value.activePage
@@ -1344,7 +1404,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                         it.copy(
                             workspaces = current,
                             workspaceActionLoading = false,
-                            syncError = parseApiError(text, "Failed to reorder workspace"),
+                            syncError = parseApiError(text, str(R.string.error_op_reorder_workspace)),
                         )
                     }
                     return@launch
@@ -1356,7 +1416,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                     it.copy(
                         workspaces = current,
                         workspaceActionLoading = false,
-                        syncError = e.toUserFacingMessage("Failed to reorder workspace"),
+                        syncError = e.toUserFacingMessage(str(R.string.error_op_reorder_workspace)),
                     )
                 }
             }

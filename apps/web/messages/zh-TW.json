@@ -13,7 +13,8 @@
     "noResults": "沒有結果",
     "selectModel": "選擇模型",
     "reconnectingDrive": "Google Drive 重新連線中...",
-    "untitled": "未命名"
+    "untitled": "未命名",
+    "close": "關閉"
   },
   "auth": {
     "signIn": "使用 Google 登入",
@@ -42,7 +43,8 @@
     "toggleConversation": "切換對話面板",
     "graphView": "知識圖譜",
     "runLint": "執行 Wiki 健康檢查",
-    "lintRunning": "健康檢查執行中…"
+    "lintRunning": "健康檢查執行中…",
+    "initFailed": "自動初始化失敗，請手動建立工作區。"
   },
   "wiki": {
     "index": "Wiki 索引",
@@ -83,7 +85,10 @@
     "editorTask": "待辦",
     "editorQuote": "引用",
     "editorCode": "程式碼",
-    "editorLink": "連結"
+    "editorLink": "連結",
+    "discardChangesConfirm": "有尚未儲存的變更，確定要捨棄嗎？",
+    "lockFailed": "更新頁面鎖定失敗",
+    "backlinks": "反向連結"
   },
   "ingest": {
     "addSource": "新增來源",
@@ -95,7 +100,7 @@
     "failed": "失敗",
     "queuePending": "等待中",
     "touchedPages": "已更新 {count} 個頁面",
-    "placeholder": "貼上 URL、文字或 Markdown…",
+    "placeholder": "貼上 URL、文字或 Markdown，或拖曳檔案至此（Ctrl+Enter 送出）",
     "button": "整合",
     "doneStatus": "完成 — {status}",
     "savedSynthesis": "已儲存為綜合頁面",
@@ -113,7 +118,9 @@
     "sources": "來源",
     "empty": "問問你的 Wiki 任何問題…",
     "thinking": "思考中…",
-    "searchWiki": "搜尋 Wiki..."
+    "searchWiki": "搜尋 Wiki...",
+    "stop": "停止",
+    "fileBackFailed": "儲存為整合頁失敗"
   },
   "settings": {
     "title": "設定",
@@ -135,7 +142,9 @@
     "noProfiles": "尚無設定檔，請在下方新增。",
     "default": "預設",
     "deleteProfile": "刪除設定檔",
-    "saveFailed": "儲存設定檔失敗"
+    "saveFailed": "儲存設定檔失敗",
+    "confirmDeleteProfile": "確定要刪除此 LLM 設定檔嗎？綁定此設定檔的工作區將改用預設設定。",
+    "deleteProfileFailed": "刪除設定檔失敗"
   },
   "help": {
     "title": "使用說明",
@@ -153,5 +162,13 @@
     "driveBody": "若 Drive 權限失效，系統會要求重新授權。完成後回到 App 或網頁，工作區與設定檔會重新整理。",
     "toolsTitle": "搜尋、圖譜與健康檢查",
     "toolsBody": "頂列放大鏡輸入 2 字以上即可全文搜尋 Wiki。GitFork 按鈕開啟知識圖譜：圓點是頁面、連線是 wikilink；孤立的灰點代表尚未被任何頁面引用的頁面，點擊節點可直接跳轉。燒杯按鈕觸發 Wiki 健康檢查：LLM 自動找出孤立頁面、斷連 wikilink、概念重疊等問題並修復，完成後跳轉至健檢報告（_lint/日期.md）。"
+  },
+  "graph": {
+    "loading": "載入關聯圖…",
+    "empty": "尚無頁面",
+    "legendEntity": "實體",
+    "legendConcept": "概念",
+    "legendSynthesis": "整合",
+    "legendOther": "其他"
   }
 }

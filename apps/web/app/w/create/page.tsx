@@ -38,7 +38,7 @@ export default async function CreateWorkspacePage({
           </h1>
           {error === 'init_failed' && (
             <p className="text-sm" style={{ color: 'oklch(65% 0.18 30)' }}>
-              Auto-setup failed. Please try creating your workspace manually.
+              {t('initFailed')}
             </p>
           )}
         </div>

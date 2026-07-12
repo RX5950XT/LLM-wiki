@@ -1,10 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Base theme: transparent/edge-to-edge, Compose handles all coloring.
-         windowBackground matches BgLight so light-mode cold start doesn't flash black;
-         values-night/themes.xml overrides it for dark mode. -->
+    <!-- Dark-mode window background matches Compose Bg (#0F1419) -->
     <style name="Theme.LlmWiki" parent="Theme.AppCompat.DayNight.NoActionBar">
-        <item name="android:windowBackground">#FAF9F7</item>
+        <item name="android:windowBackground">#0F1419</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
     </style>

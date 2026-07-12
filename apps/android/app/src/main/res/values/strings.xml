@@ -142,4 +142,20 @@
     <string name="error_drive_empty_response">Google Drive returned an invalid empty response.</string>
     <string name="error_api_invalid_response">The server returned an invalid page response.</string>
     <string name="error_internal_server">The server failed to load the page.</string>
+    <string name="error_op_rename_workspace">Failed to rename workspace</string>
+    <string name="error_op_delete_workspace">Failed to delete workspace</string>
+    <string name="error_op_reorder_workspace">Failed to reorder workspaces</string>
+    <string name="error_op_load_workspaces">Failed to load workspaces</string>
+    <string name="error_op_create_note">Failed to create note</string>
+    <string name="error_op_rename_note">Failed to rename note</string>
+    <string name="error_op_delete_note">Failed to delete note</string>
+    <string name="error_op_save_page">Failed to save page</string>
+    <string name="error_op_load_page">Failed to load page</string>
+    <string name="error_op_search">Search failed</string>
+    <string name="error_op_query">Query failed</string>
+    <string name="error_op_ingest">Import failed</string>
+    <string name="error_op_lint">Health check failed</string>
+    <string name="error_op_sync">Sync failed</string>
+    <string name="error_op_lock">Failed to update page lock</string>
+    <string name="error_op_synthesis">Failed to save synthesis</string>
 </resources>

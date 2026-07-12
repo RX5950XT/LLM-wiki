@@ -144,6 +144,7 @@ Android 呼叫與 Web 相同的後端 API（`/api/ingest`、`/api/query`、`/api
 - **Phase 10** ✅：安全性強化 + Android 手機 UI 適配 — 見下方安全注意事項
 - **Phase 10b** ✅：Android i18n + 每帳號 Room cache 隔離 + LLM profile owner guard migration
 - **Phase 11** ✅：批次檔案攝取 + 全文搜尋 + AI 完整檔案操控 — 多檔上傳/拖曳、PostgreSQL tsvector 搜尋、模型選擇器、deletePage / movePage 工具（自動重寫 backlink）
+- **Phase 12** ✅：全專案健檢 — 非同步 ingest（jobId + 輪詢，解決手機匯入逾時）、SSRF/cron P0-P2 安全修復、tools 層 lock/zone 硬性防護、Web/Android UX 大修（RWD、a11y、鍵盤、錯誤可見性、瀏覽器返回、backlinks 面板、rememberSaveable、BackHandler、DayNight 主題）
 
 ## 安全注意事項（Phase 10）
 
@@ -160,6 +161,18 @@ Android 呼叫與 Web 相同的後端 API（`/api/ingest`、`/api/query`、`/api
 **Android 設定注意**：
 - `WEB_API_BASE_URL` 現在是必要 build config 欄位（來源：`local.properties` 或 `NEXT_PUBLIC_SITE_URL`）
 - `GOOGLE_CLIENT_ID` 必須是 **Web OAuth client ID**，不是 Android client ID
+
+## 安全注意事項（Phase 12）
+
+| 嚴重度 | 位置 | 問題 | 修復方式 |
+|--------|------|------|---------|
+| P0 | `api/lint/cron/route.ts`（已刪除） | route 無任何驗證且替匿名呼叫者附上正確 CRON_SECRET 轉發到 `/api/lint`——任何人可匿名觸發全站 lint、燒光所有使用者 LLM API 額度 | 刪除代理 route，`vercel.json` cron 直指 `/api/lint`（Vercel 自動帶 secret），比較改用 `timingSafeEqual` |
+| P1 | `lib/fetch/url-to-markdown.ts` | SSRF 防護只有 hostname 前綴 regex：`http://[::1]/`、`169.254.169.254`（雲端 metadata）、CGNAT、DNS 指向內網的網域全部繞過；redirect 只驗最終 URL | 重寫為 IP 正規化（含 IPv6 去括號/mapped 形式）+ `dns.lookup` 全 IP 檢查 + `redirect: 'manual'` 逐跳驗證 + 20s timeout + 5MB 上限。殘留 TOCTOU rebinding 窗口已以註解標明升級路徑 |
+| P2 | `api/pages/[...slug]` PATCH | `content` 無大小上限 | `.max(2MB)` 對齊全站規範 |
+| P2 | `lib/ai/tools.ts` | `writePage` 不檢查 `locked_by_human`、不擋 `notes/`/`_schema/` zone——LLM 可覆寫人類鎖定頁與唯讀區 | 工具層硬性 guard（見「AI 完整檔案操控」節） |
+| P3 | `api/workspaces/[id]/synthesis` | `answer`/`cited_slugs` 無上限、slug 可注入 YAML frontmatter | `answer` 2MB、slugs regex `^[\w/.-]+$` + 上限 50 |
+| P3 | migration `0012` | `google_oauth_tokens`（加密 refresh token 表）被 0011 慣例授予 anon/authenticated SELECT | REVOKE 只留 service_role（已套用至 production）。注意：`owns_workspace` 的 authenticated EXECUTE 是 RLS 必要的，**不可 revoke** |
+| P3（已知未修） | `llm_profiles.extra_headers` | 明文儲存且 GET 原樣回傳；`api-key`/`x-api-key` 型 provider 的 secret 只能放這裡 | 已擋 `authorization` key；完整修法需整包走 AES-256-GCM 加密（影響 Android 直查路徑），列為待辦 |
 
 ## 目錄速查（Android）
 
@@ -216,7 +229,7 @@ apps/android/app/src/main/java/com/llmwiki/
 - `lib/supabase/request.ts` 驗證 Android Bearer token 時需用 admin client `auth.getUser(token)`，再回傳 bearer Supabase client 給 RLS 查詢；只用 anon/bearer client 驗證會造成有效 token 被判定 Unauthorized
 - Workspace 管理需 Web / Android 對齊：`PATCH /api/workspaces/[id]` 更新名稱，`DELETE /api/workspaces/[id]` 刪除 workspace；刪除必須先成功 trash Google Drive folder 才能刪 DB，避免手機/Web/Drive 狀態不一致
 - Android 端 workspace 刪除只有在 API 回 `{ ok: true }` 後才能清本機 Room / UI 狀態；不可 optimistic remove，否則 production route 漏部署時會出現手機消失但 Web/Drive 仍存在
-- Android 共用 `AndroidHttpClient` 必須設定 Ktor timeout（connect 10s / socket 30s / request 60s），避免建立工作區或 API request 卡在 loading；timeout / DNS / connection abort 要轉成本地化網路錯誤
+- Android 共用 `AndroidHttpClient` 必須設定 Ktor timeout（connect 10s / socket 310s / request 320s）；socket timeout 必須涵蓋 `/api/lint` 這類「完成前零輸出」的同步呼叫（伺服器預算 300s），否則長操作必逾時。timeout / DNS / connection abort 要轉成本地化網路錯誤
 - Android 切換、新建或刪除後切到下一個 workspace 時，`syncPagesInternal()` 後需自動選中 `index.md`（fallback `log.md`），避免停在「從選單選擇一個頁面」
 - Android 匯入本機文字檔要限制大小（與 Web 同級 2 MB）並以串流文字讀取，不可直接 `readBytes()` 全讀進記憶體，否則大檔容易卡頓
 - Web 三欄拖曳改用 `requestAnimationFrame` 批次套用寬度，避免每個 `mousemove` 都直接觸發整棵 shell 重渲染
@@ -236,6 +249,14 @@ apps/android/app/src/main/java/com/llmwiki/
 - Web / Android 建立工作區 UI 不保留 description 欄位；Web `/w/create` 需提供返回 `/w` 的按鈕
 - 使用說明入口需在 Web top bar 與 Android drawer 同步提供，說明內容涵蓋工作區、匯入、對話、設定同步與 Drive 重授權
 - `ModalNavigationDrawer` 的 `gesturesEnabled` 必須設為 `drawerState.isOpen`，而非 `true`；Drawer 關閉時保留橫向手勢會與頁面垂直捲動產生競爭，導致上下滑動卡頓
+- WikiScreen 的對話框開關、`inlineEditorPageSlug`、`inlineEditorValue`（`TextFieldValue.Saver`）、ingest 草稿一律用 `rememberSaveable`——旋轉/行程死亡不可丟失未儲存文字
+- `BackHandler` 已接管搜尋模式與行內編輯器；系統返回鍵先關閉它們，不會直接退出 App
+- `MainActivity` 的 `ExternalEvent` 含 `token`（nanoTime）；NavGraph 必須把 `shareUrlEvent?.token` / `authReturnEvent?.token` 傳進 WikiScreen 並作為 `LaunchedEffect` key——否則分享同一個 URL 第二次不會觸發
+- `LaunchRoute` 查 workspaces 失敗（離線）時導向 `wiki` 而非 `workspace-create`；`workspace-create` 只保留給「成功查詢且真的沒有工作區」
+- `themes.xml` 用 `Theme.AppCompat.DayNight.NoActionBar`，`values/` 淺色 windowBackground（#FAF9F7）、`values-night/` 深色（#0F1419）——避免淺色模式冷啟黑閃；AppCompat parent 不可換（`setApplicationLocales` 依賴）
+- Compose 主題已補 `surfaceContainer*` 五個 slot（`Color.kt` 由 Bg/Bg2 衍生）——否則 AlertDialog/DropdownMenu/ModalBottomSheet 會用 M3 預設紫調
+- 查詢失敗的錯誤必須傳進 `ChatBottomSheet` 內部顯示（sheet 全螢幕，Scaffold banner 會被蓋住）；`syncError` banner 有關閉鈕（`clearSyncError()`）
+- Chat/設定選擇（主題/語言）用 `FilterChip`（含勾選 + TalkBack selected 語意），不要用僅變文字色的 OutlinedButton
 
 ## Graph View 注意事項
 
@@ -247,8 +268,9 @@ apps/android/app/src/main/java/com/llmwiki/
 
 ## Vercel Cron
 
-`apps/web/vercel.json` 設定每週一 03:00 UTC 跑 GET `/api/lint/cron`。
+`apps/web/vercel.json` 設定每週一 03:00 UTC 直接跑 GET `/api/lint`（Vercel Cron 會自動附上 `Authorization: Bearer CRON_SECRET`，route 內用 `timingSafeEqual` 驗證）。
 需在 Vercel 環境變數設定 `CRON_SECRET`，與 `.env.local` 一致。
+**注意**：舊的 `/api/lint/cron` 代理 route 已刪除——它沒有任何驗證、還替匿名呼叫者附上正確 secret（P0 漏洞），不可再加回來。
 
 ## Ingest 任意格式
 
@@ -256,7 +278,20 @@ apps/android/app/src/main/java/com/llmwiki/
 - URL（`http://` / `https://`）→ `{ kind: 'url', url: ... }`
 - 其他文字或 Markdown → `{ kind: 'text', title: 第一非空行, content: ... }`
 
-API (`/api/ingest`) 已支援兩種 kind。Ctrl+Enter 快速提交。
+API (`/api/ingest`) 已支援兩種 kind。Ctrl+Enter 快速提交。text content 上限 2 MB（`MAX_TEXT_LENGTH`，與 client 端一致）。
+
+## 非同步 Ingest 協定（重要）
+
+`POST /api/ingest` **不再同步等待 LLM pipeline**：
+1. 驗證 + 抓取來源 + 建立 source / job 記錄後，立即回 `202 { jobId, status: 'running' }`
+2. Pipeline 透過 `after()`（`next/server`）在回應後繼續執行（Vercel Fluid Compute，maxDuration 300s）
+3. Client 輪詢 `GET /api/ingest?job_id=<uuid>` → `{ jobId, status, error, touched_pages }`
+4. `running` 超過 8 分鐘的 job 會在下次查詢時被掃成 `failed`（stale sweep）
+
+Web（`pollIngestJob`，3s 間隔）與 Android（`WikiViewModel.pollIngestJob`）都走這套協定；完成後顯示「已更新 N 頁」。
+**這是手機匯入不再逾時的關鍵**：舊版同步等待 300s，Android socket timeout 必炸；現在 POST 幾秒內返回，App 跳背景／切頁面都不影響伺服器端 job，回前景同步即見結果。
+向後相容：舊 server 回 `{ status: 'done' }` 時 client 直接視為完成。
+`urlToMarkdown` 有 20s fetch timeout、5 MB 頁面上限、逐跳 redirect SSRF 驗證（IP 正規化 + DNS 解析檢查，含 IPv6/link-local/CGNAT/metadata IP）。
 
 ## 側邊欄拖移
 
@@ -328,10 +363,18 @@ Conversation panel 輸入框左側有模型選擇按鈕（`Bot` icon），從 `/
 |------|------|
 | `readPage` | 讀取頁面內容（Drive file） |
 | `writePage` | 建立/覆寫頁面，自動同步 `page_links` 與 `search_text` |
-| `searchPages` | 基礎 `ilike` 搜尋 title + slug |
+| `searchPages` | 基礎 `ilike` 搜尋 title + slug（fallback 查詢會先清洗 PostgREST 特殊字元） |
 | `listPages` | 列出所有 wiki 頁面，可選 kind 篩選 |
 | `deletePage` | 刪除頁面：清理 `page_links`、刪除 Drive file、刪除 DB record |
 | `movePage` | 重命名/移動頁面：自動重寫所有**引用該頁面**的 `[[wikilink]]`，更新 `page_links` slug |
+
+**工具層硬性防護（Karpathy 原則 enforcement，勿移除）**：
+- `writePage` / `deletePage` / `movePage` 一律拒絕 `notes/`、`_schema/`、`sources/` 開頭與含 `..` 的 slug——LLM 只能寫 wiki zone（原則 5 的程式層落實，不能只靠 prompt）
+- `locked_by_human = true` 的頁面拒絕覆寫/刪除/移動（原則 3 的程式層落實）
+- `index.md` / `log.md` 為 `PROTECTED_SLUGS`，不可刪除或移動
+- slug 一律 normalize 成 `.md` 結尾
+- `movePage` 的反向連結 regex 同時匹配 `[[slug]]` 與 `[[slug.md]]`（含 `|display` / `#anchor` 後綴）——wikilink 通常不帶副檔名，舊版只匹配 `.md` 形式導致反向連結沒改到
+- `buildWikiTools` 內有 Drive folder cache，同一次 pipeline 重複寫入巢狀 slug 不會重查資料夾
 
 ## 資料庫 Migration
 
