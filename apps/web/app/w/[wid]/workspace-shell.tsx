@@ -3,13 +3,14 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { PanelLeft, PanelRight, GitFork, FlaskConical, ChevronDown, LogOut, Plus, Settings, Search, Loader2, HelpCircle, Pencil, Trash2, GripVertical } from 'lucide-react';
+import { PanelLeft, PanelRight, GitFork, FlaskConical, ChevronDown, LogOut, Plus, Settings, Search, Loader2, HelpCircle, Pencil, Trash2, GripVertical, Library } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import { PageTree } from '@/components/wiki/page-tree';
 import { PageViewer } from '@/components/wiki/page-viewer';
 import { ConversationPanel } from '@/components/wiki/conversation-panel';
 import { GraphView } from '@/components/wiki/graph-view';
 import { HelpDialog } from '@/components/wiki/help-dialog';
+import { SourcesDialog } from '@/components/wiki/sources-dialog';
 import { useRealtimePages, type PageChangedEvent } from '@/lib/sync/realtime';
 import { createClient } from '@/lib/supabase/client';
 
@@ -52,6 +53,7 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
   const [lintRunning, setLintRunning] = useState(false);
   const [showWsMenu, setShowWsMenu] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
+  const [showSources, setShowSources] = useState(false);
   const [workspaceList, setWorkspaceList] = useState(workspaces);
   const [currentWorkspaceName, setCurrentWorkspaceName] = useState(workspaceName);
   const [renamingWorkspace, setRenamingWorkspace] = useState<WorkspaceEntry | null>(null);
@@ -799,6 +801,17 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
             </>
           )}
 
+          {/* Sources list */}
+          <button
+            onClick={() => setShowSources(true)}
+            className="rounded p-1 transition-all duration-100 hover:opacity-70 active:scale-90"
+            style={{ color: 'var(--fg-muted)' }}
+            aria-label={t('sources.open')}
+            title={t('sources.open')}
+          >
+            <Library size={16} />
+          </button>
+
           {/* Graph view toggle */}
           <button
             onClick={() => setShowGraph((g) => !g)}
@@ -974,6 +987,7 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
         )}
       </div>
       <HelpDialog open={showHelp} onClose={() => setShowHelp(false)} />
+      {showSources && <SourcesDialog workspaceId={workspaceId} onClose={() => setShowSources(false)} />}
       {renamingWorkspace && (
         <WorkspaceRenameDialog
           workspace={renamingWorkspace}

@@ -32,6 +32,13 @@
     <string name="wiki_zone_schema">Rules</string>
     <string name="ingest_add_source">Add source</string>
     <string name="ingest_running">Ingesting…</string>
+    <string name="ingest_running_progress">Ingesting… %1$d pages updated so far</string>
+    <string name="wiki_backlinks">Backlinks</string>
+    <string name="sources_title">Ingested sources</string>
+    <string name="sources_empty">No sources ingested yet</string>
+    <string name="sources_status_done">%1$d pages integrated</string>
+    <string name="sources_status_running">Ingesting…</string>
+    <string name="sources_status_failed">Ingest failed</string>
     <string name="query_placeholder">Ask your wiki anything…</string>
     <string name="query_file_back">Save as synthesis page</string>
 
@@ -154,6 +161,7 @@
     <string name="error_op_search">Search failed</string>
     <string name="error_op_query">Query failed</string>
     <string name="error_op_ingest">Import failed</string>
+    <string name="error_op_load_sources">Failed to load sources</string>
     <string name="error_op_lint">Health check failed</string>
     <string name="error_op_sync">Sync failed</string>
     <string name="error_op_lock">Failed to update page lock</string>

@@ -76,6 +76,8 @@ export interface LLMProfile {
   api_key_encrypted: string;
   model: string;
   extra_headers: Record<string, string>;
+  /** AES-256-GCM ciphertext of extra_headers JSON; authoritative when present. */
+  extra_headers_encrypted?: string | null;
   is_default: boolean;
   created_at: Iso8601;
 }

@@ -62,24 +62,35 @@ Please integrate this source into the wiki following the instructions in your sy
 Remember: touch at least 5 existing pages (update + new), update index.md, and append to log.md.
 `.trim();
 
-  const result = await generateText({
+  // Collected incrementally so pollers see live progress, not just the final count
+  const touchedSlugs = new Set<string>();
+
+  await generateText({
     model,
     system: ctx.systemPrompt,
     messages: [{ role: 'user', content: userMessage }],
     tools,
     stopWhen: stepCountIs(30),
-  });
-
-  // Collect all slugs written during this ingest
-  const touchedSlugs = new Set<string>();
-  for (const step of result.steps ?? []) {
-    for (const toolResult of step.toolResults ?? []) {
-      if (toolResult.toolName === 'writePage') {
-        const res = toolResult.output as { slug?: string };
-        if (res.slug) touchedSlugs.add(res.slug);
+    onStepFinish: async (step) => {
+      let added = false;
+      for (const toolResult of step.toolResults ?? []) {
+        if (toolResult.toolName === 'writePage') {
+          const res = toolResult.output as { slug?: string };
+          if (res.slug && !touchedSlugs.has(res.slug)) {
+            touchedSlugs.add(res.slug);
+            added = true;
+          }
+        }
       }
-    }
-  }
+      if (added) {
+        // Progress heartbeat for GET /api/ingest pollers; status stays 'running'
+        await ctx.supabase
+          .from('ingest_jobs')
+          .update({ touched_pages: Array.from(touchedSlugs) })
+          .eq('id', ctx.jobId);
+      }
+    },
+  });
 
   const touched = Array.from(touchedSlugs);
 

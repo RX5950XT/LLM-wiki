@@ -1,0 +1,189 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import { useLocale, useTranslations } from 'next-intl';
+import { Link2, FileText, Type, Loader2, X } from 'lucide-react';
+import { createClient } from '@/lib/supabase/client';
+
+interface SourceEntry {
+  id: string;
+  kind: 'url' | 'file' | 'text';
+  title: string | null;
+  url: string | null;
+  created_at: string;
+  ingested_at: string | null;
+  jobStatus?: string;
+  jobError?: string | null;
+  touchedCount?: number;
+}
+
+/**
+ * Read-only list of ingested sources (Karpathy principle: sources are
+ * immutable after ingest — this is visibility, not editing).
+ */
+export function SourcesDialog({
+  workspaceId,
+  onClose,
+}: {
+  workspaceId: string;
+  onClose: () => void;
+}) {
+  const t = useTranslations();
+  const locale = useLocale();
+  const [sources, setSources] = useState<SourceEntry[] | null>(null);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  useEffect(() => {
+    const supabase = createClient();
+    let cancelled = false;
+    void (async () => {
+      const [{ data: rows }, { data: jobs }] = await Promise.all([
+        supabase
+          .from('sources')
+          .select('id, kind, title, url, created_at, ingested_at')
+          .eq('workspace_id', workspaceId)
+          .order('created_at', { ascending: false })
+          .limit(200),
+        supabase
+          .from('ingest_jobs')
+          .select('source_id, status, error, touched_pages, started_at')
+          .eq('workspace_id', workspaceId)
+          .order('started_at', { ascending: false }),
+      ]);
+      if (cancelled) return;
+      const latestJob = new Map<string, { status: string; error: string | null; touched: number }>();
+      for (const job of jobs ?? []) {
+        if (!latestJob.has(job.source_id)) {
+          latestJob.set(job.source_id, {
+            status: job.status,
+            error: job.error,
+            touched: (job.touched_pages as string[] | null)?.length ?? 0,
+          });
+        }
+      }
+      setSources(
+        (rows ?? []).map((row) => {
+          const job = latestJob.get(row.id);
+          return {
+            ...row,
+            jobStatus: job?.status,
+            jobError: job?.error ?? null,
+            touchedCount: job?.touched ?? 0,
+          } as SourceEntry;
+        }),
+      );
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId]);
+
+  const kindIcon = (kind: SourceEntry['kind']) =>
+    kind === 'url' ? <Link2 size={14} /> : kind === 'file' ? <FileText size={14} /> : <Type size={14} />;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="sources-title"
+    >
+      <button
+        type="button"
+        className="absolute inset-0 cursor-default"
+        style={{ background: 'oklch(8% 0.01 250 / 0.55)' }}
+        onClick={onClose}
+        aria-hidden="true"
+        tabIndex={-1}
+      />
+      <div
+        className="relative flex max-h-[80vh] w-full max-w-lg flex-col rounded-lg border shadow-lg"
+        style={{ background: 'var(--bg)', borderColor: 'var(--border)' }}
+      >
+        <div
+          className="flex items-center justify-between border-b px-4 py-3"
+          style={{ borderColor: 'var(--border)' }}
+        >
+          <h2 id="sources-title" className="text-sm font-semibold" style={{ color: 'var(--fg)' }}>
+            {t('sources.title')}
+          </h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded p-1 transition-all duration-100 hover:opacity-70 active:scale-90"
+            style={{ color: 'var(--fg-muted)' }}
+            aria-label={t('common.close')}
+          >
+            <X size={16} />
+          </button>
+        </div>
+        <p className="px-4 pt-2 text-xs" style={{ color: 'var(--fg-muted)' }}>
+          {t('sources.immutableHint')}
+        </p>
+        <div className="flex-1 overflow-y-auto p-3">
+          {sources === null ? (
+            <div className="flex justify-center py-8">
+              <Loader2 size={18} className="animate-spin" style={{ color: 'var(--fg-muted)' }} />
+            </div>
+          ) : sources.length === 0 ? (
+            <p className="py-8 text-center text-xs" style={{ color: 'var(--fg-muted)' }}>
+              {t('sources.empty')}
+            </p>
+          ) : (
+            <ul className="space-y-1.5">
+              {sources.map((source) => (
+                <li
+                  key={source.id}
+                  className="rounded-md border px-3 py-2"
+                  style={{ borderColor: 'var(--border)', background: 'var(--bg-2)' }}
+                >
+                  <div className="flex items-center gap-2">
+                    <span style={{ color: 'var(--fg-muted)' }}>{kindIcon(source.kind)}</span>
+                    <span className="min-w-0 flex-1 truncate text-xs font-medium" style={{ color: 'var(--fg)' }}>
+                      {source.title || source.url || t('common.untitled')}
+                    </span>
+                    <span className="shrink-0 text-[10px]" style={{ color: 'var(--fg-muted)' }}>
+                      {new Date(source.created_at).toLocaleDateString(locale)}
+                    </span>
+                  </div>
+                  {source.url && (
+                    <a
+                      href={source.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-0.5 block truncate text-[10px] underline-offset-2 hover:underline"
+                      style={{ color: 'var(--fg-muted)' }}
+                    >
+                      {source.url}
+                    </a>
+                  )}
+                  <p className="mt-1 text-[10px]">
+                    {source.jobStatus === 'failed' ? (
+                      <span style={{ color: 'oklch(65% 0.18 30)' }}>
+                        {t('sources.statusFailed')}
+                        {source.jobError ? ` — ${source.jobError}` : ''}
+                      </span>
+                    ) : source.ingested_at ? (
+                      <span style={{ color: 'var(--color-accent)' }}>
+                        {t('sources.statusDone', { count: source.touchedCount ?? 0 })}
+                      </span>
+                    ) : (
+                      <span style={{ color: 'var(--fg-muted)' }}>{t('sources.statusRunning')}</span>
+                    )}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

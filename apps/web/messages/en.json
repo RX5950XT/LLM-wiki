@@ -110,7 +110,17 @@
     "unsupportedType": "Only .txt and .md files are supported",
     "fileReadError": "Failed to read file",
     "fileTooLarge": "File must be under 2 MB",
-    "failedGeneric": "Ingest failed"
+    "failedGeneric": "Ingest failed",
+    "runningProgress": "Ingesting… {count} pages updated so far"
+  },
+  "sources": {
+    "open": "Sources",
+    "title": "Ingested sources",
+    "immutableHint": "Sources are immutable after ingest (Karpathy principle); this list is for reviewing results.",
+    "empty": "No sources ingested yet",
+    "statusDone": "{count} pages integrated",
+    "statusRunning": "Ingesting…",
+    "statusFailed": "Ingest failed"
   },
   "query": {
     "placeholder": "Ask your wiki anything...",

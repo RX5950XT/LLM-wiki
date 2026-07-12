@@ -46,3 +46,35 @@ data class SearchResult(
     val kind: String = "",
     @SerialName("updated_at") val updatedAt: String = "",
 )
+
+@Serializable
+data class PageLinkRow(
+    @SerialName("from_slug") val fromSlug: String,
+)
+
+@Serializable
+data class SourceRow(
+    val id: String,
+    val kind: String = "",
+    val title: String? = null,
+    val url: String? = null,
+    @SerialName("created_at") val createdAt: String = "",
+    @SerialName("ingested_at") val ingestedAt: String? = null,
+)
+
+@Serializable
+data class IngestJobRow(
+    @SerialName("source_id") val sourceId: String,
+    val status: String = "",
+    val error: String? = null,
+    @SerialName("touched_pages") val touchedPages: List<String> = emptyList(),
+    @SerialName("started_at") val startedAt: String? = null,
+)
+
+/** UI-side join of a source with its latest ingest job. */
+data class SourceListItem(
+    val source: SourceRow,
+    val jobStatus: String? = null,
+    val jobError: String? = null,
+    val touchedCount: Int = 0,
+)

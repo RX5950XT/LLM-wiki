@@ -74,7 +74,7 @@ export async function POST(request: NextRequest) {
 
   const { data: profile } = await supabase
     .from('llm_profiles')
-    .select('id, name, base_url, model, api_key_encrypted, extra_headers, owner_id')
+    .select('id, name, base_url, model, api_key_encrypted, extra_headers, extra_headers_encrypted, owner_id')
     .eq('id', profileId)
     .eq('owner_id', user.id)
     .single();

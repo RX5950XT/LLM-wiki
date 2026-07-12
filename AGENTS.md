@@ -114,6 +114,7 @@ CRON_SECRET=                # /api/lint GET（Vercel Cron 自動帶 Bearer）驗
 - **Phase 11** ✅：批次檔案攝取 + 全文搜尋 + AI 完整檔案操控（deletePage / movePage + backlink rewriting）
 - **Production 2026-04-29** ✅：`0004_fulltext_search.sql` 已套用至 Supabase production；臨時 `/api/migrate` route 已移除。
 - **Phase 12** ✅（2026-07-12）：全專案健檢——非同步 ingest（`202 { jobId }` + `GET /api/ingest?job_id=` 輪詢，手機匯入不再逾時、可背景執行）、P0 cron 漏洞（`/api/lint/cron` 已刪除）、SSRF 全面強化、tools 層 lock/zone 硬性防護、movePage 反向連結 regex 修復、Web/Android UX 大修、backlinks 面板、migration `0012` 已套用 production。細節見 CLAUDE.md「非同步 Ingest 協定」與「安全注意事項（Phase 12）」。
+- **Phase 13** ✅（2026-07-12）：漏洞續掃 + 功能補完 + Web/Android 對齊——`extra_headers` AES-256-GCM 加密（migration `0013`）、SSRF TOCTOU 關窗（undici Agent connect-time lookup）、`broadcast_page_metadata_change` revoke（migration `0014`）、Sources 管理列表（Web `sources-dialog.tsx` + Android `SourcesListDialog`）、Ingest 即時進度（`onStepFinish` 逐步寫回 `touched_pages`）、Android backlinks 面板、離線冷啟 workspace 持久化（DataStore）、chat 草稿 hoist 至 ViewModel。migrations 0013/0014 已套用 production。細節見 CLAUDE.md「安全注意事項（Phase 13）」。
 
 ## 關鍵功能
 

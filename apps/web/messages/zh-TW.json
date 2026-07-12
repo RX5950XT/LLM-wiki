@@ -110,7 +110,17 @@
     "unsupportedType": "僅支援 .txt 與 .md 格式",
     "fileReadError": "讀取檔案失敗",
     "fileTooLarge": "檔案需小於 2 MB",
-    "failedGeneric": "匯入失敗"
+    "failedGeneric": "匯入失敗",
+    "runningProgress": "整合中…已更新 {count} 個頁面"
+  },
+  "sources": {
+    "open": "來源清單",
+    "title": "已匯入的來源",
+    "immutableHint": "來源在匯入後不可編輯（Karpathy 原則）；此清單僅供檢視整合結果。",
+    "empty": "尚未匯入任何來源",
+    "statusDone": "已整合 {count} 個頁面",
+    "statusRunning": "整合中…",
+    "statusFailed": "整合失敗"
   },
   "query": {
     "placeholder": "問問你的 Wiki 任何問題...",

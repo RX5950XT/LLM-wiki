@@ -1,3 +1,33 @@
+# 第二輪：漏洞續掃 + 功能補完 + Web/Android 對齊（2026-07-12）
+
+## Phase G — 漏洞續掃
+- [x] G1: `extra_headers` 改 AES-256-GCM 加密（migration 0013 + POST 加密 + client.ts 解密 + GET 停止回傳明文）→ 已套用 production
+- [x] G2: SSRF TOCTOU 關窗——undici Agent connect-time lookup（node 腳本實測 PASS）
+- [x] G3: revoke `broadcast_page_metadata_change` EXECUTE（先以 rollback transaction 實測 trigger 不受影響，migration 0014 已套用 production）
+- [x] G4: advisors 其餘項目處置（owns_workspace 必要保留已註記；leaked password protection 記為 Dashboard 手動項）
+
+## Phase H — Web/Android 對齊
+- [x] H1: Android backlinks 面板（page_links 直查 + AssistChip 列）
+- [x] H2: Android 離線冷啟 workspace 持久化（DataStore JSON snapshot + refreshWorkspaces 失敗還原）
+- [x] H3: Android chat 草稿 hoist 至 WikiUiState.chatDraft
+
+## Phase I — 功能補完
+- [x] I1: Sources 管理列表（Web sources-dialog.tsx + Android SourcesListDialog，含最新 job 狀態）
+- [x] I2: Ingest 即時進度（onStepFinish 逐步寫回 touched_pages；Web/Android 輪詢顯示「已更新 N 頁」）
+
+## Phase J — 驗證收尾
+- [x] typecheck（5/5）/ web build / APK（BUILD SUCCESSFUL 52s）全綠
+- [x] 文件同步（CLAUDE.md Phase 13 + 安全節 / AGENTS.md / CONTEXT.md 改寫）
+- [x] commit + push
+
+## Review（Phase G-J）
+
+extra_headers 的修法能做到「零遷移」是因為先查了 production 資料（0 筆帶 headers）——先看資料再設計遷移策略。
+TOCTOU 修法的關鍵驗證是「undici connect.lookup 真的會被呼叫」，用 10 行 node 腳本實測比讀原始碼快且可信。
+revoke trigger function 的 EXECUTE 屬於「文件說安全但後果嚴重」類操作，先在 production 用 begin/rollback 實測是必要成本。
+
+---
+
 # 全專案健檢與修復（2026-07-12）
 
 ## Phase A — 研究/審計

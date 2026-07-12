@@ -62,6 +62,20 @@ class AppPreferencesRepository(context: Context) {
 
     suspend fun getLanguage(): AppLanguage = language.first()
 
+    /** Snapshot of the last opened workspace so offline cold-starts can show the Room cache. */
+    suspend fun setLastWorkspace(accountName: String, workspaceJson: String) {
+        dataStore.edit { preferences ->
+            preferences[LAST_WORKSPACE_ACCOUNT_KEY] = accountName
+            preferences[LAST_WORKSPACE_JSON_KEY] = workspaceJson
+        }
+    }
+
+    suspend fun getLastWorkspaceJson(accountName: String): String? {
+        val preferences = dataStore.data.first()
+        if (preferences[LAST_WORKSPACE_ACCOUNT_KEY] != accountName) return null
+        return preferences[LAST_WORKSPACE_JSON_KEY]
+    }
+
     private fun themeModeFromValue(value: String): ThemeMode =
         runCatching { ThemeMode.valueOf(value) }.getOrDefault(ThemeMode.SYSTEM)
 
@@ -71,5 +85,7 @@ class AppPreferencesRepository(context: Context) {
     private companion object {
         val THEME_MODE_KEY = stringPreferencesKey("theme_mode")
         val LANGUAGE_KEY = stringPreferencesKey("language")
+        val LAST_WORKSPACE_ACCOUNT_KEY = stringPreferencesKey("last_workspace_account")
+        val LAST_WORKSPACE_JSON_KEY = stringPreferencesKey("last_workspace_json")
     }
 }

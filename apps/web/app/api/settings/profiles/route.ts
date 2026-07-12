@@ -12,8 +12,8 @@ const ProfileSchema = z.object({
     .record(z.string().max(2000))
     .optional()
     .default({})
-    // extra_headers are stored in plaintext; the bearer credential belongs in
-    // api_key (AES-256-GCM encrypted), which the LLM client sends as Authorization
+    // The bearer credential belongs in api_key; other header values (api-key,
+    // x-api-key…) are encrypted at rest via extra_headers_encrypted.
     .refine((headers) => !Object.keys(headers).some((k) => k.toLowerCase() === 'authorization'), {
       message: 'Put the Authorization credential in the API key field instead of extra_headers',
     }),
@@ -24,9 +24,10 @@ export async function GET(request: NextRequest) {
   const { supabase, user } = await getRequestUser(request);
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
+  // extra_headers values are secrets (api-key style providers) — never return them
   const { data: profiles, error } = await supabase
     .from('llm_profiles')
-    .select('id, name, base_url, model, extra_headers, is_default, created_at')
+    .select('id, name, base_url, model, is_default, created_at')
     .eq('owner_id', user.id)
     .order('created_at', { ascending: true });
 
@@ -44,10 +45,14 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
 
-  const { api_key, is_default, ...rest } = parsed.data;
+  const { api_key, is_default, extra_headers, ...rest } = parsed.data;
   let encrypted: string;
+  let extraHeadersEncrypted: string | null = null;
   try {
     encrypted = encryptApiKey(api_key);
+    if (Object.keys(extra_headers).length > 0) {
+      extraHeadersEncrypted = encryptApiKey(JSON.stringify(extra_headers));
+    }
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Encryption failed';
     return NextResponse.json({ error: `Server configuration error: ${msg}` }, { status: 500 });
@@ -66,6 +71,8 @@ export async function POST(request: NextRequest) {
       owner_id: user.id,
       ...rest,
       api_key_encrypted: encrypted,
+      extra_headers: {},
+      extra_headers_encrypted: extraHeadersEncrypted,
       is_default: is_default ?? false,
     })
     .select('id, name, base_url, model, is_default')

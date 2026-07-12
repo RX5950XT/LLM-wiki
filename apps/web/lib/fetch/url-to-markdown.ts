@@ -1,5 +1,7 @@
 import { isIP } from 'net';
+import dns from 'dns';
 import { lookup } from 'dns/promises';
+import { Agent, fetch as undiciFetch } from 'undici';
 import { Readability } from '@mozilla/readability';
 import { JSDOM } from 'jsdom';
 import TurndownService from 'turndown';
@@ -58,8 +60,8 @@ async function assertPublicHost(hostname: string): Promise<void> {
   if (/^localhost$/i.test(bare) || /\.(local|internal)$/i.test(bare)) {
     throw new Error('URL targets a private address');
   }
-  // ponytail: dns pre-check leaves a TOCTOU rebinding window; move to an undici
-  // connect interceptor if that ever matters for this deployment
+  // Fast fail with a clear message; the connect-time guardedLookup below is
+  // what actually enforces this (no TOCTOU rebinding window).
   const records = await lookup(bare, { all: true, verbatim: true }).catch(() => []);
   if (records.length === 0) throw new Error(`Could not resolve host: ${hostname}`);
   if (records.some((record) => isPrivateIp(record.address))) {
@@ -67,11 +69,37 @@ async function assertPublicHost(hostname: string): Promise<void> {
   }
 }
 
+/**
+ * dns.lookup-compatible resolver that rejects private IPs. Used at socket
+ * connect time, so the validated addresses are exactly the ones connected to —
+ * DNS rebinding between pre-check and connect cannot bypass it.
+ */
+const guardedLookup = ((
+  hostname: string,
+  options: dns.LookupOptions,
+  callback: (err: NodeJS.ErrnoException | null, address?: unknown, family?: number) => void,
+) => {
+  dns.lookup(hostname, { ...options, all: true }, (err, addresses) => {
+    if (err) return callback(err);
+    const list = addresses as dns.LookupAddress[];
+    const [first] = list;
+    if (!first || list.some((entry) => isPrivateIp(entry.address))) {
+      const blocked: NodeJS.ErrnoException = new Error('URL resolves to a private address');
+      blocked.code = 'ERR_SSRF_PRIVATE_ADDRESS';
+      return callback(blocked);
+    }
+    if (options.all) return callback(null, list);
+    return callback(null, first.address, first.family);
+  });
+}) as typeof dns.lookup;
+
+const ssrfAgent = new Agent({ connect: { lookup: guardedLookup } });
+
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 const MAX_REDIRECTS = 5;
 
 /** Fetch with per-hop SSRF validation instead of trusting redirect: 'follow'. */
-async function fetchWithHostChecks(url: string): Promise<Response> {
+async function fetchWithHostChecks(url: string): Promise<Awaited<ReturnType<typeof undiciFetch>>> {
   let currentUrl = url;
   for (let hop = 0; ; hop += 1) {
     const parsed = new URL(currentUrl);
@@ -80,17 +108,21 @@ async function fetchWithHostChecks(url: string): Promise<Response> {
     }
     await assertPublicHost(parsed.hostname);
 
-    const response = await fetch(currentUrl, {
+    const response = await undiciFetch(currentUrl, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (compatible; LLMWiki/1.0)',
         Accept: 'text/html,application/xhtml+xml',
       },
       redirect: 'manual',
+      dispatcher: ssrfAgent,
       // A hung remote server must not eat the whole serverless budget
       signal: AbortSignal.timeout(20_000),
-    }).catch((err) => {
+    }).catch((err: unknown) => {
       if (err instanceof Error && err.name === 'TimeoutError') {
         throw new Error(`Timed out fetching ${currentUrl} (20s)`);
+      }
+      if (err instanceof Error && err.cause instanceof Error && err.cause.message.includes('private address')) {
+        throw new Error('URL resolves to a private address');
       }
       throw err;
     });

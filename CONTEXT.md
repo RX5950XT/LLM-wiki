@@ -2,7 +2,19 @@
 
 > 給下一個 AI Agent 的接手指南。架構與規範細節以 `CLAUDE.md` / `AGENTS.md` 為準，這裡只記「最近做了什麼、為什麼、還缺什麼」。
 
-## 最近一次大型變更（2026-07-12，Phase 12 全專案健檢）
+## 最近一次變更（2026-07-12，Phase 13 漏洞續掃 + 對齊）
+
+- **`extra_headers` 加密（P3 清償）**：migration `0013` 新增 `extra_headers_encrypted bytea`；POST `/api/settings/profiles` 以 AES-256-GCM 加密（重用 `encryptApiKey`）、GET 完全不回傳 headers（無 UI 消費它）、`createLLMClient` 解密（`extra_headers_encrypted` 優先，legacy 明文 jsonb fallback）。production 當時 0 筆帶 headers 的 profile，無需資料遷移。
+- **SSRF TOCTOU 關窗**：`url-to-markdown.ts` 改用 `undici` 的 `Agent({ connect: { lookup: guardedLookup } })` + `undiciFetch`——連線當下驗證的 DNS 結果就是實際連上的 IP，rebinding 無窗口。已用 node 腳本實測（public host 過、localhost 擋、lookup 確實被呼叫）。注意 fetch spec 的 bad-port 清單（port 9 等）會先於 lookup 擋掉。
+- **migration `0014`**：revoke `broadcast_page_metadata_change()` 的 anon/authenticated EXECUTE（advisor 0029）。先在 production 以 rollback transaction 實測 trigger 不受影響才套用。`owns_workspace` 的 WARN 是接受的設計（RLS 依賴），不可 revoke。
+- **Sources 管理列表**（Karpathy 缺口 #2）：Web `components/wiki/sources-dialog.tsx`（頂列 `Library` icon）+ Android `SourcesListDialog`（drawer 底列 `LibraryBooks` icon）。都直查 Supabase `sources` + `ingest_jobs`（RLS），各 source 配最新 job 的 status/touched 數。純檢視——來源不可編輯。
+- **Ingest 即時進度**（Karpathy 缺口 #3）：pipeline `onStepFinish` 逐步把 touched slugs 寫回 `ingest_jobs.touched_pages`（status 仍 running）；Web/Android 輪詢時顯示「整合中…已更新 N 頁」。
+- **Android backlinks 面板**（對齊 Web）：`loadBacklinks()` 直查 `page_links`，MarkdownViewer 下方 AssistChip 列。
+- **Android 離線冷啟**：最後使用的 workspace（JSON snapshot）存 DataStore；`refreshWorkspaces()` 失敗時還原，Room 快取可瀏覽。
+- **Android chat 草稿**：hoist 至 `WikiUiState.chatDraft`，sheet 關閉不再丟失。
+- 新增依賴：`undici@8.7.0`（apps/web）。
+
+## 上一次大型變更（2026-07-12，Phase 12 全專案健檢）
 
 ### 核心：Ingest 改為非同步 job（手機匯入逾時的根因修復）
 
@@ -25,21 +37,19 @@
 
 ### 已知未修（接手者注意）
 
-1. **`llm_profiles.extra_headers` 明文**（P3）：`api-key`/`x-api-key` 型 provider 的 secret 仍明文存 DB 且 GET 原樣回傳。已擋 `authorization` key。完整修法要整包 AES-256-GCM 加密 + 遷移既有資料 + 處理 Android 直查 `llm_profiles` 的路徑。
-2. **SSRF TOCTOU**：DNS pre-check 與實際 fetch 之間有 rebinding 窗口（程式內有 ponytail 註解），升級路徑是 undici connect interceptor。
-3. **Android 離線冷啟**：`LaunchRoute` 失敗現在導向 `wiki`（不再誤導到建立工作區），但因 workspaceId 未本地持久化，離線時仍看不到 Room 快取頁面清單。修法：把最後使用的 workspaceId 存 DataStore。
-4. **Lint 仍是同步呼叫**（Android socket timeout 已拉到 310s 覆蓋），流量大時可比照 ingest 改 job 化。
-5. Chat 草稿在 sheet 關閉時仍會丟（audit 建議 hoist 到 ViewModel，未做）。
+1. **Lint 仍是同步呼叫**（Android socket timeout 已拉到 310s 覆蓋），流量大時可比照 ingest 改 job 化。
+2. **Leaked Password Protection**（Supabase advisor）：需在 Dashboard Auth 設定手動開啟；本專案只用 Google OAuth，不影響現有流程。
+3. legacy `extra_headers` 明文列（Phase 13 之前建立且帶 headers 的 profile）仍以明文供 `createLLMClient` fallback；production 確認為 0 筆，自架者如有既有資料可重建 profile 即完成加密。
+
+（Phase 12 清單中的 extra_headers 明文、SSRF TOCTOU、Android 離線冷啟、chat 草稿四項已於 Phase 13 修復。）
 
 ### Karpathy 精神現況評估
 
-**已到位**：ingest=編譯（prompt 要求 5-15 頁 cascade）、sources immutable、query file-back、分離原則（本次起為程式層硬防護）、lock 機制（同上）、schema 共同演化、Realtime live wiki、lint 迴圈、graph view、backlinks 面板（本次新增）。
+**已到位**：ingest=編譯（prompt 要求 5-15 頁 cascade）、sources immutable、query file-back、分離原則（程式層硬防護）、lock 機制（同上）、schema 共同演化、Realtime live wiki、lint 迴圈、graph view、backlinks 面板（Web + Android）、Sources 管理列表（Phase 13）、Ingest 逐頁即時進度（Phase 13）。
 
-**缺口（依價值排序）**：
+**剩餘缺口**：
 1. **矛盾呈現**：prompt 要求記錄 contradiction，但只進 log.md，無專門 UI。
-2. **Sources 管理頁**：`sources` 表有完整記錄（含 touched_pages via job），無 UI 列表／重新編譯入口。
-3. **Ingest 即時進度**：現在有完成後的 touched 數；更貼近精神的是逐頁進度（可用 Realtime 訂 `ingest_jobs`，publication 已包含該表）。
-4. Android 端 backlinks 面板（Web 已有）。
+2. **來源重新編譯**：Sources 列表目前純檢視；「re-ingest 這個來源」入口尚未做（需考慮 sources immutable 語意——重新編譯應建新 job 而非改來源）。
 
 ### UX 大修摘要（细節見 git log）
 

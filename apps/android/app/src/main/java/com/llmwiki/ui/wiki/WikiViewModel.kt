@@ -8,10 +8,15 @@ import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.llmwiki.BuildConfig
 import com.llmwiki.R
 import com.llmwiki.data.AndroidHttpClient
+import com.llmwiki.data.AppPreferencesRepository
 import com.llmwiki.data.DriveClient
+import com.llmwiki.data.IngestJobRow
 import com.llmwiki.data.LlmProfileRepository
 import com.llmwiki.data.LlmProfile
+import com.llmwiki.data.PageLinkRow
 import com.llmwiki.data.PageRepository
+import com.llmwiki.data.SourceListItem
+import com.llmwiki.data.SourceRow
 import com.llmwiki.data.PageLoadResult
 import com.llmwiki.data.PageErrorCodes
 import com.llmwiki.data.ProfileAuthRequiredException
@@ -26,6 +31,9 @@ import com.llmwiki.data.room.AppDatabase
 import com.llmwiki.data.room.PageEntity
 import com.llmwiki.sync.SyncWorker
 import io.github.jan.supabase.auth.auth
+import io.github.jan.supabase.postgrest.from
+import io.github.jan.supabase.postgrest.query.Columns
+import io.github.jan.supabase.postgrest.query.Order
 import io.ktor.client.request.delete
 import io.ktor.client.request.get
 import io.ktor.client.request.header
@@ -91,8 +99,13 @@ data class WikiUiState(
     val lastErrorRequestId: String? = null,
     val workspaceActionLoading: Boolean = false,
     val ingestLoading: Boolean = false,
+    val ingestProgress: Int = 0,
     val pageSaveLoading: Boolean = false,
     val syncLoading: Boolean = false,
+    val backlinks: List<String> = emptyList(),
+    val chatDraft: String = "",
+    val sources: List<SourceListItem>? = null,
+    val sourcesLoading: Boolean = false,
 )
 
 private val apiJson = Json { ignoreUnknownKeys = true }
@@ -107,6 +120,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
     private var accountName: String = ""
     private val repository = PageRepository(db, null)
     private val profileRepository = LlmProfileRepository(supabase)
+    private val appPreferences = AppPreferencesRepository(application)
 
     private val workspaceId = MutableStateFlow<String?>(null)
     private val accountNameFlow = MutableStateFlow("")
@@ -156,9 +170,12 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                 searchQuery = "",
                 searchResults = emptyList(),
                 driveReconnectUrl = null,
+                backlinks = emptyList(),
+                sources = null,
             )
         }
         workspaceId.value = ws.id
+        persistLastWorkspace(ws)
         viewModelScope.launch {
             syncPagesInternal(ws.id)
             selectDefaultPageIfNeeded(ws.id)
@@ -278,6 +295,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 }
                 workspaceId.value = next?.id
+                persistLastWorkspace(next)
                 next?.let {
                     syncPagesInternal(it.id)
                     selectDefaultPageIfNeeded(it.id)
@@ -319,9 +337,35 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                 showSearch = false,
                 searchQuery = "",
                 searchResults = emptyList(),
+                backlinks = emptyList(),
             )
         }
         if (page.content == null) loadContent(page)
+        loadBacklinks(page.slug)
+    }
+
+    /** Pages whose [[wikilinks]] point at the given slug (mirrors the Web backlinks panel). */
+    private fun loadBacklinks(slug: String) {
+        viewModelScope.launch {
+            val wsId = workspaceId.value ?: return@launch
+            val backlinks = runCatching {
+                supabase.requireAccessToken(forceRefresh = false)
+                supabase.from("page_links")
+                    .select(columns = Columns.raw("from_slug")) {
+                        filter {
+                            eq("workspace_id", wsId)
+                            eq("to_slug", slug)
+                        }
+                    }
+                    .decodeList<PageLinkRow>()
+                    .map { it.fromSlug }
+                    .distinct()
+                    .sorted()
+            }.getOrDefault(emptyList())
+            _uiState.update { state ->
+                if (state.activePage?.slug == slug) state.copy(backlinks = backlinks) else state
+            }
+        }
     }
 
     fun selectPageBySlug(slug: String) {
@@ -704,6 +748,11 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(driveReconnectUrl = null) }
     }
 
+    /** Chat input draft lives here so closing the sheet or rotating never discards it. */
+    fun updateChatDraft(value: String) {
+        _uiState.update { it.copy(chatDraft = value) }
+    }
+
     fun sendQuery(userText: String) {
         if (userText.isBlank()) return
         val wsId = workspaceId.value ?: return
@@ -717,6 +766,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                 chatMessages = newHistory + placeholder,
                 chatLoading = true,
                 synthesisSavedSlug = null,
+                chatDraft = "",
             )
         }
 
@@ -943,6 +993,49 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** Read-only sources list (immutable after ingest) joined with the latest job state. */
+    fun loadSources() {
+        val wsId = workspaceId.value ?: return
+        viewModelScope.launch {
+            _uiState.update { it.copy(sourcesLoading = true) }
+            try {
+                supabase.requireAccessToken(forceRefresh = false)
+                val sources = supabase.from("sources")
+                    .select(columns = Columns.raw("id,kind,title,url,created_at,ingested_at")) {
+                        filter { eq("workspace_id", wsId) }
+                        order("created_at", order = Order.DESCENDING)
+                        limit(200)
+                    }
+                    .decodeList<SourceRow>()
+                val jobs = supabase.from("ingest_jobs")
+                    .select(columns = Columns.raw("source_id,status,error,touched_pages,started_at")) {
+                        filter { eq("workspace_id", wsId) }
+                        order("started_at", order = Order.DESCENDING)
+                    }
+                    .decodeList<IngestJobRow>()
+                val latestJob = jobs.groupBy { it.sourceId }.mapValues { it.value.first() }
+                val items = sources.map { source ->
+                    val job = latestJob[source.id]
+                    SourceListItem(
+                        source = source,
+                        jobStatus = job?.status,
+                        jobError = job?.error,
+                        touchedCount = job?.touchedPages?.size ?: 0,
+                    )
+                }
+                _uiState.update { it.copy(sources = items, sourcesLoading = false) }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        sourcesLoading = false,
+                        sources = emptyList(),
+                        syncError = e.toUserFacingMessage(str(R.string.error_op_load_sources)),
+                    )
+                }
+            }
+        }
+    }
+
     fun signOut() {
         viewModelScope.launch {
             val workspaceIds = _uiState.value.workspaces.map { it.id }
@@ -966,7 +1059,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
     fun ingestUrl(url: String, onDone: (Boolean) -> Unit) {
         viewModelScope.launch {
             val wsId = workspaceId.value ?: return@launch
-            _uiState.update { it.copy(ingestLoading = true) }
+            _uiState.update { it.copy(ingestLoading = true, ingestProgress = 0) }
             try {
                 val requestBody = buildJsonObject {
                     put("kind", "url")
@@ -988,7 +1081,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                 _uiState.update { it.copy(syncError = e.toUserFacingMessage(str(R.string.error_op_ingest))) }
                 onDone(false)
             } finally {
-                _uiState.update { it.copy(ingestLoading = false) }
+                _uiState.update { it.copy(ingestLoading = false, ingestProgress = 0) }
             }
         }
     }
@@ -996,7 +1089,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
     fun ingestText(title: String, content: String, onDone: (Boolean) -> Unit) {
         viewModelScope.launch {
             val wsId = workspaceId.value ?: return@launch
-            _uiState.update { it.copy(ingestLoading = true) }
+            _uiState.update { it.copy(ingestLoading = true, ingestProgress = 0) }
             try {
                 val requestBody = buildJsonObject {
                     put("kind", "text")
@@ -1019,7 +1112,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                 _uiState.update { it.copy(syncError = e.toUserFacingMessage(str(R.string.error_op_ingest))) }
                 onDone(false)
             } finally {
-                _uiState.update { it.copy(ingestLoading = false) }
+                _uiState.update { it.copy(ingestLoading = false, ingestProgress = 0) }
             }
         }
     }
@@ -1090,6 +1183,11 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                     "done" -> return null
                     "failed" -> return obj["error"]?.jsonPrimitive?.contentOrNull
                         ?.takeIf { it.isNotBlank() } ?: str(R.string.error_op_ingest)
+                    else -> {
+                        // Still running — surface live cascade progress
+                        val touched = (obj["touched_pages"] as? kotlinx.serialization.json.JsonArray)?.size ?: 0
+                        if (touched > 0) _uiState.update { it.copy(ingestProgress = touched) }
+                    }
                 }
             } catch (e: Exception) {
                 if (++consecutiveFailures >= 5) return e.toUserFacingMessage(str(R.string.error_op_ingest))
@@ -1126,6 +1224,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 }
                 workspaceId.value = targetId
+                persistLastWorkspace(workspace)
 
                 if (targetId != null) {
                     if (syncSelected || targetId != previousId) {
@@ -1139,9 +1238,47 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                     SyncWorker.schedule(getApplication(), accountName, targetId)
                 }
             } catch (e: Exception) {
-                _uiState.update { it.copy(syncError = e.toUserFacingMessage(str(R.string.error_op_load_workspaces))) }
+                // Offline cold start: fall back to the persisted workspace so the
+                // Room page cache is browsable instead of an empty screen
+                val cached = restoreLastWorkspace()
+                if (cached != null && workspaceId.value == null) {
+                    _uiState.update {
+                        it.copy(
+                            workspace = cached,
+                            workspaces = listOf(cached),
+                            workspacesLoaded = true,
+                            syncError = e.toUserFacingMessage(str(R.string.error_op_load_workspaces)),
+                        )
+                    }
+                    workspaceId.value = cached.id
+                    selectDefaultPageIfNeeded(cached.id)
+                } else {
+                    _uiState.update { it.copy(syncError = e.toUserFacingMessage(str(R.string.error_op_load_workspaces))) }
+                }
             }
         }
+    }
+
+    private fun persistLastWorkspace(workspace: WorkspaceRow?) {
+        val ws = workspace ?: return
+        if (accountName.isBlank()) return
+        viewModelScope.launch {
+            runCatching {
+                appPreferences.setLastWorkspace(
+                    accountName,
+                    apiJson.encodeToString(WorkspaceRow.serializer(), ws),
+                )
+            }
+        }
+    }
+
+    private suspend fun restoreLastWorkspace(): WorkspaceRow? {
+        if (accountName.isBlank()) return null
+        return runCatching {
+            appPreferences.getLastWorkspaceJson(accountName)?.let {
+                apiJson.decodeFromString(WorkspaceRow.serializer(), it)
+            }
+        }.getOrNull()
     }
 
     fun clearSyncError() {

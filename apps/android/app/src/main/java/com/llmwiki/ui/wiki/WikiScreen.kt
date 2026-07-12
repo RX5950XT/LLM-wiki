@@ -33,6 +33,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.LibraryBooks
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -53,6 +54,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -119,6 +121,7 @@ import com.llmwiki.R
 import com.llmwiki.data.parseDriveReconnectSource
 import com.llmwiki.data.LlmProfile
 import com.llmwiki.data.SearchResult
+import com.llmwiki.data.SourceListItem
 import com.llmwiki.data.WorkspaceRow
 import com.llmwiki.data.room.PageEntity
 import kotlinx.coroutines.launch
@@ -151,6 +154,7 @@ fun WikiScreen(
     var showWorkspaceMenu by remember { mutableStateOf(false) }
     var showActiveNoteMenu by remember { mutableStateOf(false) }
     var showHelpDialog by rememberSaveable { mutableStateOf(false) }
+    var showSourcesDialog by rememberSaveable { mutableStateOf(false) }
     var showCreateNoteDialog by rememberSaveable { mutableStateOf(false) }
     var renameWorkspace by remember { mutableStateOf<WorkspaceRow?>(null) }
     var deleteWorkspace by remember { mutableStateOf<WorkspaceRow?>(null) }
@@ -465,6 +469,16 @@ fun WikiScreen(
                         )
                     }
                     IconButton(onClick = {
+                        showSourcesDialog = true
+                        wikiViewModel.loadSources()
+                        scope.launch { drawerState.close() }
+                    }) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.LibraryBooks,
+                            contentDescription = stringResource(R.string.sources_title),
+                        )
+                    }
+                    IconButton(onClick = {
                         scope.launch { drawerState.close() }
                         onNavigateToSettings(uiState.workspace?.id)
                     }) {
@@ -693,7 +707,11 @@ fun WikiScreen(
                                 color = MaterialTheme.colorScheme.onSecondaryContainer,
                             )
                             Text(
-                                text = stringResource(R.string.ingest_running),
+                                text = if (uiState.ingestProgress > 0) {
+                                    stringResource(R.string.ingest_running_progress, uiState.ingestProgress)
+                                } else {
+                                    stringResource(R.string.ingest_running)
+                                },
                                 color = MaterialTheme.colorScheme.onSecondaryContainer,
                                 style = MaterialTheme.typography.bodySmall,
                             )
@@ -739,14 +757,39 @@ fun WikiScreen(
                                 .fillMaxWidth()
                                 .padding(horizontal = 16.dp, vertical = 8.dp),
                         )
-                        uiState.pageContent != null -> MarkdownViewer(
-                            markdown = uiState.pageContent!!,
-                            onWikiLinkClick = { slug -> wikiViewModel.selectPageBySlug(slug) },
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 8.dp),
-                        )
+                        uiState.pageContent != null -> Column(Modifier.weight(1f).fillMaxWidth()) {
+                            MarkdownViewer(
+                                markdown = uiState.pageContent!!,
+                                onWikiLinkClick = { slug -> wikiViewModel.selectPageBySlug(slug) },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                            )
+                            if (uiState.backlinks.isNotEmpty()) {
+                                HorizontalDivider()
+                                Text(
+                                    text = stringResource(R.string.wiki_backlinks),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(start = 16.dp, top = 8.dp),
+                                )
+                                Row(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .horizontalScroll(rememberScrollState())
+                                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    uiState.backlinks.forEach { slug ->
+                                        AssistChip(
+                                            onClick = { wikiViewModel.selectPageBySlug(slug) },
+                                            label = { Text(slug.removeSuffix(".md")) },
+                                        )
+                                    }
+                                }
+                            }
+                        }
                         else -> Box(
                             Modifier.weight(1f).fillMaxWidth(),
                             contentAlignment = Alignment.Center,
@@ -793,6 +836,8 @@ fun WikiScreen(
         ChatBottomSheet(
             messages = uiState.chatMessages,
             isLoading = uiState.chatLoading,
+            input = uiState.chatDraft,
+            onInputChange = { wikiViewModel.updateChatDraft(it) },
             errorMessage = uiState.syncError,
             onDismissError = { wikiViewModel.clearSyncError() },
             synthesisSavedSlug = uiState.synthesisSavedSlug,
@@ -835,6 +880,14 @@ fun WikiScreen(
 
     if (showHelpDialog) {
         WikiHelpDialog(onDismiss = { showHelpDialog = false })
+    }
+
+    if (showSourcesDialog) {
+        SourcesListDialog(
+            sources = uiState.sources,
+            isLoading = uiState.sourcesLoading,
+            onDismiss = { showSourcesDialog = false },
+        )
     }
 
     if (showCreateNoteDialog) {
@@ -1311,6 +1364,8 @@ private fun isHumanEditablePage(page: PageEntity): Boolean =
 private fun ChatBottomSheet(
     messages: List<ChatMessage>,
     isLoading: Boolean,
+    input: String,
+    onInputChange: (String) -> Unit,
     errorMessage: String?,
     onDismissError: () -> Unit,
     synthesisSavedSlug: String?,
@@ -1325,7 +1380,6 @@ private fun ChatBottomSheet(
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val listState = rememberLazyListState()
-    var input by rememberSaveable { mutableStateOf("") }
     var showProfileMenu by remember { mutableStateOf(false) }
 
     LaunchedEffect(messages.size) {
@@ -1491,7 +1545,7 @@ private fun ChatBottomSheet(
 
                 OutlinedTextField(
                     value = input,
-                    onValueChange = { input = it },
+                    onValueChange = onInputChange,
                     placeholder = { Text(stringResource(R.string.wiki_chat_input_hint)) },
                     modifier = Modifier.weight(1f).heightIn(min = 56.dp),
                     maxLines = 4,
@@ -1500,11 +1554,11 @@ private fun ChatBottomSheet(
                         imeAction = ImeAction.Send,
                     ),
                     keyboardActions = KeyboardActions(onSend = {
-                        if (input.isNotBlank() && !isLoading) { onSend(input); input = "" }
+                        if (input.isNotBlank() && !isLoading) onSend(input)
                     }),
                 )
                 IconButton(
-                    onClick = { if (input.isNotBlank() && !isLoading) { onSend(input); input = "" } },
+                    onClick = { if (input.isNotBlank() && !isLoading) onSend(input) },
                     enabled = input.isNotBlank() && !isLoading,
                     modifier = Modifier.size(56.dp),
                     colors = IconButtonDefaults.iconButtonColors(
@@ -1589,6 +1643,79 @@ private fun ChatBubble(
             }
         }
     }
+}
+
+// ── Sources list dialog (read-only: sources are immutable after ingest) ───
+
+@Composable
+private fun SourcesListDialog(
+    sources: List<SourceListItem>?,
+    isLoading: Boolean,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.sources_title)) },
+        text = {
+            when {
+                isLoading || sources == null -> Box(
+                    Modifier.fillMaxWidth().padding(vertical = 24.dp),
+                    contentAlignment = Alignment.Center,
+                ) { CircularProgressIndicator() }
+                sources.isEmpty() -> Text(
+                    stringResource(R.string.sources_empty),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                else -> LazyColumn(
+                    modifier = Modifier.heightIn(max = 420.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    items(sources) { item ->
+                        Column(Modifier.fillMaxWidth()) {
+                            Text(
+                                text = item.source.title
+                                    ?: item.source.url
+                                    ?: stringResource(R.string.wiki_untitled),
+                                style = MaterialTheme.typography.bodyMedium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            item.source.url?.let { url ->
+                                Text(
+                                    text = url,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                            val statusText = when {
+                                item.jobStatus == "failed" ->
+                                    stringResource(R.string.sources_status_failed) +
+                                        (item.jobError?.takeIf { it.isNotBlank() }?.let { " — $it" } ?: "")
+                                item.source.ingestedAt != null ->
+                                    stringResource(R.string.sources_status_done, item.touchedCount)
+                                else -> stringResource(R.string.sources_status_running)
+                            }
+                            Text(
+                                text = statusText,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = when {
+                                    item.jobStatus == "failed" -> MaterialTheme.colorScheme.error
+                                    item.source.ingestedAt != null -> MaterialTheme.colorScheme.primary
+                                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                            )
+                            HorizontalDivider(Modifier.padding(top = 8.dp))
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_dismiss)) }
+        },
+    )
 }
 
 // ── Ingest dialog (URL + text/markdown) ───────────────────────────────────

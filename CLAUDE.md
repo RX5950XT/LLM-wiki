@@ -145,6 +145,7 @@ Android 呼叫與 Web 相同的後端 API（`/api/ingest`、`/api/query`、`/api
 - **Phase 10b** ✅：Android i18n + 每帳號 Room cache 隔離 + LLM profile owner guard migration
 - **Phase 11** ✅：批次檔案攝取 + 全文搜尋 + AI 完整檔案操控 — 多檔上傳/拖曳、PostgreSQL tsvector 搜尋、模型選擇器、deletePage / movePage 工具（自動重寫 backlink）
 - **Phase 12** ✅：全專案健檢 — 非同步 ingest（jobId + 輪詢，解決手機匯入逾時）、SSRF/cron P0-P2 安全修復、tools 層 lock/zone 硬性防護、Web/Android UX 大修（RWD、a11y、鍵盤、錯誤可見性、瀏覽器返回、backlinks 面板、rememberSaveable、BackHandler、DayNight 主題）
+- **Phase 13** ✅：漏洞續掃 + 功能補完 + Web/Android 對齊 — `extra_headers` AES-256-GCM 加密（migration 0013）、SSRF TOCTOU 關窗（undici pinned-DNS lookup）、broadcast trigger revoke（0014）、Sources 管理列表（Web + Android）、Ingest 即時進度（touched_pages 逐步回報）、Android backlinks 面板、離線冷啟 workspace 持久化（DataStore）、chat 草稿 hoist 至 ViewModel
 
 ## 安全注意事項（Phase 10）
 
@@ -167,12 +168,19 @@ Android 呼叫與 Web 相同的後端 API（`/api/ingest`、`/api/query`、`/api
 | 嚴重度 | 位置 | 問題 | 修復方式 |
 |--------|------|------|---------|
 | P0 | `api/lint/cron/route.ts`（已刪除） | route 無任何驗證且替匿名呼叫者附上正確 CRON_SECRET 轉發到 `/api/lint`——任何人可匿名觸發全站 lint、燒光所有使用者 LLM API 額度 | 刪除代理 route，`vercel.json` cron 直指 `/api/lint`（Vercel 自動帶 secret），比較改用 `timingSafeEqual` |
-| P1 | `lib/fetch/url-to-markdown.ts` | SSRF 防護只有 hostname 前綴 regex：`http://[::1]/`、`169.254.169.254`（雲端 metadata）、CGNAT、DNS 指向內網的網域全部繞過；redirect 只驗最終 URL | 重寫為 IP 正規化（含 IPv6 去括號/mapped 形式）+ `dns.lookup` 全 IP 檢查 + `redirect: 'manual'` 逐跳驗證 + 20s timeout + 5MB 上限。殘留 TOCTOU rebinding 窗口已以註解標明升級路徑 |
+| P1 | `lib/fetch/url-to-markdown.ts` | SSRF 防護只有 hostname 前綴 regex：`http://[::1]/`、`169.254.169.254`（雲端 metadata）、CGNAT、DNS 指向內網的網域全部繞過；redirect 只驗最終 URL | 重寫為 IP 正規化（含 IPv6 去括號/mapped 形式）+ `dns.lookup` 全 IP 檢查 + `redirect: 'manual'` 逐跳驗證 + 20s timeout + 5MB 上限。TOCTOU rebinding 窗口已於 Phase 13 以 undici Agent connect-time `lookup` 關閉（連線當下驗證同一份 DNS 結果） |
 | P2 | `api/pages/[...slug]` PATCH | `content` 無大小上限 | `.max(2MB)` 對齊全站規範 |
 | P2 | `lib/ai/tools.ts` | `writePage` 不檢查 `locked_by_human`、不擋 `notes/`/`_schema/` zone——LLM 可覆寫人類鎖定頁與唯讀區 | 工具層硬性 guard（見「AI 完整檔案操控」節） |
 | P3 | `api/workspaces/[id]/synthesis` | `answer`/`cited_slugs` 無上限、slug 可注入 YAML frontmatter | `answer` 2MB、slugs regex `^[\w/.-]+$` + 上限 50 |
 | P3 | migration `0012` | `google_oauth_tokens`（加密 refresh token 表）被 0011 慣例授予 anon/authenticated SELECT | REVOKE 只留 service_role（已套用至 production）。注意：`owns_workspace` 的 authenticated EXECUTE 是 RLS 必要的，**不可 revoke** |
-| P3（已知未修） | `llm_profiles.extra_headers` | 明文儲存且 GET 原樣回傳；`api-key`/`x-api-key` 型 provider 的 secret 只能放這裡 | 已擋 `authorization` key；完整修法需整包走 AES-256-GCM 加密（影響 Android 直查路徑），列為待辦 |
+| P3（Phase 13 已修） | `llm_profiles.extra_headers` | 明文儲存且 GET 原樣回傳；`api-key`/`x-api-key` 型 provider 的 secret 只能放這裡 | migration `0013`：新增 `extra_headers_encrypted bytea`，POST 走 AES-256-GCM 加密、GET 不再回傳 headers、`createLLMClient` 解密（legacy 明文列 fallback）。Android 不受影響（只讀 id/name/model 等欄位） |
+
+## 安全注意事項（Phase 13）
+
+- migration `0014`：revoke `broadcast_page_metadata_change()` 的 anon/authenticated EXECUTE（Supabase advisor 0029）。trigger 在 fire 時不檢查呼叫者的 EXECUTE 權限（已在 production 以 rollback transaction 實測），revoke 只擋直接 RPC 呼叫。
+- `owns_workspace(uuid)` 的 authenticated EXECUTE 是 RLS 必要依賴，advisor 會持續 WARN——**這是接受的設計，不可 revoke**。
+- Advisor「Leaked Password Protection Disabled」：本專案只用 Google OAuth；若要消除警告需在 Supabase Dashboard Auth 設定手動開啟（MCP/CLI 無法設定），不影響現有登入流程。
+- SSRF 修法依賴 `undici` 套件（`apps/web` 直接依賴）：`Agent({ connect: { lookup: guardedLookup } })` 讓 net/tls connect 使用被驗證過的 DNS 結果；IP literal 由 `assertPublicHost` 前置擋掉（connect 不會對 literal 呼叫 lookup）。
 
 ## 目錄速查（Android）
 
@@ -253,6 +261,11 @@ apps/android/app/src/main/java/com/llmwiki/
 - `BackHandler` 已接管搜尋模式與行內編輯器；系統返回鍵先關閉它們，不會直接退出 App
 - `MainActivity` 的 `ExternalEvent` 含 `token`（nanoTime）；NavGraph 必須把 `shareUrlEvent?.token` / `authReturnEvent?.token` 傳進 WikiScreen 並作為 `LaunchedEffect` key——否則分享同一個 URL 第二次不會觸發
 - `LaunchRoute` 查 workspaces 失敗（離線）時導向 `wiki` 而非 `workspace-create`；`workspace-create` 只保留給「成功查詢且真的沒有工作區」
+- 離線冷啟：`AppPreferencesRepository.setLastWorkspace()` 持久化最後使用的 workspace（account + WorkspaceRow JSON），`refreshWorkspaces()` 失敗時還原它並顯示 Room 快取頁面清單，不再出現空白畫面
+- Android backlinks 面板：`selectPage` 觸發 `loadBacklinks()` 直查 Supabase `page_links`（RLS），顯示為 MarkdownViewer 下方的 AssistChip 橫向捲動列；查詢失敗靜默為空（離線可接受）
+- Sources 清單：drawer 底列 `LibraryBooks` icon → `SourcesListDialog`，`loadSources()` 直查 `sources` + `ingest_jobs`（各 source 取最新 job 的 status/touched 數）；來源不可編輯（Karpathy 原則），純檢視
+- Chat 草稿存 `WikiUiState.chatDraft`（ViewModel），sheet 關閉/旋轉不丟；`sendQuery` 送出時清空
+- Ingest 進度：`pollIngestJob` 於 running 期間讀 `touched_pages` 長度 → `WikiUiState.ingestProgress`，banner 顯示「整合中…已更新 N 個頁面」
 - `themes.xml` 用 `Theme.AppCompat.DayNight.NoActionBar`，`values/` 淺色 windowBackground（#FAF9F7）、`values-night/` 深色（#0F1419）——避免淺色模式冷啟黑閃；AppCompat parent 不可換（`setApplicationLocales` 依賴）
 - Compose 主題已補 `surfaceContainer*` 五個 slot（`Color.kt` 由 Bg/Bg2 衍生）——否則 AlertDialog/DropdownMenu/ModalBottomSheet 會用 M3 預設紫調
 - 查詢失敗的錯誤必須傳進 `ChatBottomSheet` 內部顯示（sheet 全螢幕，Scaffold banner 會被蓋住）；`syncError` banner 有關閉鈕（`clearSyncError()`）
@@ -291,7 +304,8 @@ API (`/api/ingest`) 已支援兩種 kind。Ctrl+Enter 快速提交。text conten
 Web（`pollIngestJob`，3s 間隔）與 Android（`WikiViewModel.pollIngestJob`）都走這套協定；完成後顯示「已更新 N 頁」。
 **這是手機匯入不再逾時的關鍵**：舊版同步等待 300s，Android socket timeout 必炸；現在 POST 幾秒內返回，App 跳背景／切頁面都不影響伺服器端 job，回前景同步即見結果。
 向後相容：舊 server 回 `{ status: 'done' }` 時 client 直接視為完成。
-`urlToMarkdown` 有 20s fetch timeout、5 MB 頁面上限、逐跳 redirect SSRF 驗證（IP 正規化 + DNS 解析檢查，含 IPv6/link-local/CGNAT/metadata IP）。
+`urlToMarkdown` 有 20s fetch timeout、5 MB 頁面上限、逐跳 redirect SSRF 驗證（IP 正規化 + DNS 解析檢查，含 IPv6/link-local/CGNAT/metadata IP），並用 undici Agent 的 connect-time `lookup` 在建立連線當下驗證 IP（無 TOCTOU rebinding 窗口）。
+**即時進度**：pipeline 的 `onStepFinish` 會把 `touched_pages` 逐步寫回 job row，輪詢端在 `running` 期間即可顯示「已更新 N 頁」（Web `ingestProgress` state / Android `WikiUiState.ingestProgress`）。
 
 ## 側邊欄拖移
 

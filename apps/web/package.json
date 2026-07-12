@@ -32,6 +32,7 @@
     "react-markdown": "^9.0.1",
     "remark-gfm": "^4.0.0",
     "turndown": "^7.2.0",
+    "undici": "^8.7.0",
     "zod": "^3.24.0"
   },
   "devDependencies": {

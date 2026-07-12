@@ -72,6 +72,8 @@ export function ConversationPanel({
   const [ingesting, setIngesting] = useState(false);
   const [ingestError, setIngestError] = useState<string | null>(null);
   const [ingestResult, setIngestResult] = useState<string | null>(null);
+  // Live page count while the server-side ingest job is running
+  const [ingestProgress, setIngestProgress] = useState<number | null>(null);
   const [isDraggingFile, setIsDraggingFile] = useState(false);
   const [uploadQueue, setUploadQueue] = useState<{ name: string; status: 'pending' | 'uploading' | 'done' | 'error'; error?: string }[]>([]);
   const [driveReconnectPending, setDriveReconnectPending] = useState(false);
@@ -191,6 +193,10 @@ export function ConversationPanel({
           if (data.status === 'done') return { ok: true, touched: data.touched_pages?.length ?? 0 };
           if (data.status === 'failed') {
             return { ok: false, error: data.error ?? t('ingest.failedGeneric') };
+          }
+          // Still running — surface live cascade progress
+          if (data.touched_pages && data.touched_pages.length > 0) {
+            setIngestProgress(data.touched_pages.length);
           }
         } catch {
           if (++consecutiveFailures >= 3) return { ok: false, error: t('ingest.failedGeneric') };
@@ -403,6 +409,7 @@ export function ConversationPanel({
     setIngesting(true);
     setIngestError(null);
     setIngestResult(null);
+    setIngestProgress(null);
 
     try {
       const trimmed = ingestInput.trim();
@@ -449,6 +456,7 @@ export function ConversationPanel({
       setIngestError(t('ingest.failedGeneric'));
     } finally {
       setIngesting(false);
+      setIngestProgress(null);
     }
   };
 
@@ -580,7 +588,11 @@ export function ConversationPanel({
             style={{ background: 'var(--color-accent-glow)', color: 'var(--color-accent)' }}
           >
             <Loader2 size={12} className="animate-spin" />
-            <span>{t('ingest.running')}</span>
+            <span>
+              {ingestProgress
+                ? t('ingest.runningProgress', { count: ingestProgress })
+                : t('ingest.running')}
+            </span>
           </div>
         )}
         {uploadQueue.length > 0 && (

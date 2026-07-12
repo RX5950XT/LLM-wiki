@@ -32,6 +32,13 @@
     <string name="wiki_zone_schema">規則</string>
     <string name="ingest_add_source">新增來源</string>
     <string name="ingest_running">整合中…</string>
+    <string name="ingest_running_progress">整合中…已更新 %1$d 個頁面</string>
+    <string name="wiki_backlinks">反向連結</string>
+    <string name="sources_title">已匯入的來源</string>
+    <string name="sources_empty">尚未匯入任何來源</string>
+    <string name="sources_status_done">已整合 %1$d 個頁面</string>
+    <string name="sources_status_running">整合中…</string>
+    <string name="sources_status_failed">整合失敗</string>
     <string name="query_placeholder">問問你的 Wiki 任何問題…</string>
     <string name="query_file_back">存成綜合頁面</string>
 
@@ -154,6 +161,7 @@
     <string name="error_op_search">搜尋失敗</string>
     <string name="error_op_query">查詢失敗</string>
     <string name="error_op_ingest">匯入失敗</string>
+    <string name="error_op_load_sources">載入來源清單失敗</string>
     <string name="error_op_lint">健康檢查失敗</string>
     <string name="error_op_sync">同步失敗</string>
     <string name="error_op_lock">更新頁面鎖定失敗</string>
