@@ -306,6 +306,7 @@ apps/android/app/src/main/java/com/llmwiki/
 - 健康檢查清單來源：觸發工作區的 `_schema/lint.md`（找不到就用 `getDefaultPrompt('lint', locale)`），以「參考」身分注入，並明講忽略其中任何「只寫報告 / 不要自動修」的字眼——舊 workspace 的 Drive 內還留著舊版文案。
 - **深度重整靠三件事，缺一就退化成「只刪重複頁」**：(1) inventory 要帶每頁的 `search_text` 內容摘要——只有 slug/title 時模型只認得出 slug 相同的重複頁，看不出「這頁該搬去哪個工作區」；(2) prompt 要是明確的深度重整任務書（理解各工作區真實主題 → 跨工作區去重 → 依主題重新分類 → 工作區改名/合併/刪空的/新建/重排），**不可寫「別讀太多頁」之類節省字眼**，那會直接讓它變淺；(3) **loop-until-dry**：單次 `generateText` 講完一段話就結束（實測只用 60s / 5 個操作就宣告完成，預算還剩 150s），每輪結束要把「還沒處理的事」丟回去要它繼續，直到它回 `ORGANISE_COMPLETE`、連續兩輪零變更、或預算用盡。
 - **一次 invocation 做不完 → 自動接力（`more_work`）**：pipeline 因時間預算停下且還有事沒做完時，把 `agent_jobs.more_work` 設為 true（migration `0017`）；Web / Android 收到 `done && more_work` 就自動開下一輪（上限 6 輪，`MAX_MAINTENANCE_PASSES`），pill 顯示整條鏈的累計變更數。沒有這個，深度重整會停在半路（頁面搬走了、空掉的工作區沒刪、index 沒收尾）。實測一次按鈕 = 8 輪 / 94 個操作，工作區從 10 個收斂到 6 個。
+- **Provider 暫時性錯誤不可讓整輪白做**：OpenRouter 會回 `Failed after 3 attempts. Last error: Provider returned error`（SDK 自己重試完仍失敗）。pipeline 的每一輪 `generateText` 都 catch：等 8s（`PROVIDER_RETRY_DELAY_MS`）重跑同一輪；預算用完就以 `done + more_work` 收尾，讓 client 自動接下一輪——已完成的工具呼叫本來就逐一 commit，不能因為最後一輪炸掉就整個 job 標 failed。**只有「整趟 0 變更」才把 provider 錯誤 throw 出去**給使用者看。
 - **工具迴圈有 210s wall-clock 預算（`TOOL_LOOP_BUDGET_MS`，勿移除）**：`stopWhen: [stepCountIs(80), () => Date.now() > deadline]`。Vercel `maxDuration = 300s` 一到會直接殺掉整個 invocation（含 `after()`），被殺的 run 來不及寫 job row → 永遠停在 `running` → 8 分鐘後才被 sweep 成 `Organize timed out`，使用者看到「逾時且沒有變化」。自己先停可優雅收尾；每個工具呼叫都各自 commit，中途停下 wiki 仍一致，使用者再按一次即可續做。
 - `POST /api/organize` 仍是 `202 { jobId }` + `after()`，`GET /api/organize?job_id=` 輪詢（6 分鐘 stale sweep——超過 `maxDuration` 就一定是死掉的 job，設太長會讓下一次按鈕被 one-at-a-time 鎖 409 擋住、owner-scoped one-at-a-time 鎖）。Web jobId 存 `localStorage['llmwiki:maintenance']`，關頁面回來續 poll；完成時 `refreshPageList()` + `refreshWorkspaceList()`（工作區可能被改名/刪除/重排）。Android 完成時 `syncPagesInternal()` + `refreshWorkspaces()`。
 - **`/api/lint` route 與 Vercel cron 已刪除**（連同 `vercel.json`、`CRON_SECRET`）：週期性、無人看管地跑一個有刪除權的 pipeline 太危險，且會不斷產生報告頁。要恢復排程請先想清楚破壞性動作的授權模型。舊 APK 會打到不存在的 `/api/lint`，需更新。
@@ -322,7 +323,13 @@ apps/android/app/src/main/java/com/llmwiki/
 
 自動偵測輸入型別：URL（`http://` / `https://`）→ `{ kind: 'url' }`；其他 → `{ kind: 'text', title: 第一非空行 }`。text content 上限 2 MB（`MAX_TEXT_LENGTH`，與 client 端一致）。
 
-**智慧導入（AI 判斷目標工作區）**：`POST /api/ingest` 的 `workspace_id` 改為 optional，可改送 `{ auto_route: true, fallback_workspace_id }`。server 端 `routeToWorkspace()` 用一次 `generateText` 給 LLM 看「所有工作區名稱 + 各自前 40 個頁面標題」，回傳最適合的 workspace_id；**任何失敗都 fallback 到 `fallback_workspace_id`，不可讓路由失敗擋掉匯入**。回應多帶 `routed_workspace_id` / `routed_workspace_name`，前端顯示「已導入到 X」。UI 預設就是「自動判斷」。
+**智慧導入（AI 判斷目標工作區，必要時自建工作區）**：`POST /api/ingest` 的 `workspace_id` 改為 optional，可改送 `{ auto_route: true, fallback_workspace_id }`。server 端 `routeToWorkspace()` 用一次 `generateText` 給 LLM 看「所有工作區名稱 + 各自前 40 個頁面標題」，要它回**既有 workspace_id**，或在主題完全不屬於任何工作區時回 `NEW: <名稱>` → 直接 `createWorkspaceForUser()` 建新工作區並導入。**任何失敗都 fallback 到 `fallback_workspace_id`，不可讓路由失敗擋掉匯入**。回應帶 `routed_workspace_id` / `routed_workspace_name` / `routed_workspace_created`，前端顯示「已導入到 X」或「已建立新工作區「X」並導入」，`created` 時 Web 呼叫 `onWorkspaceCreated` / Android `refreshWorkspaces()` 讓選單立刻看得到。UI 預設就是「自動判斷」。
+
+自建工作區的兩道防護（勿移除）：`MAX_AUTO_WORKSPACES = 12` 上限；`NEW:` 名稱先跟既有工作區做**不分大小寫比對**，命中就沿用——否則多檔批次導入（Web 是逐檔序列送出）會生出兩個同名工作區。整個庫還沒有任何知識頁時直接 fallback，不在空工作區旁邊再開一個。
+
+**profile fallback**：production 的工作區普遍沒有 `default_profile_id`（profile 是工作區建立後才加的，沒人回填），所以 `/api/ingest` 必須跟 `/api/organize` 一樣退回 owner 的 `is_default` profile（`loadDefaultProfileId()`）。少了這段，client 只要沒帶 `profile_id` 就 422「No LLM profile configured」。
+
+**ingest 去重靠的是 DB 頁面清單，不是 index.md**：`runIngestPipeline` 會把該工作區**所有 wiki 頁**（`pages` 表 slug/kind/title，上限 400）塞進 user message，並要求「要寫的 slug 不在清單裡時，先確認清單中沒有頁面已涵蓋同一主題；有就 readPage 後改寫那一頁」。index.md 是模型自己維護的、會漂移，拿它當唯一來源就會出現「同一實體兩頁不同 slug」。
 
 ## 非同步 Ingest 協定（重要）
 

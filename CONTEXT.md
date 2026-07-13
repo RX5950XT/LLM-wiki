@@ -2,7 +2,21 @@
 
 > 給下一個 AI Agent 的接手指南。架構與規範細節以 `CLAUDE.md` / `AGENTS.md` 為準，這裡只記「最近做了什麼、為什麼、還缺什麼」。
 
-## 最近一次變更（2026-07-13，Phase 16c 真正的跨工作區深度重整）
+## 最近一次變更（2026-07-14，Phase 16d 導入路由 + 去重 + provider 容錯）
+
+使用者要求：修掉 `Failed after 3 attempts. Last error: Provider returned error`；並確認統一導入「能正確分類到對應工作區、完美整合避免重複、必要時自己建立新工作區」。四個修法：
+
+1. **provider 暫時錯誤不再毀掉整趟維護**：`runOrganizePipeline` 的每一輪 `generateText` 都 catch → 等 8s 重跑同一輪；預算用完就以 `done + more_work` 收尾讓 client 接力。**只有整趟 0 變更才把錯誤 throw 給使用者**。以前最後一輪被限流就整個 job 標 failed，前面 90 幾個操作看起來像白做。
+2. **導入去重靠 DB 頁面清單**：`runIngestPipeline` 之前只給模型 `index.md`＋來源，模型看不到實際有哪些頁 → 同一實體很容易再開一頁。現在把該工作區所有 wiki 頁（`pages` 表 slug/kind/title，上限 400）注入 prompt，並要求「同主題就 readPage 改寫既有頁，不要寫近似 slug」。
+3. **路由可以自建工作區**：`routeToWorkspace()` 允許模型回 `NEW: <名稱>` → `createWorkspaceForUser()`。防護：上限 12 個工作區、`NEW:` 名稱與既有工作區不分大小寫比對命中就沿用（批次導入是逐檔序列送出，否則會生同名雙胞胎）、整庫還沒有知識頁時直接 fallback。回應多帶 `routed_workspace_created`，Web/Android 收到就刷新工作區選單。
+4. **`/api/ingest` 補 profile fallback**：production 的工作區**全部**沒有 `default_profile_id`（profile 是工作區建立後才加的），client 只要沒帶 `profile_id` 就 422「No LLM profile configured」。改成跟 `/api/organize` 一樣退回 owner 的 `is_default` profile。
+
+**production 實測**（用瀏覽器直接打 API）：
+- 路由：把一段已存在於「科技產業動態」的 Cloudflare 財報內容，從「地緣政治與全球貿易」用自動判斷導入 → `routed_workspace_name: 科技產業動態`（不是 fallback）。
+- 去重：該次 ingest 觸及 5 個知識頁，**全部是既有 slug**（`entities/cloudflare.md`、`summaries/cloudflare_2026_q1.md`、`concepts/workers_platform.md`…），工作區知識頁數 34 → 34，**零新增重複頁**。
+- 自建工作區：導入一段手沖咖啡筆記（與四個工作區都無關）→ `routed_workspace_created: true`，新工作區「咖啡與生活品味」+ 5 頁。測完已用 `DELETE /api/workspaces/{id}` 刪除（順帶再驗一次 0018 的刪除路徑：回 `{ok:true}`），測試用的 source row 也已清掉。
+
+## 上一次變更（2026-07-13，Phase 16c 真正的跨工作區深度重整）
 
 使用者要的不只是刪重複頁，而是「跨全部工作區一起看：去重、重新分類、工作區改名／建立／刪除，非常深入的分類」。修完逾時後第一次實測只跑了 60 秒 / 5 個操作就自己收工——太淺。挖出四個獨立的原因，全部修掉：
 

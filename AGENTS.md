@@ -133,6 +133,9 @@ GOOGLE_OAUTH_CLIENT_SECRET=
 ### 統一導入 + 智慧路由
 - `import-dialog.tsx`：貼上 URL/文字/Markdown、拖曳檔案、多檔佇列（pending/uploading/done/error）
 - 目標工作區預設「自動判斷」：POST `/api/ingest` 帶 `{ auto_route: true, fallback_workspace_id }`，server 用一次 LLM 呼叫選工作區，**失敗一律 fallback，不可擋掉匯入**；回應帶 `routed_workspace_name` 供 UI 顯示「已導入到 X」
+- LLM 可回 `NEW: <名稱>` → server 直接建新工作區並導入（上限 12 個、同名沿用、整庫還沒有知識頁時不建）；回應多帶 `routed_workspace_created`，Web/Android 收到就刷新工作區選單
+- `/api/ingest` 找不到工作區綁定的 profile 時，退回 owner 的 `is_default` profile（production 的工作區普遍沒綁 profile）
+- **去重靠 DB 頁面清單**：`runIngestPipeline` 把該工作區所有 wiki 頁（slug/kind/title，上限 400）注入 prompt，要求同主題改寫既有頁而非新建近似 slug；index.md 會漂移，不能當唯一依據
 
 ### 跨工作區 AI + 破壞性操作確認
 - `lib/ai/tools.ts` 的頁面工具都吃可選 `workspace_id`；`resolveScope()` 必帶 `.eq('owner_id', userId)`
