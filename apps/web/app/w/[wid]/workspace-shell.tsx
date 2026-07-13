@@ -36,10 +36,23 @@ interface MaintState {
   jobId: string;
   status: 'running' | 'done' | 'failed';
   error?: string | null;
+  /** Changes made by the pass currently running / just finished. */
   changes?: number;
+  /** Which pass of the chain this is (1-based). */
+  pass: number;
+  /** Changes accumulated by the earlier passes of this chain. */
+  carried: number;
 }
 
 const MAINTENANCE_STORAGE_KEY = 'llmwiki:maintenance';
+
+/**
+ * A deep reorganisation does not fit in one 300s Vercel invocation: the model
+ * gets cut off mid-plan (pages moved out of a workspace, the emptied workspace
+ * not yet deleted). When a pass reports more_work we start the next one, up to
+ * this many, so one button press converges instead of stopping half-done.
+ */
+const MAX_MAINTENANCE_PASSES = 6;
 
 interface WorkspaceShellProps {
   workspaceId: string;
@@ -398,12 +411,8 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
   // One maintenance job = health check + organize/dedupe in a single background
   // pass. It mutates the wiki directly (no report page) and keeps running
   // server-side even if this tab is closed.
-  const startMaintenance = useCallback(async () => {
-    if (maintenance?.status === 'running') return;
-    if (!window.confirm(t('workspace.maintenanceConfirm'))) return;
-    setMaintenance(null);
-    setWorkspaceActionError(null);
-    try {
+  const startMaintenancePass = useCallback(
+    async (pass: number, carried: number) => {
       const res = await fetch('/api/organize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-llm-wiki-locale': locale },
@@ -413,12 +422,27 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
       // we can adopt and keep tracking it instead of erroring.
       const data = (await res.json().catch(() => null)) as { jobId?: string; error?: string } | null;
       if (!data?.jobId) throw new Error(data?.error ?? t('workspace.maintenanceFailed'));
-      localStorage.setItem(MAINTENANCE_STORAGE_KEY, JSON.stringify({ jobId: data.jobId }));
-      setMaintenance({ jobId: data.jobId, status: 'running' });
+      const next: MaintState = { jobId: data.jobId, status: 'running', pass, carried };
+      localStorage.setItem(
+        MAINTENANCE_STORAGE_KEY,
+        JSON.stringify({ jobId: data.jobId, pass, carried }),
+      );
+      setMaintenance(next);
+    },
+    [locale, workspaceId, t],
+  );
+
+  const startMaintenance = useCallback(async () => {
+    if (maintenance?.status === 'running') return;
+    if (!window.confirm(t('workspace.maintenanceConfirm'))) return;
+    setMaintenance(null);
+    setWorkspaceActionError(null);
+    try {
+      await startMaintenancePass(1, 0);
     } catch (error) {
       setWorkspaceActionError(error instanceof Error ? error.message : t('workspace.maintenanceFailed'));
     }
-  }, [maintenance?.status, locale, workspaceId, t]);
+  }, [maintenance?.status, startMaintenancePass, t]);
 
   const dismissMaintenance = useCallback(() => {
     localStorage.removeItem(MAINTENANCE_STORAGE_KEY);
@@ -430,8 +454,15 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
     const raw = typeof window !== 'undefined' ? localStorage.getItem(MAINTENANCE_STORAGE_KEY) : null;
     if (!raw) return;
     try {
-      const saved = JSON.parse(raw) as { jobId?: string };
-      if (saved?.jobId) setMaintenance({ jobId: saved.jobId, status: 'running' });
+      const saved = JSON.parse(raw) as { jobId?: string; pass?: number; carried?: number };
+      if (saved?.jobId) {
+        setMaintenance({
+          jobId: saved.jobId,
+          status: 'running',
+          pass: saved.pass ?? 1,
+          carried: saved.carried ?? 0,
+        });
+      }
     } catch {
       localStorage.removeItem(MAINTENANCE_STORAGE_KEY);
     }
@@ -441,7 +472,7 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
   // whether this page is open, so closing the tab never cancels it.
   useEffect(() => {
     if (maintenance?.status !== 'running') return;
-    const { jobId } = maintenance;
+    const { jobId, pass, carried } = maintenance;
     let cancelled = false;
     const tick = async () => {
       try {
@@ -451,6 +482,7 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
           status?: string;
           error?: string;
           progress?: string[];
+          more_work?: boolean;
         };
         if (cancelled) return;
         if (poll.status === 'running') {
@@ -464,19 +496,39 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
           return;
         }
         if (poll.status === 'done' || poll.status === 'failed') {
-          localStorage.removeItem(MAINTENANCE_STORAGE_KEY);
-          setMaintenance({
-            jobId,
-            status: poll.status,
-            error: poll.error ?? null,
-            changes: poll.progress?.length ?? 0,
-          });
+          const changes = poll.progress?.length ?? 0;
           if (poll.status === 'done') {
             refreshPageList();
             // Maintenance may have renamed/created/deleted/reordered workspaces
             refreshWorkspaceList();
             setGraphRefreshKey((k) => k + 1);
           }
+          // The pass ran out of time with work still outstanding: chain the next
+          // one so a single button press converges instead of stopping half-done.
+          if (poll.status === 'done' && poll.more_work && pass < MAX_MAINTENANCE_PASSES) {
+            cancelled = true;
+            try {
+              await startMaintenancePass(pass + 1, carried + changes);
+            } catch {
+              setMaintenance({
+                jobId,
+                status: 'done',
+                changes,
+                pass,
+                carried,
+              });
+            }
+            return;
+          }
+          localStorage.removeItem(MAINTENANCE_STORAGE_KEY);
+          setMaintenance({
+            jobId,
+            status: poll.status,
+            error: poll.error ?? null,
+            changes,
+            pass,
+            carried,
+          });
         }
       } catch {
         /* transient network error — keep polling */
@@ -488,7 +540,15 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
       cancelled = true;
       window.clearInterval(id);
     };
-  }, [maintenance?.status, maintenance?.jobId, refreshPageList, refreshWorkspaceList]);
+  }, [
+    maintenance?.status,
+    maintenance?.jobId,
+    maintenance?.pass,
+    maintenance?.carried,
+    refreshPageList,
+    refreshWorkspaceList,
+    startMaintenancePass,
+  ]);
 
   const handleSignOut = useCallback(async () => {
     const supabase = createClient();
@@ -934,9 +994,9 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
           {maintenance.status === 'failed' && <AlertCircle size={14} className="shrink-0" />}
           <span className="min-w-0 flex-1 truncate">
             {maintenance.status === 'running'
-              ? `${t('workspace.maintenanceRunning', { count: maintenance.changes ?? 0 })} · ${t('workspace.maintenanceBackgroundHint')}`
+              ? `${t('workspace.maintenanceRunning', { count: maintenance.carried + (maintenance.changes ?? 0) })} · ${t('workspace.maintenanceBackgroundHint')}`
               : maintenance.status === 'done'
-                ? t('workspace.maintenanceDone', { count: maintenance.changes ?? 0 })
+                ? t('workspace.maintenanceDone', { count: maintenance.carried + (maintenance.changes ?? 0) })
                 : maintenance.error || t('workspace.maintenanceFailed')}
           </span>
           {maintenance.status !== 'running' && (

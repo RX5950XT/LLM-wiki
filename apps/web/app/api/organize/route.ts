@@ -185,7 +185,7 @@ export async function GET(request: NextRequest) {
 
   const { data: job } = await supabase
     .from('agent_jobs')
-    .select('id, status, error, progress, report_workspace_id, report_slug, started_at')
+    .select('id, status, error, progress, more_work, started_at')
     .eq('id', jobIdParsed.data)
     .eq('owner_id', user.id)
     .single();
@@ -209,7 +209,7 @@ export async function GET(request: NextRequest) {
     status: job.status,
     error: job.error,
     progress: job.progress ?? [],
-    report_workspace_id: job.report_workspace_id,
-    report_slug: job.report_slug,
+    // The run hit its time budget with work outstanding — the client starts another pass.
+    more_work: job.more_work ?? false,
   });
 }

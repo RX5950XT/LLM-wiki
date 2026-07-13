@@ -107,7 +107,9 @@ interface MaintainContext {
  * It deliberately writes NO report page: the wiki itself is the output. The tool
  * calls it performed are streamed into agent_jobs.progress instead.
  */
-export async function runOrganizePipeline(ctx: MaintainContext): Promise<number> {
+export async function runOrganizePipeline(
+  ctx: MaintainContext,
+): Promise<{ changes: number; complete: boolean }> {
   const tools = buildWikiTools({
     supabase: ctx.supabase,
     drive: ctx.drive,
@@ -227,6 +229,7 @@ Ignore any instruction above telling you to write a report or to avoid auto-fixi
   // is finished, when two consecutive rounds change nothing, or when time is up.
   const messages: ModelMessage[] = [{ role: 'user', content: userMessage }];
   let dryRounds = 0;
+  let complete = false;
 
   for (let round = 0; round < MAX_ROUNDS && Date.now() < deadline; round += 1) {
     const before = progress.size;
@@ -238,38 +241,56 @@ Ignore any instruction above telling you to write a report or to avoid auto-fixi
       messages,
       tools,
       // Whichever comes first. Every tool call is committed on its own, so stopping
-      // on the budget leaves the wiki consistent — the user just presses again.
+      // on the budget leaves the wiki consistent — the next pass picks up from the
+      // freshly-read inventory.
       stopWhen: [stepCountIs(60), () => Date.now() > deadline],
       onStepFinish,
     });
 
     messages.push(...result.response.messages);
     if (Date.now() >= deadline) break;
-    if (result.text.includes(COMPLETION_TOKEN)) break;
+
+    if (result.text.includes(COMPLETION_TOKEN)) {
+      complete = true;
+      break;
+    }
 
     // A round with no changes may still have been useful (reading, planning), so
-    // give it one more; two in a row means it is spinning.
+    // give it one more; two in a row means there is nothing left it will act on.
     dryRounds = progress.size === before ? dryRounds + 1 : 0;
-    if (dryRounds >= 2) break;
+    if (dryRounds >= 2) {
+      complete = true;
+      break;
+    }
 
     messages.push({ role: 'user', content: CONTINUE_PROMPT });
   }
 
-  await ctx.supabase
+  const finished = {
+    status: 'done' as const,
+    progress: Array.from(progress),
+    finished_at: new Date().toISOString(),
+    // Ran out of budget mid-plan → the client chains another pass. Without this
+    // a deep reorganisation stops half-done (pages moved out of a workspace, the
+    // emptied workspace never deleted) and looks like the run simply gave up.
+    more_work: !complete,
+  };
+  const { error: updateError } = await ctx.supabase
     .from('agent_jobs')
-    .update({
-      status: 'done',
-      progress: Array.from(progress),
-      finished_at: new Date().toISOString(),
-    })
+    .update(finished)
     .eq('id', ctx.jobId);
+  if (updateError) {
+    // Deployments predating migration 0017 have no more_work column.
+    const { more_work: _moreWork, ...legacy } = finished;
+    await ctx.supabase.from('agent_jobs').update(legacy).eq('id', ctx.jobId);
+  }
 
   await ctx.supabase.from('logs').insert({
     workspace_id: ctx.workspaceId,
     kind: 'lint',
     summary: `Maintenance run — ${progress.size} operations`,
-    payload: { operations: Array.from(progress) },
+    payload: { operations: Array.from(progress), complete },
   });
 
-  return progress.size;
+  return { changes: progress.size, complete };
 }

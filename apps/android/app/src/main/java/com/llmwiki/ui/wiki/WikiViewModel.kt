@@ -71,6 +71,13 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 
+/**
+ * A deep reorganisation is cut off by the server's 300s invocation limit, so a
+ * pass reports `more_work` and the client chains the next one. Keep in step with
+ * the Web client's MAX_MAINTENANCE_PASSES.
+ */
+private const val MAX_MAINTENANCE_PASSES = 6
+
 data class ChatMessage(
     val role: String,
     val content: String,
@@ -826,71 +833,88 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
         val failMsg = str(R.string.error_op_organize)
         viewModelScope.launch {
             _uiState.update { it.copy(organizeRunning = true, maintenanceChanges = 0, syncError = null) }
+            var carried = 0
             try {
-                val bodyJson = buildJsonObject { put("workspace_id", wsId) }.toString()
-                val response = sendAuthorizedRequest { accessToken ->
-                    AndroidHttpClient.instance.post(webApiUrl("/api/organize")) {
-                        header("Authorization", "Bearer $accessToken")
-                        header("x-llm-wiki-locale", currentUiLocale())
-                        contentType(ContentType.Application.Json)
-                        setBody(bodyJson)
+                // A deep reorganisation does not fit in one server invocation (300s):
+                // the pass reports more_work when it was cut off mid-plan, and we chain
+                // the next one so a single button press converges. Mirrors the Web client.
+                for (pass in 1..MAX_MAINTENANCE_PASSES) {
+                    val bodyJson = buildJsonObject { put("workspace_id", wsId) }.toString()
+                    val response = sendAuthorizedRequest { accessToken ->
+                        AndroidHttpClient.instance.post(webApiUrl("/api/organize")) {
+                            header("Authorization", "Bearer $accessToken")
+                            header("x-llm-wiki-locale", currentUiLocale())
+                            contentType(ContentType.Application.Json)
+                            setBody(bodyJson)
+                        }
+                    } ?: run {
+                        _uiState.update { it.copy(organizeRunning = false, syncError = unauthorizedMessage()) }
+                        onDone(false)
+                        return@launch
                     }
-                } ?: run {
-                    _uiState.update { it.copy(organizeRunning = false, syncError = unauthorizedMessage()) }
-                    onDone(false)
-                    return@launch
-                }
-                val text = response.bodyAsText()
-                val bodyJsonObj = if (isJsonObject(text)) apiJson.parseToJsonElement(text).jsonObject else null
-                val jobId = bodyJsonObj?.get("jobId")?.jsonPrimitive?.contentOrNull
-                if (response.status.value !in 200..299 || jobId == null) {
-                    _uiState.update {
-                        it.copy(organizeRunning = false, syncError = parseApiError(text, failMsg))
+                    val text = response.bodyAsText()
+                    val bodyJsonObj = if (isJsonObject(text)) apiJson.parseToJsonElement(text).jsonObject else null
+                    val jobId = bodyJsonObj?.get("jobId")?.jsonPrimitive?.contentOrNull
+                    if (response.status.value !in 200..299 || jobId == null) {
+                        _uiState.update {
+                            it.copy(organizeRunning = false, syncError = parseApiError(text, failMsg))
+                        }
+                        onDone(false)
+                        return@launch
                     }
-                    onDone(false)
-                    return@launch
+
+                    val deadline = System.currentTimeMillis() + 6 * 60 * 1000L
+                    var settled = false
+                    var moreWork = false
+                    while (System.currentTimeMillis() < deadline) {
+                        delay(3_000)
+                        val poll = sendAuthorizedRequest { accessToken ->
+                            AndroidHttpClient.instance.get(webApiUrl("/api/organize?job_id=$jobId")) {
+                                header("Authorization", "Bearer $accessToken")
+                            }
+                        } ?: continue
+                        val pollText = poll.bodyAsText()
+                        if (poll.status.value !in 200..299 || !isJsonObject(pollText)) continue
+                        val obj = apiJson.parseToJsonElement(pollText).jsonObject
+                        val changes = (obj["progress"] as? JsonArray)?.size ?: 0
+                        when (obj["status"]?.jsonPrimitive?.contentOrNull) {
+                            "done" -> {
+                                carried += changes
+                                moreWork = obj["more_work"]?.jsonPrimitive?.booleanOrNull ?: false
+                                syncPagesInternal(wsId, forceSync = true)
+                                // Maintenance may rename / create / delete / reorder workspaces
+                                refreshWorkspaces(syncSelected = false)
+                                _uiState.update { it.copy(maintenanceChanges = carried) }
+                                settled = true
+                            }
+                            "failed" -> {
+                                val err = obj["error"]?.jsonPrimitive?.contentOrNull
+                                    ?.takeIf { it.isNotBlank() } ?: failMsg
+                                _uiState.update {
+                                    it.copy(organizeRunning = false, maintenanceChanges = 0, syncError = err)
+                                }
+                                onDone(false)
+                                return@launch
+                            }
+                            // still running — surface how many pages/workspaces changed so far
+                            else -> _uiState.update { it.copy(maintenanceChanges = carried + changes) }
+                        }
+                        if (settled) break
+                    }
+                    if (!settled) {
+                        _uiState.update {
+                            it.copy(organizeRunning = false, syncError = str(R.string.error_network_timeout))
+                        }
+                        onDone(false)
+                        return@launch
+                    }
+                    if (!moreWork) break
                 }
 
-                val deadline = System.currentTimeMillis() + 6 * 60 * 1000L
-                while (System.currentTimeMillis() < deadline) {
-                    delay(3_000)
-                    val poll = sendAuthorizedRequest { accessToken ->
-                        AndroidHttpClient.instance.get(webApiUrl("/api/organize?job_id=$jobId")) {
-                            header("Authorization", "Bearer $accessToken")
-                        }
-                    } ?: continue
-                    val pollText = poll.bodyAsText()
-                    if (poll.status.value !in 200..299 || !isJsonObject(pollText)) continue
-                    val obj = apiJson.parseToJsonElement(pollText).jsonObject
-                    val changes = (obj["progress"] as? JsonArray)?.size ?: 0
-                    when (obj["status"]?.jsonPrimitive?.contentOrNull) {
-                        "done" -> {
-                            syncPagesInternal(wsId, forceSync = true)
-                            // Maintenance may rename / create / delete / reorder workspaces
-                            refreshWorkspaces(syncSelected = false)
-                            _uiState.update {
-                                it.copy(organizeRunning = false, maintenanceChanges = 0, syncError = null)
-                            }
-                            onDone(true)
-                            return@launch
-                        }
-                        "failed" -> {
-                            val err = obj["error"]?.jsonPrimitive?.contentOrNull
-                                ?.takeIf { it.isNotBlank() } ?: failMsg
-                            _uiState.update {
-                                it.copy(organizeRunning = false, maintenanceChanges = 0, syncError = err)
-                            }
-                            onDone(false)
-                            return@launch
-                        }
-                        // still running — surface how many pages/workspaces changed so far
-                        else -> _uiState.update { it.copy(maintenanceChanges = changes) }
-                    }
-                }
                 _uiState.update {
-                    it.copy(organizeRunning = false, syncError = str(R.string.error_network_timeout))
+                    it.copy(organizeRunning = false, maintenanceChanges = 0, syncError = null)
                 }
-                onDone(false)
+                onDone(true)
             } catch (e: Exception) {
                 _uiState.update {
                     it.copy(organizeRunning = false, syncError = e.toUserFacingMessage(failMsg))
