@@ -2,7 +2,22 @@
 
 > 給下一個 AI Agent 的接手指南。架構與規範細節以 `CLAUDE.md` / `AGENTS.md` 為準，這裡只記「最近做了什麼、為什麼、還缺什麼」。
 
-## 最近一次變更（2026-07-13，Phase 16b 自動整理逾時修復）
+## 最近一次變更（2026-07-13，Phase 16c 真正的跨工作區深度重整）
+
+使用者要的不只是刪重複頁，而是「跨全部工作區一起看：去重、重新分類、工作區改名／建立／刪除，非常深入的分類」。修完逾時後第一次實測只跑了 60 秒 / 5 個操作就自己收工——太淺。挖出四個獨立的原因，全部修掉：
+
+1. **inventory 沒有內容**（只有 slug/kind/title）→ 模型只認得出 slug 完全相同的重複頁，看不出「這頁該搬去哪個工作區」。改成帶入每頁的 `search_text` 摘要（DB 已存前 2000 字，不用額外讀 Drive）。
+2. **prompt 叫它別深入**：修 timeout 時我加的「do not read every page just to look」直接讓它變淺。改寫成明確的深度重整任務書。
+3. **單次 generateText 講完就結束**，沒有任何機制逼它用完預算 → 改成 **loop-until-dry**（每輪把「還沒處理的事」丟回去，直到回 `ORGANISE_COMPLETE`／連兩輪零變更／預算用盡）。
+4. **一次 invocation 做不完**：實測 214s 預算用盡時才剛把「科技研究」9 頁中的 6 頁搬走，空掉的工作區沒刪。→ migration `0017` 加 `agent_jobs.more_work`，Web/Android 收到 `done && more_work` 自動接下一輪（上限 6 輪），pill 顯示累計變更數。
+
+**最大的坑（migration 0018）**：AI 一直不肯刪空工作區，只把它們改名成「【準備刪除】…」「【已空】…」。以為是 prompt 保守，實際上是 **DB bug——任何工作區都刪不掉**：`bump_workspace_sync_revision()`（pages 的 AFTER DELETE trigger）會對已被 CASCADE 刪掉的 workspace_id 做 INSERT → FK 違規 → 交易回滾。`DELETE /api/workspaces/{id}` 直接 500，Web/Android 的刪除鍵一樣壞，AI 是被工具反覆拒絕才繞路的。trigger 改成 workspace 不存在時 `RETURN NULL`；`deleteWorkspaceForUser` 也補上「DB 刪除失敗時把已 trash 的 Drive 資料夾還原」。
+
+**實測結果**（在 production 按下按鈕全程監控）：一次按鈕 → 自動接力 8 輪 → **94 個操作**。工作區 10 → 6：合併「理財＋總體經濟＋各種個股研究」成「個人理財與退休規劃」、「科技研究」併入「科技產業動態」、「訪談」拆散歸位後刪除、「國際政治」改名「地緣政治與全球貿易」，4 個空工作區真的被 `deleteWorkspace` 刪掉。
+
+> 未做：最後兩輪撞到 OpenRouter `Provider returned error`（連跑 7 輪重負載後的限流），還剩兩個空的「My Wiki」沒刪掉——再按一次按鈕即可清掉。provider 暫時性失敗會讓該輪 job 標成 failed 並中斷接力鏈（changes 已落地），目前沒有自動重試，先觀察是否需要。
+
+## 上一次變更（2026-07-13，Phase 16b 自動整理逾時修復）
 
 使用者回報：按「自動分類」跑出 `Organize timed out`，而且**看不到任何變化**。查 production `agent_jobs` 發現 job 其實有做 14 個操作、卻在 532 秒被判逾時。兩個獨立的 bug 疊在一起：
 

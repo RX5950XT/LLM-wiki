@@ -259,6 +259,8 @@ Query API 文字串流結尾依序附加 `\x00CITATIONS\x00[...]`、`\x00ACTIONS
 - i18n cookie-based（`NEXT_LOCALE`），`zh-TW`（預設）和 `en`
 - GraphView 動態 import `react-force-graph-2d` 避免 SSR 問題
 - **維護 job（Phase 16 合一）**：健康檢查與整理去重合併成單一 pipeline / 單一按鈕（`/api/organize`），`/api/lint` route、`vercel.json` cron、`CRON_SECRET` 皆已刪除（無人看管地跑有刪除權的 pipeline 太危險，且會不停產生報告頁）。舊 APK 打 `/api/lint` 會 404，需更新。owner-scoped one-at-a-time 鎖 + 6 分鐘 stale sweep（超過 `maxDuration` 就一定是死掉的 job；設太長會讓下一次按鈕被鎖 409 擋住）。
+- **工作區刪除（migration 0018，勿回退）**：`bump_workspace_sync_revision()` 是 pages 的 AFTER DELETE trigger，刪工作區時 pages CASCADE → trigger 對已不存在的 workspace_id 做 INSERT → FK 違規 → 交易回滾，**任何工作區都刪不掉**（Web/Android 刪除鍵 500、AI 只好把工作區改名成「【準備刪除】…」繞路）。trigger 已改成 workspace 不存在時 `RETURN NULL`；`deleteWorkspaceForUser` 在 DB 刪除失敗時要把已 trash 的 Drive 資料夾還原。
+- **深度重整靠 inventory 內容摘要 ＋ 深度任務書 prompt ＋ loop-until-dry ＋ `more_work` 自動接力（migration 0017）**，缺一就退化成「只刪重複頁就收工」。prompt 內不可出現「別讀太多頁」之類節省字眼。
 - **維護 job 的兩個必修坑（勿改回去）**：(1) 工具層 slug 解析必須走 `resolveExistingSlug()` 查 DB，不可盲目補 `.md`——舊資料存在沒有副檔名的 slug（`concepts/HBM`），硬補 `.md` 會讓這些頁永遠查不到，模型於是寫一個新 `X.md` 再刪掉同一個 `X.md`，空轉到被砍；(2) 工具迴圈要有 210s wall-clock 預算（`TOOL_LOOP_BUDGET_MS`），否則 Vercel 在 `maxDuration = 300s` 直接殺掉 invocation，job row 永遠停在 `running`，使用者只看到「Organize timed out 且沒有任何變化」。
 - **來源 re-ingest（Phase 15）**：`POST /api/sources/[id]/reingest` 讀 Drive 既有內容重跑 pipeline（不重抓 URL、不建重複 source），沿用 `/api/ingest?job_id=` 輪詢。Web/Android sources 列表每列「重新整合」按鈕。
 - Supabase DB migration 若本機 5432/6543 被擋，可從 Vercel/serverless 走 pooler：`aws-1-ap-southeast-1.pooler.supabase.com:6543`，user 格式 `postgres.<project-ref>`
