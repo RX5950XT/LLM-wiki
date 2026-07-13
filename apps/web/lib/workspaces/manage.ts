@@ -119,6 +119,13 @@ export async function deleteWorkspaceForUser(
     .eq('id', workspace.id)
     .eq('owner_id', userId);
 
-  if (deleteError) return { ok: false, error: deleteError.message };
+  if (deleteError) {
+    // The folder is already in Drive's trash but the workspace survived. Put it
+    // back, or the user keeps a workspace whose content quietly rots in the bin.
+    await drive.files
+      .update({ fileId: workspace.drive_folder_id, requestBody: { trashed: false }, fields: 'id' })
+      .catch(() => {});
+    return { ok: false, error: deleteError.message };
+  }
   return { ok: true };
 }
