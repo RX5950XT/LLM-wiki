@@ -675,7 +675,14 @@ fun WikiScreen(
                             )
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = stringResource(R.string.wiki_maintenance_running),
+                                    text = if (uiState.maintenanceChanges > 0) {
+                                        stringResource(
+                                            R.string.wiki_maintenance_running_progress,
+                                            uiState.maintenanceChanges,
+                                        )
+                                    } else {
+                                        stringResource(R.string.wiki_maintenance_running)
+                                    },
                                     color = MaterialTheme.colorScheme.onSecondaryContainer,
                                     style = MaterialTheme.typography.bodySmall,
                                 )

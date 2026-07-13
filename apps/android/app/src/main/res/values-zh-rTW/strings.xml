@@ -91,6 +91,7 @@
     <string name="wiki_maintenance_confirm_title">整理知識庫</string>
     <string name="wiki_maintenance_confirm_body">AI 將掃描你的全部工作區，直接修正失效連結與矛盾、合併重複知識、把放錯位置的頁面歸位，必要時也會改動工作區（重新命名／建立／刪除空工作區）。這些改動會實際寫入，過程可能需要數分鐘。確定執行？</string>
     <string name="wiki_maintenance_running">整理知識庫中…</string>
+    <string name="wiki_maintenance_running_progress">整理中…已變更 %1$d 項</string>
     <string name="wiki_maintenance_done">知識庫整理完成</string>
     <string name="wiki_maintenance_background_hint">可離開此畫面，任務會在背景繼續執行</string>
     <string name="chat_tag_workspace">標記工作區作為上下文</string>

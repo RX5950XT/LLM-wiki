@@ -91,6 +91,7 @@
     <string name="wiki_maintenance_confirm_title">Tidy knowledge base</string>
     <string name="wiki_maintenance_confirm_body">The AI will scan ALL your workspaces and directly fix dead links and contradictions, merge duplicated knowledge, re-file misplaced pages, and adjust workspaces when needed (rename / create / delete empty ones). These changes are written for real and may take a few minutes. Continue?</string>
     <string name="wiki_maintenance_running">Tidying knowledge base…</string>
+    <string name="wiki_maintenance_running_progress">Tidying… %1$d changes so far</string>
     <string name="wiki_maintenance_done">Knowledge base tidied</string>
     <string name="wiki_maintenance_background_hint">You can leave this screen — it keeps running in the background</string>
     <string name="chat_tag_workspace">Tag a workspace as context</string>

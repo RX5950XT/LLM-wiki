@@ -60,6 +60,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.booleanOrNull
@@ -122,6 +123,8 @@ data class WikiUiState(
     val ingestRoutedName: String? = null,
     /** The background maintenance job (health check + dedupe) is running */
     val organizeRunning: Boolean = false,
+    /** Pages / workspaces changed so far by the running maintenance job */
+    val maintenanceChanges: Int = 0,
     /** Source id currently being re-ingested (null = none) */
     val reingestingSourceId: String? = null,
 )
@@ -822,7 +825,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
         if (_uiState.value.organizeRunning) return
         val failMsg = str(R.string.error_op_organize)
         viewModelScope.launch {
-            _uiState.update { it.copy(organizeRunning = true, syncError = null) }
+            _uiState.update { it.copy(organizeRunning = true, maintenanceChanges = 0, syncError = null) }
             try {
                 val bodyJson = buildJsonObject { put("workspace_id", wsId) }.toString()
                 val response = sendAuthorizedRequest { accessToken ->
@@ -859,22 +862,29 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                     val pollText = poll.bodyAsText()
                     if (poll.status.value !in 200..299 || !isJsonObject(pollText)) continue
                     val obj = apiJson.parseToJsonElement(pollText).jsonObject
+                    val changes = (obj["progress"] as? JsonArray)?.size ?: 0
                     when (obj["status"]?.jsonPrimitive?.contentOrNull) {
                         "done" -> {
                             syncPagesInternal(wsId, forceSync = true)
                             // Maintenance may rename / create / delete / reorder workspaces
                             refreshWorkspaces(syncSelected = false)
-                            _uiState.update { it.copy(organizeRunning = false, syncError = null) }
+                            _uiState.update {
+                                it.copy(organizeRunning = false, maintenanceChanges = 0, syncError = null)
+                            }
                             onDone(true)
                             return@launch
                         }
                         "failed" -> {
                             val err = obj["error"]?.jsonPrimitive?.contentOrNull
                                 ?.takeIf { it.isNotBlank() } ?: failMsg
-                            _uiState.update { it.copy(organizeRunning = false, syncError = err) }
+                            _uiState.update {
+                                it.copy(organizeRunning = false, maintenanceChanges = 0, syncError = err)
+                            }
                             onDone(false)
                             return@launch
                         }
+                        // still running — surface how many pages/workspaces changed so far
+                        else -> _uiState.update { it.copy(maintenanceChanges = changes) }
                     }
                 }
                 _uiState.update {
