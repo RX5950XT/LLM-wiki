@@ -2,7 +2,21 @@
 
 > 給下一個 AI Agent 的接手指南。架構與規範細節以 `CLAUDE.md` / `AGENTS.md` 為準，這裡只記「最近做了什麼、為什麼、還缺什麼」。
 
-## 最近一次變更（2026-07-14，Phase 16d 導入路由 + 去重 + provider 容錯）
+## 最近一次變更（2026-07-14，Phase 16e 機械判斷歸程式、語意判斷歸模型）
+
+使用者：「修復導入內容的問題 / 維護鍵之前不是成功了嗎怎麼突然有問題 / 可以用腳本處理部分問題不一定要全用模型判斷」。查 production job 表後找到兩個真 bug，一個誤判：
+
+1. **導入會靜默失敗（7/22）**——`ingest_jobs` 裡有一批 `status=done`、`touched_pages=[]`、只跑 5–12 秒的 job：模型只回了一段話、沒呼叫任何工具，`runIngestPipeline` 卻無條件把 job 標成 `done`。使用者看到「匯入完成」，wiki 完全沒變，整篇文章等於沒進來（受害來源：川普馬斯克大和解、中俄關係逆轉、央行經濟學人回應、老黃CSIS訪談、美國軍工生產危機、盧特尼克效應、賴清德紐時專訪——全在「地緣政治與全球貿易」）。修法：`touchedSlugs` 為空 → 同一段對話追加 `NUDGE_PROMPT` 再跑一輪（provider 錯誤等 5s）→ 兩輪都沒寫入就 **throw**，route 的 `after()` 把 job 標 `failed`。**寫沒寫進去是程式驗的，不是模型說了算。**
+2. **「維護鍵之前成功」是我誤判**——Phase 16c 我拿「8 輪 / 94 個操作 / 工作區 10 → 6」當成功指標，但那個「收斂」本身就是同一個崩壞行為（把不相關工作區的頁面掃進一處再刪殼），只是當時我只看計數器沒看頁面去了哪。它從來沒有真的成功過。
+3. **照使用者說的做：能用程式判斷的就不要問模型**（新檔 `apps/web/lib/ai/organize-mechanical.ts`）：
+   - `sweepEmptyWorkspaces()`：刪掉「只剩 index.md/log.md」的工作區——純程式，在 LLM 迴圈**前後各掃一次**（跑完當場清掉這輪被搬空的殼，不必等下一輪接力）。跳過當前工作區、跳過 1 小時內建立的（自動路由剛建好、ingest 還在跑的不能被掃掉）、`created_at` 解析不出來就不刪。
+   - 維護 pipeline 傳 `allowWorkspaceDelete: false` → **模型連 `deleteWorkspace` 工具都拿不到**，Phase 16d 的白名單 (`deletableWorkspaceIds`) 因此被移除（一個機制就好）。刪工作區沒有任何判斷成分，卻是唯一失手就毀掉整個書架的動作。
+   - `findDuplicateClusters()`：用 `canonicalWikiAlias`（大小寫／資料夾前綴／`.md`）＋ 標題完全相同，跨工作區算出重複叢集，把答案直接寫進 prompt（`# Exact duplicates the system already found for you`）。模型只負責語意重複與分類。
+   - 測試：`lib/ai/organize-mechanical.test.ts`（7 個）＋ `lib/ai/tools.test.ts`（維護拿不到刪工作區工具）。`bun test lib/ai/` → 8 pass。
+
+**待辦**：那 7 篇沒進 wiki 的來源可用 `POST /api/sources/[id]/reingest` 重跑（source 原文還在 Drive）；新版 pipeline 若再失敗會誠實標 `failed`。
+
+## 上一次變更（2026-07-14，Phase 16d 導入路由 + 去重 + provider 容錯）
 
 使用者要求：修掉 `Failed after 3 attempts. Last error: Provider returned error`；並確認統一導入「能正確分類到對應工作區、完美整合避免重複、必要時自己建立新工作區」。四個修法：
 

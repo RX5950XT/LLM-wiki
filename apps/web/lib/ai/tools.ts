@@ -34,12 +34,13 @@ interface ToolContext {
   /** UI locale for workspace creation seeds */
   locale?: string | null;
   /**
-   * Workspaces this run may delete (maintenance: the ones already empty when it
-   * started). Undefined = no restriction. Without it a run can "merge" by sweeping
-   * a workspace's pages into an unrelated one and then deleting the husk — the
-   * user loses a whole shelf and only sees "N changes".
+   * Whether the model may delete whole workspaces. The chat does (the user asks for
+   * it and confirms a card); maintenance does NOT — left with the tool, a model
+   * "merges" by sweeping a workspace's pages into an unrelated one and deleting the
+   * husk, and the user loses a shelf while the UI reports "N changes". Empty
+   * workspaces are removed by code instead (lib/ai/organize-mechanical.ts).
    */
-  deletableWorkspaceIds?: Set<string>;
+  allowWorkspaceDelete?: boolean;
 }
 
 export interface Scope {
@@ -527,42 +528,6 @@ export function buildWikiTools(ctx: ToolContext) {
       },
     }),
 
-    deleteWorkspace: tool({
-      description:
-        'Delete an entire workspace (Drive folder is trashed, all pages removed). Destructive.',
-      inputSchema: z.object({ workspace_id: z.string().uuid() }),
-      execute: async ({ workspace_id }: { workspace_id: string }) => {
-        const { data: ws } = await ctx.supabase
-          .from('workspaces')
-          .select('id, name')
-          .eq('id', workspace_id)
-          .eq('owner_id', userId)
-          .maybeSingle();
-        if (!ws) return { error: `Workspace not found: ${workspace_id}` };
-
-        if (ctx.deletableWorkspaceIds && !ctx.deletableWorkspaceIds.has(workspace_id)) {
-          return {
-            error:
-              `Workspace "${ws.name}" still held knowledge pages when this run started, so it cannot be deleted here. ` +
-              'Only workspaces that were already empty may be deleted. If its pages truly belong elsewhere, move them ' +
-              'on the merits and the next maintenance pass will find it empty.',
-          };
-        }
-
-        const gated = gateDestructive({
-          action: 'delete_workspace',
-          // `name` is display-only; /api/agent/execute strips unknown fields
-          params: { workspace_id, name: ws.name },
-          label: `Delete workspace "${ws.name}"`,
-        });
-        if (gated) return gated;
-
-        const result = await deleteWorkspaceForUser(ctx.drive, userId, workspace_id);
-        if (!result.ok) return { error: result.error };
-        return { ok: true, workspace_id, name: ws.name };
-      },
-    }),
-
     movePageToWorkspace: tool({
       description:
         'Move a wiki page from one workspace to another. Content is copied to the target and the source page is deleted. Wikilinks in the source workspace that pointed to it become dangling — fix them with writePage if needed.',
@@ -663,7 +628,39 @@ export function buildWikiTools(ctx: ToolContext) {
     }),
   };
 
-  return { ...baseTools, ...adminTools };
+  // Withheld from the maintenance job: see ToolContext.allowWorkspaceDelete.
+  if (ctx.allowWorkspaceDelete === false) return { ...baseTools, ...adminTools };
+
+  const deleteWorkspaceTool = {
+    deleteWorkspace: tool({
+      description:
+        'Delete an entire workspace (Drive folder is trashed, all pages removed). Destructive.',
+      inputSchema: z.object({ workspace_id: z.string().uuid() }),
+      execute: async ({ workspace_id }: { workspace_id: string }) => {
+        const { data: ws } = await ctx.supabase
+          .from('workspaces')
+          .select('id, name')
+          .eq('id', workspace_id)
+          .eq('owner_id', userId)
+          .maybeSingle();
+        if (!ws) return { error: `Workspace not found: ${workspace_id}` };
+
+        const gated = gateDestructive({
+          action: 'delete_workspace',
+          // `name` is display-only; /api/agent/execute strips unknown fields
+          params: { workspace_id, name: ws.name },
+          label: `Delete workspace "${ws.name}"`,
+        });
+        if (gated) return gated;
+
+        const result = await deleteWorkspaceForUser(ctx.drive, userId, workspace_id);
+        if (!result.ok) return { error: result.error };
+        return { ok: true, workspace_id, name: ws.name };
+      },
+    }),
+  };
+
+  return { ...baseTools, ...adminTools, ...deleteWorkspaceTool };
 }
 
 /** Minimal deps for page write/delete cores — shared by tools and /api/agent/execute. */

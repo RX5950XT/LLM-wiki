@@ -146,8 +146,12 @@ GOOGLE_OAUTH_CLIENT_SECRET=
 ### 維護（健康檢查＋整理去重，單一動作）
 - `POST /api/organize` → `agent_jobs`（migration `0015`）→ `after()` 背景跑 `runOrganizePipeline` → `GET ?job_id=` 輪詢
 - **不產生報告頁**；`progress` 記錄每次工具呼叫，UI 顯示「已變更 N 項」
-- 維護 job 用 `confirmDestructive: false`（按鈕上的 confirm 就是授權），且保留 workspace 生命週期工具——這是它真的能刪重複頁、改動工作區的前提
+- 維護 job 用 `confirmDestructive: false`（按鈕上的 confirm 就是授權）——這是它真的能刪重複頁、改動工作區的前提
+- **機械判斷歸程式，語意判斷才歸模型**（`lib/ai/organize-mechanical.ts`）：空工作區由 `sweepEmptyWorkspaces()` 在 LLM 迴圈前後掃掉（模型傳 `allowWorkspaceDelete: false`，**連工具都拿不到**——它曾把「合併」做成「掃進當前工作區再刪掉整個書架」）；完全重複的頁由 `findDuplicateClusters()`（alias + 同標題）算好餵給模型。模型只留 rename/create/reorder/move/write/deletePage
 - 入口：Web 頂列 `Wrench`、Android drawer `Build`（各一顆）
+
+### Ingest 驗證
+- `runIngestPipeline` 跑完若 `touched_pages` 為空 → 追加硬性指令重跑一輪 → 仍為空就 **throw**（job 標 `failed`）。舊版無條件標 `done`，production 22 次匯入有 7 次「done 但 0 頁」，使用者以為匯入成功、內容其實沒進 wiki
 
 ### 全文搜尋
 - **DB**：`pages.search_text TEXT` + `pages_fts_idx` GIN index + `search_pages` RPC

@@ -3,41 +3,29 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { drive_v3 } from 'googleapis';
 import { buildWikiTools } from './tools';
 
-const WS_WITH_PAGES = '11111111-1111-4111-8111-111111111111';
-const WS_EMPTY = '22222222-2222-4222-8222-222222222222';
-
-/** Enough of PostgREST to satisfy deleteWorkspace's ownership lookup. */
-function stubSupabase(): SupabaseClient {
-  const builder = {
-    select: () => builder,
-    eq: () => builder,
-    maybeSingle: async () => ({ data: { id: WS_WITH_PAGES, name: 'Finance' }, error: null }),
-  };
-  return { from: () => builder } as unknown as SupabaseClient;
-}
-
-function tools(deletable: Set<string>) {
+function tools(allowWorkspaceDelete?: boolean) {
   return buildWikiTools({
-    supabase: stubSupabase(),
+    supabase: {} as SupabaseClient,
     drive: {} as drive_v3.Drive,
-    workspaceId: WS_EMPTY,
+    workspaceId: '11111111-1111-4111-8111-111111111111',
     wikiFolderId: 'folder',
     userId: 'user',
     crossWorkspace: true,
     confirmDestructive: false,
-    deletableWorkspaceIds: deletable,
+    allowWorkspaceDelete,
   });
 }
 
-describe('deleteWorkspace guard', () => {
-  it('refuses a workspace that held pages when the run started', async () => {
-    // The failure it prevents: a maintenance pass "merges" by sweeping a workspace's
-    // pages into an unrelated one, then deletes the husk — a whole shelf disappears.
-    const deleteWorkspace = tools(new Set([WS_EMPTY])).deleteWorkspace;
-    const result = await deleteWorkspace.execute!(
-      { workspace_id: WS_WITH_PAGES },
-      { toolCallId: 't', messages: [] },
-    );
-    expect(result).toMatchObject({ error: expect.stringContaining('already empty') });
+describe('buildWikiTools', () => {
+  it('withholds deleteWorkspace when the caller disables it', () => {
+    // The failure it prevents: a maintenance pass "merges" workspaces by sweeping
+    // one workspace's pages into an unrelated one and deleting the husk — a whole
+    // shelf disappears and the UI only says "N changes". Empty workspaces are swept
+    // by code (organize-mechanical.ts), so the model never needs this tool.
+    expect(Object.keys(tools(false))).not.toContain('deleteWorkspace');
+  });
+
+  it('keeps deleteWorkspace for the chat, where the user asks and confirms', () => {
+    expect(Object.keys(tools())).toContain('deleteWorkspace');
   });
 });
