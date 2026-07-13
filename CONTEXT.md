@@ -14,7 +14,11 @@
    - `findDuplicateClusters()`：用 `canonicalWikiAlias`（大小寫／資料夾前綴／`.md`）＋ 標題完全相同，跨工作區算出重複叢集，把答案直接寫進 prompt（`# Exact duplicates the system already found for you`）。模型只負責語意重複與分類。
    - 測試：`lib/ai/organize-mechanical.test.ts`（7 個）＋ `lib/ai/tools.test.ts`（維護拿不到刪工作區工具）。`bun test lib/ai/` → 8 pass。
 
-**待辦**：那 7 篇沒進 wiki 的來源可用 `POST /api/sources/[id]/reingest` 重跑（source 原文還在 Drive）；新版 pipeline 若再失敗會誠實標 `failed`。
+4. **`/api/sources/[id]/reingest` 是第三個漏 profile fallback 的 route**（`/api/ingest`、`/api/query` 已於 16d 修）：工作區都沒綁 `*_profile_id` → 按「重新整合」一律 422，等於這顆按鈕從來沒能用過。fallback 抽成 `lib/ai/profile.ts` 的 `loadDefaultProfileId()`，三個 route 共用。
+
+**production 復原（已完成）**：7 篇「以為匯入成功、其實 0 頁」的來源全部用 `reingest` 重跑，全數成功——川普馬斯克大和解 5 頁、中俄關係逆轉 8、央行經濟學人回應 6、老黃CSIS訪談 7、美國軍工生產危機 5、盧特尼克效應 6、賴清德紐時專訪 8（共 45 次頁面寫入）。「地緣政治與全球貿易」知識頁 53 → 61。全庫 142 個知識頁、**alias 重複叢集 0**（新版 ingest 的去重清單有效）。
+
+**待辦**：剩一個空的「My Wiki」——下次按維護時會由 `sweepEmptyWorkspaces()` 自動掃掉（順便就是新防護的第一次實戰驗證）。
 
 ## 上一次變更（2026-07-14，Phase 16d 導入路由 + 去重 + provider 容錯）
 
