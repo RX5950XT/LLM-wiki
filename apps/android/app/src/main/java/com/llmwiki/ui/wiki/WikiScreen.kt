@@ -28,6 +28,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -41,6 +42,7 @@ import androidx.compose.material.icons.automirrored.filled.Help
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.ChatBubbleOutline
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
@@ -152,14 +154,11 @@ fun WikiScreen(
     var pendingShareUrl by rememberSaveable { mutableStateOf<String?>(null) }
     var showChatSheet by rememberSaveable { mutableStateOf(false) }
     var showWorkspaceMenu by remember { mutableStateOf(false) }
-    var showActiveNoteMenu by remember { mutableStateOf(false) }
     var showHelpDialog by rememberSaveable { mutableStateOf(false) }
     var showSourcesDialog by rememberSaveable { mutableStateOf(false) }
-    var showCreateNoteDialog by rememberSaveable { mutableStateOf(false) }
+    var showOrganizeConfirm by rememberSaveable { mutableStateOf(false) }
     var renameWorkspace by remember { mutableStateOf<WorkspaceRow?>(null) }
     var deleteWorkspace by remember { mutableStateOf<WorkspaceRow?>(null) }
-    var renameNote by remember { mutableStateOf<PageEntity?>(null) }
-    var deleteNote by remember { mutableStateOf<PageEntity?>(null) }
     var inlineEditorPageSlug by rememberSaveable { mutableStateOf<String?>(null) }
     var inlineEditorValue by rememberSaveable(stateSaver = TextFieldValue.Saver) {
         mutableStateOf(TextFieldValue(""))
@@ -224,7 +223,6 @@ fun WikiScreen(
     }
 
     LaunchedEffect(uiState.activePage?.slug) {
-        showActiveNoteMenu = false
         inlineEditorPageSlug = null
     }
 
@@ -377,12 +375,9 @@ fun WikiScreen(
                     } else {
                         val pinnedSlugs = setOf("index.md", "log.md")
                         val pinnedPages = pinnedSlugs.mapNotNull { slug -> pages.firstOrNull { it.slug == slug } }
-                        val otherPages = pages.filter { it.slug !in pinnedSlugs }
-                        val byZone = otherPages.groupBy { it.zone }
-                        val zones = listOf(
-                            "wiki" to stringResource(R.string.wiki_zone_wiki),
-                            "notes" to stringResource(R.string.wiki_zone_notes),
-                        )
+                        // Notes UI was removed (chat-first workflow); only the wiki
+                        // zone is listed. notes/schema stay in Drive & Room untouched.
+                        val wikiPages = pages.filter { it.slug !in pinnedSlugs && it.zone == "wiki" }
 
                         LazyColumn(Modifier.fillMaxSize()) {
                             // Pinned pages: index.md + log.md always at top
@@ -403,12 +398,6 @@ fun WikiScreen(
                                         onToggleLock = {
                                             wikiViewModel.toggleLock(page.slug, page.lockedByHuman)
                                         },
-                                        onRenameNote = if (page.zone == "notes" && page.slug != "notes/guide.md") {
-                                            { renameNote = page }
-                                        } else null,
-                                        onDeleteNote = if (page.zone == "notes" && page.slug != "notes/guide.md") {
-                                            { deleteNote = page }
-                                        } else null,
                                     )
                                 }
                                 item {
@@ -416,38 +405,28 @@ fun WikiScreen(
                                 }
                             }
 
-                            // Zone sections
-                            zones.forEach { (zone, zoneLabel) ->
-                                val zonePages = byZone[zone] ?: emptyList()
-                                if (zonePages.isNotEmpty()) {
-                                    item {
-                                        Text(
-                                            text = zoneLabel,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            modifier = Modifier.padding(start = 20.dp, top = 8.dp, bottom = 2.dp),
-                                        )
-                                    }
-                                    items(zonePages, key = { "${it.workspaceId}/${it.accountName}/${it.slug}" }) { page ->
-                                        PageListItem(
-                                            page = page,
-                                            label = localizedSystemPageLabel(page.slug),
-                                            isSelected = uiState.activePage?.slug == page.slug,
-                                            onClick = {
-                                                wikiViewModel.selectPage(page)
-                                                scope.launch { drawerState.close() }
-                                            },
-                                            onToggleLock = {
-                                                wikiViewModel.toggleLock(page.slug, page.lockedByHuman)
-                                            },
-                                            onRenameNote = if (page.zone == "notes" && page.slug != "notes/guide.md") {
-                                                { renameNote = page }
-                                            } else null,
-                                            onDeleteNote = if (page.zone == "notes" && page.slug != "notes/guide.md") {
-                                                { deleteNote = page }
-                                            } else null,
-                                        )
-                                    }
+                            if (wikiPages.isNotEmpty()) {
+                                item {
+                                    Text(
+                                        text = stringResource(R.string.wiki_zone_wiki),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(start = 20.dp, top = 8.dp, bottom = 2.dp),
+                                    )
+                                }
+                                items(wikiPages, key = { "${it.workspaceId}/${it.accountName}/${it.slug}" }) { page ->
+                                    PageListItem(
+                                        page = page,
+                                        label = localizedSystemPageLabel(page.slug),
+                                        isSelected = uiState.activePage?.slug == page.slug,
+                                        onClick = {
+                                            wikiViewModel.selectPage(page)
+                                            scope.launch { drawerState.close() }
+                                        },
+                                        onToggleLock = {
+                                            wikiViewModel.toggleLock(page.slug, page.lockedByHuman)
+                                        },
+                                    )
                                 }
                             }
                         }
@@ -477,6 +456,22 @@ fun WikiScreen(
                             Icons.AutoMirrored.Filled.LibraryBooks,
                             contentDescription = stringResource(R.string.sources_title),
                         )
+                    }
+                    IconButton(
+                        onClick = {
+                            showOrganizeConfirm = true
+                            scope.launch { drawerState.close() }
+                        },
+                        enabled = !uiState.organizeRunning,
+                    ) {
+                        if (uiState.organizeRunning) {
+                            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                        } else {
+                            Icon(
+                                Icons.Default.AutoFixHigh,
+                                contentDescription = stringResource(R.string.wiki_organize_action),
+                            )
+                        }
                     }
                     IconButton(onClick = {
                         scope.launch { drawerState.close() }
@@ -553,13 +548,9 @@ fun WikiScreen(
                             }
                         } else {
                             val editablePage = uiState.activePage?.takeIf { isHumanEditablePage(it) && uiState.pageContent != null }
-                            val activeNote = uiState.activePage?.takeIf { it.zone == "notes" && it.slug != "notes/guide.md" }
                             val isInlineEditing = inlineEditorPageSlug == editablePage?.slug
                             IconButton(onClick = { wikiViewModel.toggleSearch() }) {
                                 Icon(Icons.Default.Search, contentDescription = stringResource(R.string.wiki_search))
-                            }
-                            IconButton(onClick = { showCreateNoteDialog = true }) {
-                                Icon(Icons.Default.Add, contentDescription = stringResource(R.string.wiki_create_note))
                             }
                             if (editablePage != null) {
                                 if (isInlineEditing) {
@@ -599,32 +590,6 @@ fun WikiScreen(
                                     }
                                 }
                             }
-                            if (activeNote != null && !isInlineEditing) {
-                                Box {
-                                    IconButton(onClick = { showActiveNoteMenu = true }) {
-                                        Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.workspace_actions))
-                                    }
-                                    DropdownMenu(
-                                        expanded = showActiveNoteMenu,
-                                        onDismissRequest = { showActiveNoteMenu = false },
-                                    ) {
-                                        DropdownMenuItem(
-                                            text = { Text(stringResource(R.string.wiki_rename_note)) },
-                                            onClick = {
-                                                showActiveNoteMenu = false
-                                                renameNote = activeNote
-                                            },
-                                        )
-                                        DropdownMenuItem(
-                                            text = { Text(stringResource(R.string.wiki_delete_note)) },
-                                            onClick = {
-                                                showActiveNoteMenu = false
-                                                deleteNote = activeNote
-                                            },
-                                        )
-                                    }
-                                }
-                            }
                             if (uiState.contentLoading || uiState.syncLoading) {
                                 CircularProgressIndicator(
                                     modifier = Modifier.size(24.dp).padding(end = 4.dp),
@@ -641,31 +606,13 @@ fun WikiScreen(
             },
             floatingActionButton = {
                 if (!uiState.showSearch) {
-                    Column(
-                        horizontalAlignment = Alignment.End,
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    // Import lives inside the chat sheet's action menu now — one FAB
+                    FloatingActionButton(
+                        onClick = { showChatSheet = true },
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary,
                     ) {
-                        SmallFloatingActionButton(
-                            onClick = { showChatSheet = true },
-                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                        ) {
-                            Icon(Icons.Default.ChatBubbleOutline, contentDescription = stringResource(R.string.wiki_chat))
-                        }
-                        SmallFloatingActionButton(
-                            onClick = { filePickerLauncher.launch(arrayOf("text/*", "application/json", "application/xml", "text/markdown", "text/x-markdown")) },
-                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                        ) {
-                            Icon(Icons.Default.AttachFile, contentDescription = stringResource(R.string.wiki_attach_file))
-                        }
-                        FloatingActionButton(
-                            onClick = { pendingShareUrl = null; showIngestDialog = true },
-                            containerColor = MaterialTheme.colorScheme.primary,
-                            contentColor = MaterialTheme.colorScheme.onPrimary,
-                        ) {
-                            Icon(Icons.Default.Add, contentDescription = stringResource(R.string.wiki_ingest_confirm))
-                        }
+                        Icon(Icons.Default.ChatBubbleOutline, contentDescription = stringResource(R.string.wiki_chat))
                     }
                 }
             },
@@ -690,6 +637,46 @@ fun WikiScreen(
                                     tint = MaterialTheme.colorScheme.onErrorContainer,
                                 )
                             }
+                        }
+                    }
+                }
+
+                uiState.ingestRoutedName?.let { routedName ->
+                    Surface(color = MaterialTheme.colorScheme.primaryContainer) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = stringResource(R.string.wiki_ingest_routed, routedName),
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.weight(1f).padding(vertical = 10.dp),
+                            )
+                            TextButton(onClick = { wikiViewModel.clearIngestNotice() }) {
+                                Text(stringResource(R.string.action_dismiss))
+                            }
+                        }
+                    }
+                }
+
+                if (uiState.organizeRunning) {
+                    Surface(color = MaterialTheme.colorScheme.secondaryContainer) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                            )
+                            Text(
+                                text = stringResource(R.string.wiki_organize_running),
+                                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
                         }
                     }
                 }
@@ -806,7 +793,7 @@ fun WikiScreen(
         IngestInputDialog(
             initialText = pendingShareUrl ?: "",
             onDismiss = { showIngestDialog = false; pendingShareUrl = null },
-            onConfirm = { text ->
+            onConfirm = { text, autoRoute ->
                 showIngestDialog = false
                 pendingShareUrl = null
                 val onDone: (Boolean) -> Unit = { success ->
@@ -820,13 +807,41 @@ fun WikiScreen(
                     }
                 }
                 if (isUrl(text)) {
-                    wikiViewModel.ingestUrl(text, onDone)
+                    wikiViewModel.ingestUrl(text, autoRoute, onDone)
                 } else {
                     wikiViewModel.ingestText(
                         extractTitle(text, context.getString(R.string.wiki_untitled)),
                         text,
+                        autoRoute,
                         onDone,
                     )
+                }
+            },
+        )
+    }
+
+    if (showOrganizeConfirm) {
+        AlertDialog(
+            onDismissRequest = { showOrganizeConfirm = false },
+            title = { Text(stringResource(R.string.wiki_organize_confirm_title)) },
+            text = { Text(stringResource(R.string.wiki_organize_confirm_body)) },
+            confirmButton = {
+                Button(onClick = {
+                    showOrganizeConfirm = false
+                    wikiViewModel.runOrganize { success ->
+                        if (success) {
+                            scope.launch {
+                                snackbarHostState.showSnackbar(context.getString(R.string.wiki_organize_done))
+                            }
+                        }
+                    }
+                }) {
+                    Text(stringResource(R.string.chat_confirm_action))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showOrganizeConfirm = false }) {
+                    Text(stringResource(R.string.action_cancel))
                 }
             },
         )
@@ -844,6 +859,22 @@ fun WikiScreen(
             profiles = uiState.profiles,
             selectedProfileId = uiState.selectedProfileId,
             onProfileSelected = { wikiViewModel.setSelectedProfile(it) },
+            workspaces = uiState.workspaces,
+            currentWorkspaceId = uiState.workspace?.id,
+            taggedWorkspaceIds = uiState.taggedWorkspaceIds,
+            onTagWorkspace = { wikiViewModel.tagWorkspace(it) },
+            onUntagWorkspace = { wikiViewModel.untagWorkspace(it) },
+            onImportContent = {
+                showChatSheet = false
+                pendingShareUrl = null
+                showIngestDialog = true
+            },
+            onImportFile = {
+                showChatSheet = false
+                filePickerLauncher.launch(arrayOf("text/*", "application/json", "application/xml", "text/markdown", "text/x-markdown"))
+            },
+            onExecuteProposal = { mi, pi -> wikiViewModel.executeProposal(mi, pi) },
+            onDismissProposal = { mi, pi -> wikiViewModel.dismissProposal(mi, pi) },
             onSend = { wikiViewModel.sendQuery(it) },
             onPageClick = { slug ->
                 wikiViewModel.selectPageBySlug(slug)
@@ -887,51 +918,6 @@ fun WikiScreen(
             sources = uiState.sources,
             isLoading = uiState.sourcesLoading,
             onDismiss = { showSourcesDialog = false },
-        )
-    }
-
-    if (showCreateNoteDialog) {
-        NoteCreateDialog(
-            isLoading = uiState.pageSaveLoading,
-            onDismiss = { showCreateNoteDialog = false },
-            onConfirm = { title ->
-                wikiViewModel.createNote(title) { success ->
-                    if (success) {
-                        showCreateNoteDialog = false
-                        scope.launch {
-                            snackbarHostState.showSnackbar(
-                                context.getString(R.string.wiki_note_created)
-                            )
-                        }
-                    }
-                }
-            },
-        )
-    }
-
-    renameNote?.let { page ->
-        NoteRenameDialog(
-            page = page,
-            isLoading = uiState.pageSaveLoading,
-            onDismiss = { renameNote = null },
-            onConfirm = { title ->
-                wikiViewModel.renameNote(page, title) { success ->
-                    if (success) renameNote = null
-                }
-            },
-        )
-    }
-
-    deleteNote?.let { page ->
-        NoteDeleteDialog(
-            page = page,
-            isLoading = uiState.pageSaveLoading,
-            onDismiss = { deleteNote = null },
-            onConfirm = {
-                wikiViewModel.deleteNote(page) { success ->
-                    if (success) deleteNote = null
-                }
-            },
         )
     }
 
@@ -1280,66 +1266,27 @@ private fun PageListItem(
     isSelected: Boolean,
     onClick: () -> Unit,
     onToggleLock: () -> Unit,
-    onRenameNote: (() -> Unit)? = null,
-    onDeleteNote: (() -> Unit)? = null,
     label: String? = null,
 ) {
-    var showMenu by remember { mutableStateOf(false) }
     NavigationDrawerItem(
         label = { Text(label ?: page.title ?: page.slug, maxLines = 1) },
         selected = isSelected,
         onClick = onClick,
         modifier = Modifier.padding(horizontal = 8.dp),
         badge = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onToggleLock) {
-                    Icon(
-                        if (page.lockedByHuman) Icons.Default.Lock else Icons.Default.LockOpen,
-                        contentDescription = if (page.lockedByHuman)
-                            stringResource(R.string.wiki_locked)
-                        else
-                            stringResource(R.string.wiki_unlocked),
-                        modifier = Modifier.size(20.dp),
-                        tint = if (page.lockedByHuman)
-                            MaterialTheme.colorScheme.primary
-                        else
-                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
-                    )
-                }
-                if (onRenameNote != null || onDeleteNote != null) {
-                    Box {
-                        IconButton(onClick = { showMenu = true }) {
-                            Icon(
-                                Icons.Default.MoreVert,
-                                contentDescription = stringResource(R.string.workspace_actions),
-                                modifier = Modifier.size(20.dp),
-                            )
-                        }
-                        DropdownMenu(
-                            expanded = showMenu,
-                            onDismissRequest = { showMenu = false },
-                        ) {
-                            if (onRenameNote != null) {
-                                DropdownMenuItem(
-                                    text = { Text(stringResource(R.string.wiki_rename_note)) },
-                                    onClick = {
-                                        showMenu = false
-                                        onRenameNote()
-                                    },
-                                )
-                            }
-                            if (onDeleteNote != null) {
-                                DropdownMenuItem(
-                                    text = { Text(stringResource(R.string.wiki_delete_note)) },
-                                    onClick = {
-                                        showMenu = false
-                                        onDeleteNote()
-                                    },
-                                )
-                            }
-                        }
-                    }
-                }
+            IconButton(onClick = onToggleLock) {
+                Icon(
+                    if (page.lockedByHuman) Icons.Default.Lock else Icons.Default.LockOpen,
+                    contentDescription = if (page.lockedByHuman)
+                        stringResource(R.string.wiki_locked)
+                    else
+                        stringResource(R.string.wiki_unlocked),
+                    modifier = Modifier.size(20.dp),
+                    tint = if (page.lockedByHuman)
+                        MaterialTheme.colorScheme.primary
+                    else
+                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
+                )
             }
         },
     )
@@ -1372,6 +1319,15 @@ private fun ChatBottomSheet(
     profiles: List<LlmProfile>,
     selectedProfileId: String?,
     onProfileSelected: (String?) -> Unit,
+    workspaces: List<WorkspaceRow>,
+    currentWorkspaceId: String?,
+    taggedWorkspaceIds: List<String>,
+    onTagWorkspace: (String) -> Unit,
+    onUntagWorkspace: (String) -> Unit,
+    onImportContent: () -> Unit,
+    onImportFile: () -> Unit,
+    onExecuteProposal: (messageIndex: Int, proposalIndex: Int) -> Unit,
+    onDismissProposal: (messageIndex: Int, proposalIndex: Int) -> Unit,
     onSend: (String) -> Unit,
     onPageClick: (String) -> Unit,
     onSaveSynthesis: (question: String, answer: String, slugs: List<String>) -> Unit,
@@ -1380,7 +1336,17 @@ private fun ChatBottomSheet(
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val listState = rememberLazyListState()
-    var showProfileMenu by remember { mutableStateOf(false) }
+    var showActionMenu by remember { mutableStateOf(false) }
+
+    // "@..." fragment at the end of the input opens the workspace tag menu
+    val mentionRegex = remember { Regex("(?:^|\\s)@([^\\s@]*)$") }
+    val mentionQuery = mentionRegex.find(input)?.groupValues?.get(1)
+    val mentionCandidates = if (mentionQuery != null) {
+        workspaces
+            .filter { it.id != currentWorkspaceId && it.id !in taggedWorkspaceIds }
+            .filter { mentionQuery.isBlank() || it.name.contains(mentionQuery, ignoreCase = true) }
+            .take(6)
+    } else emptyList()
 
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) listState.animateScrollToItem(messages.size - 1)
@@ -1423,12 +1389,14 @@ private fun ChatBottomSheet(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     item { Spacer(Modifier.height(4.dp)) }
-                    items(messages) { msg ->
+                    itemsIndexed(messages) { messageIndex, msg ->
                         ChatBubble(
                             message = msg,
                             allMessages = messages,
                             onPageClick = onPageClick,
                             onSaveSynthesis = onSaveSynthesis,
+                            onExecuteProposal = { pi -> onExecuteProposal(messageIndex, pi) },
+                            onDismissProposal = { pi -> onDismissProposal(messageIndex, pi) },
                         )
                     }
                     if (isLoading) {
@@ -1484,32 +1452,105 @@ private fun ChatBottomSheet(
             }
 
             HorizontalDivider()
+
+            // @-tagged workspace chips (extra context for the next question)
+            if (taggedWorkspaceIds.isNotEmpty()) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 12.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    taggedWorkspaceIds.forEach { wsId ->
+                        val name = workspaces.firstOrNull { it.id == wsId }?.name ?: wsId
+                        AssistChip(
+                            onClick = { onUntagWorkspace(wsId) },
+                            label = { Text("@$name") },
+                            trailingIcon = {
+                                Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(14.dp))
+                            },
+                        )
+                    }
+                }
+            }
+
+            // Workspace mention suggestions while typing "@..."
+            if (mentionCandidates.isNotEmpty()) {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
+                    Text(
+                        stringResource(R.string.chat_tag_workspace),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(vertical = 2.dp),
+                    )
+                    mentionCandidates.forEach { ws ->
+                        Text(
+                            text = "@${ws.name}",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    onTagWorkspace(ws.id)
+                                    // strip the trailing "@..." fragment from the draft
+                                    onInputChange(input.substringBeforeLast('@').trimEnd())
+                                }
+                                .padding(vertical = 8.dp),
+                        )
+                    }
+                }
+            }
+
             Row(
                 Modifier.fillMaxWidth().padding(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                // Profile selector
-                if (profiles.isNotEmpty()) {
-                    Box {
-                        IconButton(
-                            onClick = { showProfileMenu = true },
-                            modifier = Modifier.size(56.dp),
-                            colors = IconButtonDefaults.iconButtonColors(
-                                containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                                contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                            ),
-                        ) {
-                            Icon(
-                                Icons.Default.SmartToy,
-                                contentDescription = stringResource(R.string.wiki_select_model),
-                                modifier = Modifier.size(22.dp),
+                // Action menu: import content/file + model selection
+                Box {
+                    IconButton(
+                        onClick = { showActionMenu = true },
+                        modifier = Modifier.size(56.dp),
+                        colors = IconButtonDefaults.iconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                        ),
+                    ) {
+                        Icon(
+                            Icons.Default.SmartToy,
+                            contentDescription = stringResource(R.string.wiki_chat_menu),
+                            modifier = Modifier.size(22.dp),
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = showActionMenu,
+                        onDismissRequest = { showActionMenu = false },
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.wiki_import_content)) },
+                            leadingIcon = { Icon(Icons.Default.Add, contentDescription = null) },
+                            onClick = {
+                                showActionMenu = false
+                                onImportContent()
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.wiki_import_file)) },
+                            leadingIcon = { Icon(Icons.Default.AttachFile, contentDescription = null) },
+                            onClick = {
+                                showActionMenu = false
+                                onImportFile()
+                            },
+                        )
+                        if (profiles.isNotEmpty()) {
+                            HorizontalDivider()
+                            Text(
+                                stringResource(R.string.wiki_select_model),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
                             )
-                        }
-                        DropdownMenu(
-                            expanded = showProfileMenu,
-                            onDismissRequest = { showProfileMenu = false },
-                        ) {
                             profiles.forEach { profile ->
                                 DropdownMenuItem(
                                     text = {
@@ -1524,7 +1565,7 @@ private fun ChatBottomSheet(
                                     },
                                     onClick = {
                                         onProfileSelected(profile.id)
-                                        showProfileMenu = false
+                                        showActionMenu = false
                                     },
                                     trailingIcon = {
                                         if (profile.id == selectedProfileId ||
@@ -1583,6 +1624,8 @@ private fun ChatBubble(
     allMessages: List<ChatMessage>,
     onPageClick: (String) -> Unit,
     onSaveSynthesis: (question: String, answer: String, slugs: List<String>) -> Unit,
+    onExecuteProposal: (proposalIndex: Int) -> Unit = {},
+    onDismissProposal: (proposalIndex: Int) -> Unit = {},
 ) {
     val isUser = message.role == "user"
     val bgColor = if (isUser)
@@ -1620,6 +1663,59 @@ private fun ChatBubble(
                         .fillMaxWidth()
                         .padding(12.dp),
                 )
+            }
+        }
+        // Destructive-action confirmation cards
+        message.proposals.forEachIndexed { proposalIndex, proposal ->
+            if (proposal.status == "dismissed") return@forEachIndexed
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    contentColor = MaterialTheme.colorScheme.onSurface,
+                ),
+                modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+            ) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        text = when (proposal.action) {
+                            "delete_workspace" -> stringResource(
+                                R.string.chat_proposal_delete_workspace,
+                                proposal.params["name"] ?: proposal.params["workspace_id"] ?: "",
+                            )
+                            else -> stringResource(
+                                R.string.chat_proposal_delete_page,
+                                proposal.params["slug"] ?: "",
+                            )
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    when (proposal.status) {
+                        "pending" -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = { onExecuteProposal(proposalIndex) },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.error,
+                                    contentColor = MaterialTheme.colorScheme.onError,
+                                ),
+                            ) { Text(stringResource(R.string.chat_confirm_action)) }
+                            TextButton(onClick = { onDismissProposal(proposalIndex) }) {
+                                Text(stringResource(R.string.action_cancel))
+                            }
+                        }
+                        "running" -> CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                        "done" -> Icon(
+                            Icons.Default.Check,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        "error" -> Text(
+                            proposal.error ?: stringResource(R.string.error_op_agent_action),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
             }
         }
         if (message.citedSlugs.isNotEmpty()) {
@@ -1724,9 +1820,10 @@ private fun SourcesListDialog(
 private fun IngestInputDialog(
     initialText: String,
     onDismiss: () -> Unit,
-    onConfirm: (String) -> Unit,
+    onConfirm: (String, Boolean) -> Unit,
 ) {
     var text by rememberSaveable(initialText) { mutableStateOf(initialText) }
+    var autoRoute by rememberSaveable { mutableStateOf(true) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1746,11 +1843,31 @@ private fun IngestInputDialog(
                     modifier = Modifier.fillMaxWidth(),
                     maxLines = 8,
                 )
+                // Target workspace: AI routing (default) vs. current workspace
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable { autoRoute = true }
+                        .padding(top = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    RadioButton(selected = autoRoute, onClick = { autoRoute = true })
+                    Text(stringResource(R.string.wiki_ingest_target_auto), style = MaterialTheme.typography.bodySmall)
+                }
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable { autoRoute = false },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    RadioButton(selected = !autoRoute, onClick = { autoRoute = false })
+                    Text(stringResource(R.string.wiki_ingest_target_current), style = MaterialTheme.typography.bodySmall)
+                }
             }
         },
         confirmButton = {
             Button(
-                onClick = { if (text.isNotBlank()) onConfirm(text.trim()) },
+                onClick = { if (text.isNotBlank()) onConfirm(text.trim(), autoRoute) },
                 enabled = text.isNotBlank(),
             ) { Text(stringResource(R.string.wiki_ingest_confirm)) }
         },
@@ -1804,147 +1921,6 @@ private fun InlinePageEditor(
             maxLines = 24,
         )
     }
-}
-
-@Composable
-private fun NoteCreateDialog(
-    isLoading: Boolean,
-    onDismiss: () -> Unit,
-    onConfirm: (String) -> Unit,
-) {
-    var title by remember { mutableStateOf("") }
-
-    AlertDialog(
-        onDismissRequest = {
-            if (!isLoading) onDismiss()
-        },
-        title = { Text(stringResource(R.string.wiki_create_note)) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    stringResource(R.string.wiki_create_note_hint),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                OutlinedTextField(
-                    value = title,
-                    onValueChange = { title = it },
-                    placeholder = { Text(stringResource(R.string.wiki_untitled)) },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                )
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = { onConfirm(title.trim()) },
-                enabled = !isLoading && title.trim().isNotEmpty(),
-            ) {
-                if (isLoading) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(16.dp),
-                        strokeWidth = 2.dp,
-                        color = MaterialTheme.colorScheme.onPrimary,
-                    )
-                } else {
-                    Text(stringResource(R.string.action_save))
-                }
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss, enabled = !isLoading) {
-                Text(stringResource(R.string.action_cancel))
-            }
-        },
-    )
-}
-
-@Composable
-private fun NoteRenameDialog(
-    page: PageEntity,
-    isLoading: Boolean,
-    onDismiss: () -> Unit,
-    onConfirm: (String) -> Unit,
-) {
-    var title by remember(page.slug) {
-        mutableStateOf(page.title ?: page.slug.removePrefix("notes/").removeSuffix(".md"))
-    }
-
-    AlertDialog(
-        onDismissRequest = {
-            if (!isLoading) onDismiss()
-        },
-        title = { Text(stringResource(R.string.wiki_rename_note)) },
-        text = {
-            OutlinedTextField(
-                value = title,
-                onValueChange = { title = it },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-            )
-        },
-        confirmButton = {
-            Button(
-                onClick = { onConfirm(title.trim()) },
-                enabled = !isLoading && title.trim().isNotEmpty(),
-            ) {
-                if (isLoading) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(16.dp),
-                        strokeWidth = 2.dp,
-                        color = MaterialTheme.colorScheme.onPrimary,
-                    )
-                } else {
-                    Text(stringResource(R.string.action_save))
-                }
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss, enabled = !isLoading) {
-                Text(stringResource(R.string.action_cancel))
-            }
-        },
-    )
-}
-
-@Composable
-private fun NoteDeleteDialog(
-    page: PageEntity,
-    isLoading: Boolean,
-    onDismiss: () -> Unit,
-    onConfirm: () -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = {
-            if (!isLoading) onDismiss()
-        },
-        title = { Text(stringResource(R.string.wiki_delete_note)) },
-        text = {
-            Text(stringResource(R.string.wiki_delete_note_confirm, page.title ?: page.slug))
-        },
-        confirmButton = {
-            Button(
-                onClick = onConfirm,
-                enabled = !isLoading,
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-            ) {
-                if (isLoading) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(16.dp),
-                        strokeWidth = 2.dp,
-                        color = MaterialTheme.colorScheme.onError,
-                    )
-                } else {
-                    Text(stringResource(R.string.action_delete))
-                }
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss, enabled = !isLoading) {
-                Text(stringResource(R.string.action_cancel))
-            }
-        },
-    )
 }
 
 private data class MarkdownToolbarAction(

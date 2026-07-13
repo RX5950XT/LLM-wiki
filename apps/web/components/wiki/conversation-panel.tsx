@@ -1,12 +1,32 @@
 'use client';
 
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Send, Bookmark, Loader2, CheckCircle, ChevronRight, Plus, Bot, Square } from 'lucide-react';
+import {
+  Send,
+  Bookmark,
+  Loader2,
+  CheckCircle,
+  ChevronRight,
+  Bot,
+  Square,
+  Import,
+  AlertTriangle,
+  X,
+} from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import { parseCitations } from '@/lib/ai/citation-parser';
+import type { ActionProposal } from '@/lib/ai/tools';
 import { isDriveReconnectError, reconnectGoogleDrive } from '@/lib/google/drive-reconnect';
+import { ImportDialog } from './import-dialog';
+
+type ProposalStatus = 'pending' | 'running' | 'done' | 'error' | 'dismissed';
+
+interface MessageProposal extends ActionProposal {
+  status: ProposalStatus;
+  error?: string;
+}
 
 interface Message {
   id: string;
@@ -14,6 +34,8 @@ interface Message {
   content: string;
   /** Slugs of wiki pages the LLM referenced to produce this answer */
   citedSlugs?: string[];
+  /** Destructive actions awaiting user confirmation */
+  proposals?: MessageProposal[];
 }
 
 interface Profile {
@@ -23,27 +45,23 @@ interface Profile {
   is_default: boolean;
 }
 
+interface WorkspaceRef {
+  id: string;
+  name: string;
+}
+
 interface ConversationPanelProps {
   workspaceId: string;
+  workspaceName?: string;
+  /** Page the user is currently viewing — sent as default chat context */
+  currentSlug?: string;
+  /** All workspaces (for @-tagging as extra context) */
+  workspaces?: WorkspaceRef[];
   onSourceAdded?: () => void;
   onPageWritten?: (slug: string) => void;
   onPageClick?: (slug: string) => void;
-}
-
-const MAX_INGEST_FILE_BYTES = 2 * 1024 * 1024;
-
-function isUrl(text: string): boolean {
-  try {
-    const u = new URL(text.trim());
-    return u.protocol === 'http:' || u.protocol === 'https:';
-  } catch {
-    return false;
-  }
-}
-
-function extractTitle(text: string, fallbackTitle: string): string {
-  const line = text.split('\n').find((l) => l.trim().length > 0) ?? fallbackTitle;
-  return line.replace(/^#+\s*/, '').trim().slice(0, 80);
+  /** The AI can create/rename/delete workspaces mid-chat — refresh the switcher */
+  onWorkspacesChanged?: () => void;
 }
 
 function parseInternalWikiHref(href: string): string | null {
@@ -62,20 +80,16 @@ function preserveWikiUrlTransform(url: string): string {
 
 export function ConversationPanel({
   workspaceId,
+  workspaceName,
+  currentSlug,
+  workspaces = [],
   onSourceAdded,
   onPageWritten,
   onPageClick,
+  onWorkspacesChanged,
 }: ConversationPanelProps) {
   const t = useTranslations();
   const locale = useLocale();
-  const [ingestInput, setIngestInput] = useState('');
-  const [ingesting, setIngesting] = useState(false);
-  const [ingestError, setIngestError] = useState<string | null>(null);
-  const [ingestResult, setIngestResult] = useState<string | null>(null);
-  // Live page count while the server-side ingest job is running
-  const [ingestProgress, setIngestProgress] = useState<number | null>(null);
-  const [isDraggingFile, setIsDraggingFile] = useState(false);
-  const [uploadQueue, setUploadQueue] = useState<{ name: string; status: 'pending' | 'uploading' | 'done' | 'error'; error?: string }[]>([]);
   const [driveReconnectPending, setDriveReconnectPending] = useState(false);
   const [wasReconnected] = useState(() =>
     typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('r') === '1',
@@ -89,17 +103,33 @@ export function ConversationPanel({
   const [fileBackPendingId, setFileBackPendingId] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
-  const [showProfileMenu, setShowProfileMenu] = useState(false);
-  const profileMenuRef = useRef<HTMLDivElement>(null);
+  const [showActionMenu, setShowActionMenu] = useState(false);
+  const [showImport, setShowImport] = useState(false);
+  const actionMenuRef = useRef<HTMLDivElement>(null);
+
+  // @-tagged workspaces used as extra context for the next question
+  const [taggedWorkspaces, setTaggedWorkspaces] = useState<WorkspaceRef[]>([]);
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const [mentionIndex, setMentionIndex] = useState(0);
+
+  const mentionCandidates = useMemo(() => {
+    if (mentionQuery === null) return [];
+    const q = mentionQuery.toLowerCase();
+    return workspaces
+      .filter((w) => w.id !== workspaceId)
+      .filter((w) => !taggedWorkspaces.some((tw) => tw.id === w.id))
+      .filter((w) => (q ? w.name.toLowerCase().includes(q) : true))
+      .slice(0, 6);
+  }, [mentionQuery, workspaces, workspaceId, taggedWorkspaces]);
 
   const startDriveReconnect = useCallback(async () => {
     if (wasReconnected) {
       const msg = t('workspace.driveReconnectFailed');
       setError(new Error(msg));
-      setIngestError(msg);
       return;
     }
     setDriveReconnectPending(true);
@@ -109,9 +139,8 @@ export function ConversationPanel({
       const msg = err instanceof Error ? err.message : t('workspace.startGoogleFailed');
       setDriveReconnectPending(false);
       setError(new Error(msg));
-      setIngestError(msg);
     }
-  }, [workspaceId, wasReconnected]);
+  }, [workspaceId, wasReconnected, t]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -131,179 +160,42 @@ export function ConversationPanel({
         }
       })
       .catch(() => {
-        /* silently ignore profile fetch errors */ 
+        /* silently ignore profile fetch errors */
       });
   }, []);
 
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
-      if (profileMenuRef.current && !profileMenuRef.current.contains(e.target as Node)) {
-        setShowProfileMenu(false);
+      if (actionMenuRef.current && !actionMenuRef.current.contains(e.target as Node)) {
+        setShowActionMenu(false);
       }
     };
     document.addEventListener('mousedown', onClick);
     return () => document.removeEventListener('mousedown', onClick);
   }, []);
 
-  const loadFileIntoIngest = useCallback(
-    async (file: File) => {
-      setIngestError(null);
-      setIngestResult(null);
-
-      const isSupported = file.name.endsWith('.md') || file.name.endsWith('.txt') || file.type.startsWith('text/');
-      if (!isSupported) {
-        setIngestError(t('ingest.unsupportedType'));
-        return false;
-      }
-
-      if (file.size > MAX_INGEST_FILE_BYTES) {
-        setIngestError(t('ingest.fileTooLarge'));
-        return false;
-      }
-
-      try {
-        const text = await file.text();
-        setIngestInput(text);
-        setIngestResult(t('ingest.fileLoaded', { name: file.name }));
-        return true;
-      } catch {
-        setIngestError(t('ingest.fileReadError'));
-        return false;
+  // Detect an active "@..." mention fragment at the caret end of the input
+  const updateMentionState = useCallback(
+    (value: string) => {
+      const match = /(?:^|\s)@([^\s@]*)$/.exec(value);
+      if (match && workspaces.length > 1) {
+        setMentionQuery(match[1] ?? '');
+        setMentionIndex(0);
+      } else {
+        setMentionQuery(null);
       }
     },
-    [t],
+    [workspaces.length],
   );
 
-  // Ingest now runs server-side as a background job; poll until it reaches a
-  // terminal state instead of holding one request open for minutes.
-  const pollIngestJob = useCallback(
-    async (jobId: string): Promise<{ ok: boolean; error?: string; touched?: number }> => {
-      const deadline = Date.now() + 6 * 60 * 1000; // server budget 300s + buffer
-      let consecutiveFailures = 0;
-      while (Date.now() < deadline) {
-        await new Promise((resolve) => setTimeout(resolve, 3000));
-        try {
-          const res = await fetch(`/api/ingest?job_id=${encodeURIComponent(jobId)}`);
-          if (!res.ok) {
-            if (++consecutiveFailures >= 3) return { ok: false, error: t('ingest.failedGeneric') };
-            continue;
-          }
-          consecutiveFailures = 0;
-          const data = (await res.json()) as { status?: string; error?: string; touched_pages?: string[] };
-          if (data.status === 'done') return { ok: true, touched: data.touched_pages?.length ?? 0 };
-          if (data.status === 'failed') {
-            return { ok: false, error: data.error ?? t('ingest.failedGeneric') };
-          }
-          // Still running — surface live cascade progress
-          if (data.touched_pages && data.touched_pages.length > 0) {
-            setIngestProgress(data.touched_pages.length);
-          }
-        } catch {
-          if (++consecutiveFailures >= 3) return { ok: false, error: t('ingest.failedGeneric') };
-        }
-      }
-      return { ok: false, error: t('ingest.failedGeneric') };
+  const selectMention = useCallback(
+    (ws: WorkspaceRef) => {
+      setTaggedWorkspaces((prev) => (prev.length >= 5 ? prev : [...prev, ws]));
+      setInput((prev) => prev.replace(/(^|\s)@[^\s@]*$/, '$1').trimEnd());
+      setMentionQuery(null);
+      inputRef.current?.focus();
     },
-    [t],
-  );
-
-  const ingestText = useCallback(
-    async (title: string, content: string): Promise<{ ok: boolean; error?: string }> => {
-      try {
-        const payload = {
-          kind: 'text' as const,
-          title,
-          content,
-          workspace_id: workspaceId,
-          profile_id: selectedProfileId,
-        };
-        const res = await fetch('/api/ingest', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-llm-wiki-locale': locale,
-          },
-          body: JSON.stringify(payload),
-        });
-        const raw = await res.text();
-        let message = t('ingest.failedGeneric');
-        let parsedBody: { error?: unknown; jobId?: string; status?: string } = {};
-        if (raw) {
-          try {
-            parsedBody = JSON.parse(raw) as typeof parsedBody;
-            message = typeof parsedBody.error === 'string' ? parsedBody.error : message;
-          } catch {
-            message = raw;
-          }
-        }
-
-        if (!res.ok) {
-          if (res.status === 403 && isDriveReconnectError(message)) {
-            await startDriveReconnect();
-          }
-          return { ok: false, error: message };
-        }
-
-        if (parsedBody.jobId && parsedBody.status !== 'done') {
-          return pollIngestJob(parsedBody.jobId);
-        }
-        return { ok: true };
-      } catch {
-        return { ok: false, error: t('ingest.failedGeneric') };
-      }
-    },
-    [locale, workspaceId, selectedProfileId, startDriveReconnect, pollIngestJob, t],
-  );
-
-  const handleBatchIngest = useCallback(
-    async (files: FileList | null) => {
-      if (!files || files.length === 0) return;
-      const validFiles: File[] = [];
-
-      for (const file of Array.from(files)) {
-        const isSupported = file.name.endsWith('.md') || file.name.endsWith('.txt') || file.type.startsWith('text/');
-        const isSmallEnough = file.size <= MAX_INGEST_FILE_BYTES;
-        if (isSupported && isSmallEnough) {
-          validFiles.push(file);
-        }
-      }
-
-      if (validFiles.length === 0) {
-        setIngestError(t('ingest.unsupportedType'));
-        return;
-      }
-
-      setUploadQueue(validFiles.map((f) => ({ name: f.name, status: 'pending' })));
-      setIngesting(true);
-
-      let idx = 0;
-      for (const file of validFiles) {
-        setUploadQueue((prev) => prev.map((item, i) => (i === idx ? { ...item, status: 'uploading' } : item)));
-
-        try {
-          const text = await file.text();
-          const result = await ingestText(extractTitle(text, t('common.untitled')), text);
-
-          setUploadQueue((prev) =>
-            prev.map((item, i) =>
-              i === idx
-                ? { ...item, status: result.ok ? 'done' : 'error', error: result.ok ? undefined : result.error ?? t('ingest.failedGeneric') }
-                : item,
-            ),
-          );
-
-          if (result.ok) {
-            onSourceAdded?.();
-          }
-        } catch {
-          setUploadQueue((prev) => prev.map((item, i) => (i === idx ? { ...item, status: 'error', error: t('ingest.fileReadError') } : item)));
-        }
-        idx++;
-      }
-
-      setIngesting(false);
-    },
-    [t, ingestText, onSourceAdded],
+    [],
   );
 
   const handleSubmit = useCallback(
@@ -317,6 +209,7 @@ export function ConversationPanel({
 
       setMessages([...allMessages, { id: assistantId, role: 'assistant', content: '' }]);
       setInput('');
+      setMentionQuery(null);
       setIsLoading(true);
       setError(null);
       setSavedSlug(null);
@@ -336,6 +229,8 @@ export function ConversationPanel({
             messages: allMessages.map((m) => ({ role: m.role, content: m.content })),
             workspace_id: workspaceId,
             profile_id: selectedProfileId,
+            current_slug: currentSlug,
+            context_workspace_ids: taggedWorkspaces.map((w) => w.id),
           }),
           signal: controller.signal,
         });
@@ -359,23 +254,31 @@ export function ConversationPanel({
           const chunk = decoder.decode(value, { stream: true });
           raw += chunk;
 
-          // Show only the text portion while streaming (strip citation block if already present)
-          const displayText = raw.includes('\x00CITATIONS\x00')
-            ? raw.slice(0, raw.lastIndexOf('\x00CITATIONS\x00'))
-            : raw;
+          // Show only the text portion while streaming (strip metadata blocks)
+          const nulIdx = raw.indexOf('\x00');
+          const displayText = nulIdx === -1 ? raw : raw.slice(0, nulIdx);
 
           setMessages((prev) =>
             prev.map((m) => (m.id === assistantId ? { ...m, content: displayText } : m)),
           );
         }
 
-        // After stream ends, parse citations from full raw response
-        const { text, citedSlugs } = parseCitations(raw);
+        // After stream ends, parse citation + action blocks from full raw response
+        const { text, citedSlugs, proposals } = parseCitations(raw);
         setMessages((prev) =>
           prev.map((m) =>
-            m.id === assistantId ? { ...m, content: text, citedSlugs } : m,
+            m.id === assistantId
+              ? {
+                  ...m,
+                  content: text,
+                  citedSlugs,
+                  proposals: proposals.map((p) => ({ ...p, status: 'pending' as const })),
+                }
+              : m,
           ),
         );
+        // The AI may have created/renamed a workspace or written pages this turn
+        onWorkspacesChanged?.();
       } catch (err) {
         if (err instanceof Error && err.name === 'AbortError') {
           // User pressed Stop — keep the partial answer instead of discarding it
@@ -396,69 +299,69 @@ export function ConversationPanel({
         setIsLoading(false);
       }
     },
-    [input, isLoading, locale, messages, workspaceId, selectedProfileId, startDriveReconnect],
+    [
+      input,
+      isLoading,
+      locale,
+      messages,
+      workspaceId,
+      selectedProfileId,
+      currentSlug,
+      taggedWorkspaces,
+      startDriveReconnect,
+      onWorkspacesChanged,
+    ],
   );
 
   const stopStreaming = useCallback(() => {
     abortRef.current?.abort();
   }, []);
 
-  const handleIngest = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!ingestInput.trim()) return;
-    setIngesting(true);
-    setIngestError(null);
-    setIngestResult(null);
-    setIngestProgress(null);
+  const setProposalStatus = useCallback(
+    (messageId: string, proposalIdx: number, status: ProposalStatus, errMsg?: string) => {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === messageId
+            ? {
+                ...m,
+                proposals: m.proposals?.map((p, i) =>
+                  i === proposalIdx ? { ...p, status, error: errMsg } : p,
+                ),
+              }
+            : m,
+        ),
+      );
+    },
+    [],
+  );
 
-    try {
-      const trimmed = ingestInput.trim();
-      const payload = isUrl(trimmed)
-        ? { kind: 'url' as const, url: trimmed, workspace_id: workspaceId, profile_id: selectedProfileId }
-        : { kind: 'text' as const, title: extractTitle(trimmed, t('common.untitled')), content: trimmed, workspace_id: workspaceId, profile_id: selectedProfileId };
-
-      const res = await fetch('/api/ingest', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-llm-wiki-locale': locale,
-        },
-        body: JSON.stringify(payload),
-      });
-      const data = await res.json();
-
-      if (!res.ok) {
-        const message = data.error ?? t('ingest.failedGeneric');
-        setIngestError(message);
-        if (res.status === 403 && isDriveReconnectError(message)) {
-          await startDriveReconnect();
+  const executeProposal = useCallback(
+    async (messageId: string, proposalIdx: number, proposal: MessageProposal) => {
+      setProposalStatus(messageId, proposalIdx, 'running');
+      try {
+        const res = await fetch('/api/agent/execute', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: proposal.action, ...proposal.params }),
+        });
+        const data = (await res.json().catch(() => null)) as { error?: unknown } | null;
+        if (!res.ok) {
+          const msg = typeof data?.error === 'string' ? data.error : t('query.actionFailed');
+          setProposalStatus(messageId, proposalIdx, 'error', msg);
+          return;
         }
-      } else if (data.jobId && data.status !== 'done') {
-        // Job accepted — clear the input right away, then poll to completion
-        setIngestInput('');
-        const result = await pollIngestJob(data.jobId);
-        if (result.ok) {
-          setIngestResult(
-            result.touched
-              ? t('ingest.touchedPages', { count: result.touched })
-              : t('ingest.doneStatus', { status: 'done' }),
-          );
-          onSourceAdded?.();
-        } else {
-          setIngestError(result.error ?? t('ingest.failedGeneric'));
-        }
-      } else {
-        setIngestResult(t('ingest.doneStatus', { status: data.status }));
-        setIngestInput('');
+        setProposalStatus(messageId, proposalIdx, 'done');
         onSourceAdded?.();
+        if (proposal.action === 'delete_workspace' && proposal.params.workspace_id === workspaceId) {
+          // Current workspace is gone — leave it
+          window.location.href = '/w';
+        }
+      } catch {
+        setProposalStatus(messageId, proposalIdx, 'error', t('query.actionFailed'));
       }
-    } catch {
-      setIngestError(t('ingest.failedGeneric'));
-    } finally {
-      setIngesting(false);
-      setIngestProgress(null);
-    }
-  };
+    },
+    [setProposalStatus, onSourceAdded, workspaceId, t],
+  );
 
   const handleFileBack = useCallback(
     async (message: Message) => {
@@ -497,119 +400,13 @@ export function ConversationPanel({
     [messages, workspaceId, onPageWritten, fileBackPendingId, t],
   );
 
+  const selectedProfile = profiles.find((p) => p.id === selectedProfileId);
+
   return (
     <div
       className="flex h-full flex-col border-l"
       style={{ borderColor: 'var(--border)', background: 'var(--bg)' }}
     >
-      {/* Ingest strip */}
-      <form
-        onSubmit={handleIngest}
-        className="border-b px-4 py-3"
-        style={{ borderColor: 'var(--border)' }}
-      >
-        <div className="flex gap-2">
-          <label
-            className="self-end rounded-md border p-1.5 transition-all duration-100 hover:opacity-70 active:scale-90"
-            style={{ borderColor: 'var(--border)', color: 'var(--fg-muted)' }}
-            title={t('ingest.uploadFile')}
-            aria-label={t('ingest.uploadFile')}
-          >
-            <Plus size={14} />
-            <input
-              type="file"
-              accept=".md,.txt,text/*"
-              multiple
-              className="hidden"
-              onChange={(e) => {
-                const files = e.target.files;
-                if (files && files.length > 0) void handleBatchIngest(files);
-                e.target.value = '';
-              }}
-              disabled={ingesting}
-            />
-          </label>
-          <textarea
-            value={ingestInput}
-            onChange={(e) => {
-              setIngestInput(e.target.value);
-              e.target.style.height = 'auto';
-              e.target.style.height = `${Math.min(e.target.scrollHeight, 80)}px`;
-            }}
-            onDragOver={(e) => {
-              e.preventDefault();
-              setIsDraggingFile(true);
-            }}
-            onDragLeave={() => setIsDraggingFile(false)}
-            onDrop={(e) => {
-              e.preventDefault();
-              setIsDraggingFile(false);
-              const files = e.dataTransfer.files;
-              if (files && files.length > 0) void handleBatchIngest(files);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-                handleIngest(e as unknown as React.FormEvent);
-              }
-            }}
-            placeholder={isDraggingFile ? t('ingest.dropHere') : t('ingest.placeholder')}
-            rows={1}
-            className="flex-1 resize-none rounded-md border px-3 py-1.5 text-xs outline-none transition-all duration-150"
-            style={{
-              background: isDraggingFile ? 'var(--color-accent-glow)' : 'var(--bg-2)',
-              borderColor: isDraggingFile ? 'var(--color-accent)' : 'var(--border)',
-              color: 'var(--fg)',
-              overflow: 'hidden',
-            }}
-            disabled={ingesting}
-          />
-          <button
-            type="submit"
-            disabled={ingesting || !ingestInput.trim()}
-            className="self-end rounded-md px-3 py-1.5 text-xs font-medium transition-all duration-100 active:scale-95 disabled:opacity-50"
-            style={{ background: 'var(--color-accent)', color: 'oklch(10% 0.015 250)' }}
-          >
-            {ingesting ? <Loader2 size={12} className="animate-spin" /> : t('ingest.button')}
-          </button>
-        </div>
-        {ingestError && (
-          <p className="mt-1 text-xs" style={{ color: 'oklch(65% 0.18 30)' }}>
-            {ingestError}
-          </p>
-        )}
-        {ingestResult && (
-          <p className="mt-1 text-xs" style={{ color: 'var(--color-accent)' }}>
-            {ingestResult}
-          </p>
-        )}
-        {ingesting && (
-          <div
-            className="mt-2 flex items-center gap-2 rounded-md px-2.5 py-2 text-xs"
-            style={{ background: 'var(--color-accent-glow)', color: 'var(--color-accent)' }}
-          >
-            <Loader2 size={12} className="animate-spin" />
-            <span>
-              {ingestProgress
-                ? t('ingest.runningProgress', { count: ingestProgress })
-                : t('ingest.running')}
-            </span>
-          </div>
-        )}
-        {uploadQueue.length > 0 && (
-          <div className="mt-2 space-y-1">
-            {uploadQueue.map((item, idx) => (
-              <div key={idx} className="flex items-center gap-2 text-xs">
-                <span className="truncate" style={{ color: 'var(--fg-muted)' }}>{item.name}</span>
-                {item.status === 'pending' && <span style={{ color: 'var(--fg-muted)' }}>{t('ingest.queuePending')}</span>}
-                {item.status === 'uploading' && <Loader2 size={10} className="animate-spin" style={{ color: 'var(--color-accent)' }} />}
-                {item.status === 'done' && <CheckCircle size={10} style={{ color: 'oklch(65% 0.22 145)' }} />}
-                {item.status === 'error' && <span style={{ color: 'oklch(65% 0.18 30)' }}>{item.error ?? t('ingest.failed')}</span>}
-              </div>
-            ))}
-          </div>
-        )}
-      </form>
-
       {/* Saved synthesis notification */}
       {savedSlug && (
         <div
@@ -710,6 +507,61 @@ export function ConversationPanel({
               </div>
             )}
 
+            {/* Destructive-action confirmation cards */}
+            {m.role === 'assistant' &&
+              m.proposals?.map((proposal, idx) =>
+                proposal.status === 'dismissed' ? null : (
+                  <div
+                    key={`${m.id}-proposal-${idx}`}
+                    className="flex items-center justify-between gap-2 rounded-lg border px-3 py-2 text-xs"
+                    style={{
+                      borderColor:
+                        proposal.status === 'error' ? 'oklch(65% 0.18 30)' : 'var(--border)',
+                      background: 'var(--bg-2)',
+                      color: 'var(--fg)',
+                    }}
+                  >
+                    <span className="flex min-w-0 items-center gap-1.5">
+                      <AlertTriangle size={13} style={{ color: 'oklch(70% 0.15 70)' }} />
+                      <span className="truncate">
+                        {proposal.action === 'delete_workspace'
+                          ? t('query.confirmDeleteWorkspace', { name: proposal.params.name ?? '' })
+                          : t('query.confirmDeletePage', { slug: proposal.params.slug ?? '' })}
+                      </span>
+                    </span>
+                    {proposal.status === 'pending' && (
+                      <span className="flex shrink-0 items-center gap-1.5">
+                        <button
+                          onClick={() => executeProposal(m.id, idx, proposal)}
+                          className="rounded px-2 py-1 font-medium transition-opacity hover:opacity-80"
+                          style={{ background: 'oklch(55% 0.18 30)', color: 'white' }}
+                        >
+                          {t('query.confirmAction')}
+                        </button>
+                        <button
+                          onClick={() => setProposalStatus(m.id, idx, 'dismissed')}
+                          className="rounded px-2 py-1 transition-opacity hover:opacity-70"
+                          style={{ color: 'var(--fg-muted)' }}
+                        >
+                          {t('common.cancel')}
+                        </button>
+                      </span>
+                    )}
+                    {proposal.status === 'running' && (
+                      <Loader2 size={12} className="shrink-0 animate-spin" style={{ color: 'var(--color-accent)' }} />
+                    )}
+                    {proposal.status === 'done' && (
+                      <CheckCircle size={13} className="shrink-0" style={{ color: 'oklch(65% 0.22 145)' }} />
+                    )}
+                    {proposal.status === 'error' && (
+                      <span className="shrink-0" style={{ color: 'oklch(65% 0.18 30)' }}>
+                        {proposal.error ?? t('query.actionFailed')}
+                      </span>
+                    )}
+                  </div>
+                ),
+              )}
+
             {/* File-back button (only for completed assistant messages with citations) */}
             {m.role === 'assistant' && m.citedSlugs !== undefined && m.content.length > 0 && (
               <button
@@ -752,70 +604,165 @@ export function ConversationPanel({
         className="border-t px-4 py-3"
         style={{ borderColor: 'var(--border)' }}
       >
-        <div className="flex gap-2">
-          {/* Model selector */}
-          {profiles.length > 0 && (
-            <div className="relative shrink-0" ref={profileMenuRef}>
-              <button
-                type="button"
-                onClick={() => setShowProfileMenu((s) => !s)}
-                disabled={isLoading}
-                className="flex h-full items-center gap-1 rounded-md border px-2.5 py-2 text-xs font-medium transition-all duration-100 hover:opacity-70 active:scale-95 disabled:opacity-40"
+        {/* Tagged workspace chips */}
+        {taggedWorkspaces.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-1">
+            {taggedWorkspaces.map((ws) => (
+              <span
+                key={ws.id}
+                className="flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs"
+                style={{
+                  borderColor: 'var(--color-accent)',
+                  background: 'var(--color-accent-glow)',
+                  color: 'var(--color-accent)',
+                }}
+              >
+                @{ws.name}
+                <button
+                  type="button"
+                  onClick={() => setTaggedWorkspaces((prev) => prev.filter((w) => w.id !== ws.id))}
+                  className="transition-opacity hover:opacity-70"
+                  aria-label={t('common.close')}
+                >
+                  <X size={11} />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+
+        <div className="relative flex gap-2">
+          {/* Action menu: model selection + import */}
+          <div className="relative shrink-0" ref={actionMenuRef}>
+            <button
+              type="button"
+              onClick={() => setShowActionMenu((s) => !s)}
+              disabled={isLoading}
+              className="flex h-full items-center gap-1 rounded-md border px-2.5 py-2 text-xs font-medium transition-all duration-100 hover:opacity-70 active:scale-95 disabled:opacity-40"
+              style={{
+                background: 'var(--bg-2)',
+                borderColor: 'var(--border)',
+                color: 'var(--fg)',
+              }}
+              title={t('query.actionMenu')}
+              aria-label={t('query.actionMenu')}
+            >
+              <Bot size={13} />
+            </button>
+
+            {showActionMenu && (
+              <div
+                className="absolute bottom-full left-0 z-50 mb-1 w-60 overflow-hidden rounded-lg border shadow-lg"
                 style={{
                   background: 'var(--bg-2)',
                   borderColor: 'var(--border)',
-                  color: 'var(--fg)',
+                  maxHeight: 300,
+                  overflowY: 'auto',
                 }}
-                title={t('common.selectModel')}
               >
-                <Bot size={13} />
-              </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowActionMenu(false);
+                    setShowImport(true);
+                  }}
+                  className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-xs font-medium transition-all duration-100 hover:opacity-70"
+                  style={{ color: 'var(--fg)', borderBottom: '1px solid var(--border)' }}
+                >
+                  <Import size={13} style={{ color: 'var(--color-accent)' }} />
+                  {t('ingest.dialogTitle')}
+                </button>
 
-              {showProfileMenu && (
-                <div
-                  className="absolute bottom-full left-0 z-50 mb-1 w-56 overflow-hidden rounded-lg border shadow-lg"
+                {profiles.length > 0 && (
+                  <>
+                    <div className="px-3 py-2 text-xs font-medium" style={{ color: 'var(--fg-muted)' }}>
+                      {t('common.selectModel')}
+                    </div>
+                    {profiles.map((p) => {
+                      const isSelected = p.id === selectedProfileId;
+                      return (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedProfileId(p.id);
+                            setShowActionMenu(false);
+                          }}
+                          className="flex w-full flex-col px-3 py-2 text-left text-xs transition-all duration-100 hover:opacity-70"
+                          style={{
+                            color: 'var(--fg)',
+                            borderLeft: isSelected ? '3px solid oklch(65% 0.22 145)' : '3px solid transparent',
+                            background: isSelected ? 'var(--color-accent-glow)' : undefined,
+                          }}
+                        >
+                          <span className="font-medium">{p.name}</span>
+                          <span className="truncate" style={{ color: 'var(--fg-muted)', fontSize: 10 }}>
+                            {p.model}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* @-mention workspace dropdown */}
+          {mentionQuery !== null && mentionCandidates.length > 0 && (
+            <div
+              className="absolute bottom-full left-12 z-50 mb-1 w-56 overflow-hidden rounded-lg border shadow-lg"
+              style={{ background: 'var(--bg-2)', borderColor: 'var(--border)' }}
+              role="listbox"
+            >
+              <div className="px-3 py-1.5 text-xs" style={{ color: 'var(--fg-muted)' }}>
+                {t('query.tagWorkspace')}
+              </div>
+              {mentionCandidates.map((ws, idx) => (
+                <button
+                  key={ws.id}
+                  type="button"
+                  role="option"
+                  aria-selected={idx === mentionIndex}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    selectMention(ws);
+                  }}
+                  className="flex w-full items-center px-3 py-2 text-left text-xs transition-all duration-100"
                   style={{
-                    background: 'var(--bg-2)',
-                    borderColor: 'var(--border)',
-                    maxHeight: 240,
-                    overflowY: 'auto',
+                    color: 'var(--fg)',
+                    background: idx === mentionIndex ? 'var(--color-accent-glow)' : undefined,
                   }}
                 >
-                  <div className="px-3 py-2 text-xs font-medium" style={{ color: 'var(--fg-muted)' }}>
-                    {t('common.selectModel')}
-                  </div>
-                  {profiles.map((p) => {
-                    const isSelected = p.id === selectedProfileId;
-                    return (
-                      <button
-                        key={p.id}
-                        type="button"
-                        onClick={() => {
-                          setSelectedProfileId(p.id);
-                          setShowProfileMenu(false);
-                        }}
-                        className="flex w-full flex-col px-3 py-2 text-left text-xs transition-all duration-100 hover:opacity-70"
-                        style={{
-                          color: 'var(--fg)',
-                          borderLeft: isSelected ? '3px solid oklch(65% 0.22 145)' : '3px solid transparent',
-                          background: isSelected ? 'var(--color-accent-glow)' : undefined,
-                        }}
-                      >
-                        <span className="font-medium">{p.name}</span>
-                        <span className="truncate" style={{ color: 'var(--fg-muted)', fontSize: 10 }}>
-                          {p.model}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
+                  @{ws.name}
+                </button>
+              ))}
             </div>
           )}
 
           <input
+            ref={inputRef}
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => {
+              setInput(e.target.value);
+              updateMentionState(e.target.value);
+            }}
+            onKeyDown={(e) => {
+              if (mentionQuery !== null && mentionCandidates.length > 0) {
+                if (e.key === 'ArrowDown') {
+                  e.preventDefault();
+                  setMentionIndex((i) => (i + 1) % mentionCandidates.length);
+                } else if (e.key === 'ArrowUp') {
+                  e.preventDefault();
+                  setMentionIndex((i) => (i - 1 + mentionCandidates.length) % mentionCandidates.length);
+                } else if (e.key === 'Enter' || e.key === 'Tab') {
+                  e.preventDefault();
+                  selectMention(mentionCandidates[mentionIndex]!);
+                } else if (e.key === 'Escape') {
+                  setMentionQuery(null);
+                }
+              }
+            }}
             placeholder={t('query.placeholder')}
             className="flex-1 rounded-md border px-3 py-2 text-sm outline-none"
             style={{
@@ -847,7 +794,22 @@ export function ConversationPanel({
             </button>
           )}
         </div>
+        {selectedProfile && (
+          <p className="mt-1 truncate text-xs" style={{ color: 'var(--fg-muted)', opacity: 0.7 }}>
+            {selectedProfile.name}
+          </p>
+        )}
       </form>
+
+      {showImport && (
+        <ImportDialog
+          workspaceId={workspaceId}
+          workspaceName={workspaceName ?? ''}
+          profileId={selectedProfileId}
+          onClose={() => setShowImport(false)}
+          onSourceAdded={onSourceAdded}
+        />
+      )}
     </div>
   );
 }

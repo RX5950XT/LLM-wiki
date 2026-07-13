@@ -44,6 +44,10 @@
     "graphView": "Graph view",
     "runLint": "Run wiki lint",
     "lintRunning": "Lint running…",
+    "runOrganize": "Auto-classify + dedupe (all workspaces)",
+    "organizeRunning": "Organizing…",
+    "organizeConfirm": "This scans ALL your workspaces, merges duplicated knowledge and moves misplaced pages, then writes a report page. It may take a few minutes. Continue?",
+    "organizeFailed": "Organize failed",
     "initFailed": "Auto-setup failed. Please try creating your workspace manually."
   },
   "wiki": {
@@ -111,7 +115,12 @@
     "fileReadError": "Failed to read file",
     "fileTooLarge": "File must be under 2 MB",
     "failedGeneric": "Ingest failed",
-    "runningProgress": "Ingesting… {count} pages updated so far"
+    "runningProgress": "Ingesting… {count} pages updated so far",
+    "dialogTitle": "Import content",
+    "target": "Target workspace",
+    "targetAuto": "Auto (AI decides)",
+    "targetCurrent": "Current workspace: {name}",
+    "routedTo": "Imported into \"{name}\""
   },
   "sources": {
     "open": "Sources",
@@ -130,7 +139,13 @@
     "thinking": "Thinking…",
     "searchWiki": "Search wiki...",
     "stop": "Stop",
-    "fileBackFailed": "Failed to save synthesis page"
+    "fileBackFailed": "Failed to save synthesis page",
+    "actionMenu": "Model & import",
+    "tagWorkspace": "Tag a workspace as context",
+    "confirmAction": "Confirm",
+    "actionFailed": "Action failed",
+    "confirmDeleteWorkspace": "AI wants to delete workspace \"{name}\"",
+    "confirmDeletePage": "AI wants to delete page {slug}"
   },
   "settings": {
     "title": "Settings",
@@ -152,6 +167,14 @@
     "noProfiles": "No profiles yet. Add one below.",
     "default": "default",
     "deleteProfile": "Delete profile",
+    "editProfile": "Edit profile",
+    "aiPermissions": "AI permissions",
+    "aiPermissionsBody": "How the AI handles destructive actions (deleting pages or workspaces).",
+    "aiConfirmOn": "Ask me first",
+    "aiConfirmOnHint": "The AI proposes; you confirm in the chat before it runs",
+    "aiConfirmOff": "Run directly",
+    "aiConfirmOffHint": "The AI may delete directly; Drive trash still allows recovery",
+    "apiKeyKeepHint": "Leave blank to keep current key",
     "saveFailed": "Failed to save profile",
     "confirmDeleteProfile": "Delete this LLM profile? Workspaces bound to it will fall back to the default profile.",
     "deleteProfileFailed": "Failed to delete profile"
@@ -161,11 +184,11 @@
     "open": "Open help",
     "close": "Close help",
     "workspaceTitle": "Workspaces and pages",
-    "workspaceBody": "Use the workspace menu to switch, reorder, or create workspaces. Knowledge pages are LLM-maintained. In the Notes section click \"+\" to create custom notes — pencil (rename) and trash (delete) buttons appear next to each custom note; notes/guide.md is a system page and cannot be deleted. The lock icon on each page lets you protect it from LLM overwrites.",
+    "workspaceBody": "Use the workspace menu to switch, drag to reorder, or create workspaces. Knowledge pages are AI-maintained; the lock icon on each page protects it from AI overwrites. You can also ask the AI in chat to create, rename, or delete workspaces.",
     "ingestTitle": "Import content",
-    "ingestBody": "Paste a URL, text, or Markdown in the right panel, or upload .txt / .md files. The wiki updates related pages after ingest finishes.",
+    "ingestBody": "Click the bot button left of the chat input → \"Import content\" to paste a URL, text, or Markdown, or drop / pick .txt / .md files. The target workspace defaults to \"Auto\", letting the AI decide where the content belongs.",
     "chatTitle": "Chat and synthesis",
-    "chatBody": "Use the right panel to ask questions about the current wiki. Pick an LLM profile near the input; cited answers can be saved as synthesis pages.",
+    "chatBody": "The chat defaults to the page you're viewing as context. Type \"@\" to tag another workspace as extra context. The AI files valuable content into knowledge pages; destructive actions show a confirmation card first (switchable in Settings). The wand button in the top bar runs auto-classify + dedupe across all workspaces.",
     "settingsTitle": "Settings and sync",
     "settingsBody": "Settings manages LLM profiles, language, appearance, and rules. Rules are the prompt files that control ingest, query, and health checks.",
     "driveTitle": "Google Drive reconnect",

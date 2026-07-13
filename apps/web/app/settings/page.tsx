@@ -1,11 +1,13 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
+import { after } from 'next/server';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { ArrowLeft } from 'lucide-react';
 import { createClient } from '@/lib/supabase/server';
 import { ProfileList } from '@/components/settings/profile-list';
 import { ProfileForm } from '@/components/settings/profile-form';
 import { LocaleSwitcher } from '@/components/settings/locale-switcher';
+import { AiPermissions } from '@/components/settings/ai-permissions';
 import { RulesPanel } from '@/components/settings/rules-panel';
 import { ThemeSwitcher } from '@/components/settings/theme-switcher';
 import { ensureWorkspaceSystemPages, SYSTEM_PAGE_SEEDS } from '@/lib/drive/system-pages';
@@ -42,21 +44,24 @@ export default async function SettingsPage() {
       .eq('zone', 'schema');
 
     if ((count ?? 0) < expectedSchemaCount) {
-      try {
-        const drive = await createDriveClientForUser(user.id);
-        const { data: workspace } = await supabase
-          .from('workspaces')
-          .select('drive_folder_id')
-          .eq('id', workspaceId)
-          .eq('owner_id', user.id)
-          .single();
+      // 補齊移出請求路徑：本次先渲染現有規則頁，下次載入即完整
+      after(async () => {
+        try {
+          const drive = await createDriveClientForUser(user.id);
+          const { data: workspace } = await supabase
+            .from('workspaces')
+            .select('drive_folder_id')
+            .eq('id', workspaceId)
+            .eq('owner_id', user.id)
+            .single();
 
-        if (workspace?.drive_folder_id) {
-          await ensureWorkspaceSystemPages(drive, workspaceId, workspace.drive_folder_id, locale);
+          if (workspace?.drive_folder_id) {
+            await ensureWorkspaceSystemPages(drive, workspaceId, workspace.drive_folder_id, locale);
+          }
+        } catch (error) {
+          console.warn('[settings] schema backfill skipped', error);
         }
-      } catch (error) {
-        console.warn('[settings] schema backfill skipped', error);
-      }
+      });
     }
   }
   const { data: rulePages } = workspaceId
@@ -126,6 +131,13 @@ export default async function SettingsPage() {
           </h2>
           <ProfileList profiles={profiles ?? []} />
           <ProfileForm />
+        </section>
+
+        <section className="space-y-4">
+          <h2 className="text-sm font-medium uppercase tracking-wider" style={{ color: 'var(--fg-muted)' }}>
+            {t('settings.aiPermissions')}
+          </h2>
+          <AiPermissions initialConfirm={user.user_metadata?.ai_confirm_destructive !== false} />
         </section>
 
         <section className="space-y-4">

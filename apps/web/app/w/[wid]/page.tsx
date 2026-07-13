@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation';
+import { after } from 'next/server';
 import { getLocale } from 'next-intl/server';
 import { createDriveClientForUser, isGoogleDriveAuthError } from '@/lib/google/drive-auth';
 import { ensureWorkspaceSystemPages } from '@/lib/drive/system-pages';
@@ -22,38 +23,36 @@ export default async function WorkspacePage({ params, searchParams }: WorkspaceP
 
   if (!user) redirect('/login');
 
-  const [{ data: workspace }, { data: workspaces }] = await Promise.all([
-    supabase.from('workspaces').select('id, name').eq('id', wid).single(),
+  const [{ data: workspace }, { data: workspaces }, { data: pages }] = await Promise.all([
+    supabase.from('workspaces').select('id, name, drive_folder_id').eq('id', wid).single(),
     fetchOrderedWorkspaces(supabase, {
       select: 'id, name, sort_order, created_at',
       ownerId: user.id,
     }),
+    supabase
+      .from('pages')
+      .select('slug, title, kind, zone, updated_at, version')
+      .eq('workspace_id', wid)
+      .order('updated_at', { ascending: false })
+      .limit(2000),
   ]);
 
   if (!workspace) redirect('/w');
 
-  const workspaceRootId = await supabase
-    .from('workspaces')
-    .select('drive_folder_id')
-    .eq('id', wid)
-    .single()
-    .then(({ data }) => data?.drive_folder_id);
-
+  const workspaceRootId = workspace.drive_folder_id;
   if (workspaceRootId) {
-    try {
-      const drive = await createDriveClientForUser(user.id);
-      await ensureWorkspaceSystemPages(drive, wid, workspaceRootId, locale);
-    } catch (error) {
-      if (!isGoogleDriveAuthError(error)) throw error;
-    }
+    // 防禦性補齊系統頁：移出請求路徑，避免每次導覽都同步打 Google Drive
+    after(async () => {
+      try {
+        const drive = await createDriveClientForUser(user.id);
+        await ensureWorkspaceSystemPages(drive, wid, workspaceRootId, locale);
+      } catch (error) {
+        if (!isGoogleDriveAuthError(error)) {
+          console.warn('[workspace] system pages backfill skipped', error);
+        }
+      }
+    });
   }
-
-  const { data: pages } = await supabase
-    .from('pages')
-    .select('slug, title, kind, zone, updated_at, version')
-    .eq('workspace_id', wid)
-    .order('updated_at', { ascending: false })
-    .limit(2000);
 
   const workspaceEntries = (workspaces ?? []).map((item) => ({
     id: item.id,

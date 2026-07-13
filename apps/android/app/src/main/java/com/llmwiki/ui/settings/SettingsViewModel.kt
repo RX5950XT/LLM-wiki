@@ -33,6 +33,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
@@ -51,6 +52,9 @@ data class SettingsUiState(
     val ruleDrafts: Map<String, String> = emptyMap(),
     val ruleLoadingSlug: String? = null,
     val ruleSavingSlug: String? = null,
+    /** Whether AI destructive actions need an in-chat confirmation (auth user_metadata) */
+    val aiConfirmDestructive: Boolean = true,
+    val aiPermissionSaving: Boolean = false,
 )
 
 private val settingsJson = Json { ignoreUnknownKeys = true }
@@ -64,8 +68,19 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         SettingsUiState(
             accountEmail = supabase.auth.currentSessionOrNull()?.user?.email.orEmpty(),
             accountId = supabase.auth.currentSessionOrNull()?.user?.id.orEmpty(),
+            aiConfirmDestructive = readAiConfirmPreference(),
         )
     )
+
+    /** Defaults to true (confirm required) when the flag was never set. */
+    private fun readAiConfirmPreference(): Boolean =
+        supabase.auth.currentSessionOrNull()
+            ?.user
+            ?.userMetadata
+            ?.get("ai_confirm_destructive")
+            ?.jsonPrimitive
+            ?.booleanOrNull
+            ?: true
 
     val uiState: StateFlow<SettingsUiState> = combine(
         settingsState,
@@ -172,6 +187,81 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                     )
                 }
                 onDone(false)
+            }
+        }
+    }
+
+    /** Edit an existing profile. Blank apiKey keeps the stored (encrypted) key. */
+    fun updateProfile(
+        id: String,
+        name: String,
+        baseUrl: String,
+        apiKey: String,
+        model: String,
+        isDefault: Boolean,
+        onDone: (Boolean) -> Unit,
+    ) {
+        viewModelScope.launch {
+            settingsState.update { it.copy(createLoading = true, error = null) }
+            try {
+                val bodyJson = buildJsonObject {
+                    put("id", id)
+                    put("name", name)
+                    put("base_url", baseUrl)
+                    if (apiKey.isNotBlank()) put("api_key", apiKey)
+                    put("model", model)
+                    put("is_default", isDefault)
+                }.toString()
+                val response = sendAuthorizedRequest { accessToken ->
+                    AndroidHttpClient.instance.patch(webApiUrl("/api/settings/profiles")) {
+                        header("Authorization", "Bearer $accessToken")
+                        contentType(ContentType.Application.Json)
+                        setBody(bodyJson)
+                    }
+                } ?: run {
+                    settingsState.update { it.copy(createLoading = false, error = unauthorizedMessage()) }
+                    onDone(false)
+                    return@launch
+                }
+                val text = response.bodyAsText()
+                val ok = response.status.value in 200..299 && isJsonObject(text)
+                settingsState.update {
+                    it.copy(
+                        createLoading = false,
+                        error = if (ok) null else parseApiError(text, "Failed to save profile"),
+                    )
+                }
+                if (ok) loadProfiles()
+                onDone(ok)
+            } catch (e: Exception) {
+                settingsState.update {
+                    it.copy(createLoading = false, error = e.toUserFacingMessage("Failed to save profile"))
+                }
+                onDone(false)
+            }
+        }
+    }
+
+    /** Persisted in auth user_metadata so Web and Android share one preference. */
+    fun setAiConfirmDestructive(value: Boolean) {
+        val previous = settingsState.value.aiConfirmDestructive
+        settingsState.update { it.copy(aiConfirmDestructive = value, aiPermissionSaving = true) }
+        viewModelScope.launch {
+            try {
+                supabase.auth.updateUser {
+                    data {
+                        put("ai_confirm_destructive", value)
+                    }
+                }
+                settingsState.update { it.copy(aiPermissionSaving = false, error = null) }
+            } catch (e: Exception) {
+                settingsState.update {
+                    it.copy(
+                        aiConfirmDestructive = previous,
+                        aiPermissionSaving = false,
+                        error = e.toUserFacingMessage("Failed to save setting"),
+                    )
+                }
             }
         }
     }

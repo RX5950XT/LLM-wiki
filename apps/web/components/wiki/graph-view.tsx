@@ -131,6 +131,41 @@ export function GraphView({ workspaceId, activePage, onNodeClick, refreshKey = 0
         const height = size?.height ?? containerRef.current.clientHeight ?? 400;
         const accent = cssVar('--color-accent', '#2dd4bf');
         const mutedLink = cssVar('--border', 'rgba(148,163,184,0.5)');
+        const labelColor = cssVar('--fg-muted', '#94a3b8');
+
+        // Obsidian-style semantics: node size follows connectivity, hovering
+        // highlights the neighbourhood, orphans are dimmed.
+        const degree = new Map<string, number>();
+        const neighbors = new Map<string, Set<string>>();
+        for (const link of graphData.links) {
+          degree.set(link.source, (degree.get(link.source) ?? 0) + 1);
+          degree.set(link.target, (degree.get(link.target) ?? 0) + 1);
+          if (!neighbors.has(link.source)) neighbors.set(link.source, new Set());
+          if (!neighbors.has(link.target)) neighbors.set(link.target, new Set());
+          neighbors.get(link.source)!.add(link.target);
+          neighbors.get(link.target)!.add(link.source);
+        }
+        const hover: { id: string | null } = { id: null };
+
+        const kindColor = (node: GraphNode) => {
+          if (node.id === activePage) return accent;
+          switch (node.kind) {
+            case 'entity': return '#60a5fa';
+            case 'concept': return '#34d399';
+            case 'synthesis': return '#f59e0b';
+            default: return '#94a3b8';
+          }
+        };
+        const nodeRadius = (node: GraphNode) => {
+          const d = degree.get(node.id) ?? 0;
+          return Math.min(3 + Math.sqrt(d) * 1.6, 12);
+        };
+        const isDimmed = (node: GraphNode) => {
+          if (hover.id) {
+            return node.id !== hover.id && !(neighbors.get(hover.id)?.has(node.id) ?? false);
+          }
+          return (degree.get(node.id) ?? 0) === 0; // orphans fade until hovered
+        };
 
         const fg = createElement(ForceGraph!, {
           ref: fgRef,
@@ -139,18 +174,59 @@ export function GraphView({ workspaceId, activePage, onNodeClick, refreshKey = 0
           height,
           backgroundColor: 'transparent',
           nodeLabel: (node: GraphNode) => node.label,
-          nodeVal: (node: GraphNode) =>
-            node.kind === 'index' ? 6 : node.kind === 'entity' ? 4 : 2,
-          nodeColor: (node: GraphNode) => {
-            if ((node as GraphNode & { id: string }).id === activePage) return accent;
-            switch (node.kind) {
-              case 'entity': return '#60a5fa';
-              case 'concept': return '#34d399';
-              case 'synthesis': return '#f59e0b';
-              default: return '#94a3b8';
+          nodeVal: (node: GraphNode) => nodeRadius(node) ** 2 / 4,
+          nodeCanvasObjectMode: () => 'replace' as const,
+          nodeCanvasObject: (
+            node: GraphNode & { x?: number; y?: number },
+            canvasCtx: CanvasRenderingContext2D,
+            globalScale: number,
+          ) => {
+            const x = node.x ?? 0;
+            const y = node.y ?? 0;
+            const r = nodeRadius(node);
+            const dimmed = isDimmed(node);
+
+            canvasCtx.globalAlpha = dimmed ? 0.18 : 1;
+            canvasCtx.beginPath();
+            canvasCtx.arc(x, y, r, 0, 2 * Math.PI);
+            canvasCtx.fillStyle = kindColor(node);
+            canvasCtx.fill();
+
+            // Labels appear when zoomed in enough, always on hover focus
+            const focused = hover.id === node.id;
+            if (!dimmed && (globalScale > 1.4 || focused)) {
+              const fontSize = Math.max(10 / globalScale, 2.4);
+              canvasCtx.font = `${focused ? '600 ' : ''}${fontSize}px sans-serif`;
+              canvasCtx.textAlign = 'center';
+              canvasCtx.textBaseline = 'top';
+              canvasCtx.fillStyle = focused ? kindColor(node) : labelColor;
+              canvasCtx.fillText(node.label, x, y + r + 1.5);
+            }
+            canvasCtx.globalAlpha = 1;
+          },
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          linkColor: (link: any) => {
+            if (hover.id) {
+              const s = typeof link.source === 'object' ? link.source.id : link.source;
+              const target = typeof link.target === 'object' ? link.target.id : link.target;
+              if (s !== hover.id && target !== hover.id) return 'rgba(148,163,184,0.06)';
+              return accent;
+            }
+            return mutedLink;
+          },
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          linkWidth: (link: any) => {
+            if (!hover.id) return 1;
+            const s = typeof link.source === 'object' ? link.source.id : link.source;
+            const target = typeof link.target === 'object' ? link.target.id : link.target;
+            return s === hover.id || target === hover.id ? 1.8 : 0.5;
+          },
+          onNodeHover: (node: GraphNode | null) => {
+            hover.id = node?.id ?? null;
+            if (containerRef.current) {
+              containerRef.current.style.cursor = node ? 'pointer' : 'default';
             }
           },
-          linkColor: () => mutedLink,
           onNodeClick: (node: GraphNode) => {
             onNodeClick?.((node as GraphNode & { id: string }).id);
           },

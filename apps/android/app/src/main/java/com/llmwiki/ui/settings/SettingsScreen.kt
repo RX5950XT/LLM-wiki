@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
@@ -87,6 +88,7 @@ fun SettingsScreen(
 ) {
     val uiState by settingsViewModel.uiState.collectAsState()
     var showCreateDialog by remember { mutableStateOf(false) }
+    var profileToEdit by remember { mutableStateOf<LlmProfile?>(null) }
     var profileToDelete by remember { mutableStateOf<LlmProfile?>(null) }
     var expandedRuleSlug by remember { mutableStateOf<String?>(null) }
 
@@ -168,11 +170,25 @@ fun SettingsScreen(
 
                             else -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 uiState.profiles.forEach { profile ->
-                                    ProfileCard(profile = profile, onDelete = { profileToDelete = profile })
+                                    ProfileCard(
+                                        profile = profile,
+                                        onEdit = { profileToEdit = profile },
+                                        onDelete = { profileToDelete = profile },
+                                    )
                                 }
                             }
                         }
                     }
+                }
+            }
+
+            item {
+                SettingsSection(title = stringResource(R.string.settings_ai_permissions)) {
+                    AiPermissionSelector(
+                        confirmDestructive = uiState.aiConfirmDestructive,
+                        enabled = !uiState.aiPermissionSaving,
+                        onSelect = settingsViewModel::setAiConfirmDestructive,
+                    )
                 }
             }
 
@@ -260,12 +276,26 @@ fun SettingsScreen(
     }
 
     if (showCreateDialog) {
-        CreateProfileDialog(
+        ProfileDialog(
+            existing = null,
             isLoading = uiState.createLoading,
             onDismiss = { showCreateDialog = false },
             onConfirm = { name, baseUrl, apiKey, model, isDefault ->
                 settingsViewModel.createProfile(name, baseUrl, apiKey, model, isDefault) { ok ->
                     if (ok) showCreateDialog = false
+                }
+            },
+        )
+    }
+
+    profileToEdit?.let { profile ->
+        ProfileDialog(
+            existing = profile,
+            isLoading = uiState.createLoading,
+            onDismiss = { profileToEdit = null },
+            onConfirm = { name, baseUrl, apiKey, model, isDefault ->
+                settingsViewModel.updateProfile(profile.id, name, baseUrl, apiKey, model, isDefault) { ok ->
+                    if (ok) profileToEdit = null
                 }
             },
         )
@@ -420,9 +450,49 @@ private fun AccountCard(email: String, accountId: String) {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun AiPermissionSelector(
+    confirmDestructive: Boolean,
+    enabled: Boolean,
+    onSelect: (Boolean) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            stringResource(R.string.settings_ai_permissions_hint),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            FilterChip(
+                selected = confirmDestructive,
+                enabled = enabled,
+                onClick = { onSelect(true) },
+                label = { Text(stringResource(R.string.settings_ai_confirm_on)) },
+                leadingIcon = if (confirmDestructive) {
+                    { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                } else null,
+            )
+            FilterChip(
+                selected = !confirmDestructive,
+                enabled = enabled,
+                onClick = { onSelect(false) },
+                label = { Text(stringResource(R.string.settings_ai_confirm_off)) },
+                leadingIcon = if (!confirmDestructive) {
+                    { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                } else null,
+            )
+        }
+    }
+}
+
 @Composable
 private fun ProfileCard(
     profile: LlmProfile,
+    onEdit: () -> Unit,
     onDelete: () -> Unit,
 ) {
     Surface(
@@ -463,6 +533,12 @@ private fun ProfileCard(
                     profile.baseUrl,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            IconButton(onClick = onEdit) {
+                Icon(
+                    Icons.Default.Edit,
+                    contentDescription = stringResource(R.string.settings_edit_profile),
                 )
             }
             IconButton(onClick = onDelete) {
@@ -576,22 +652,36 @@ private fun SelectableOptionChip(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun CreateProfileDialog(
+private fun ProfileDialog(
+    existing: LlmProfile?,
     isLoading: Boolean,
     onDismiss: () -> Unit,
     onConfirm: (name: String, baseUrl: String, apiKey: String, model: String, isDefault: Boolean) -> Unit,
 ) {
-    var name by remember { mutableStateOf("") }
-    var baseUrl by remember { mutableStateOf("https://openrouter.ai/api/v1") }
-    var apiKey by remember { mutableStateOf("") }
-    var model by remember { mutableStateOf("anthropic/claude-opus-4-7") }
-    var isDefault by remember { mutableStateOf(false) }
+    val isEdit = existing != null
+    var name by remember(existing?.id) { mutableStateOf(existing?.name ?: "") }
+    var baseUrl by remember(existing?.id) {
+        mutableStateOf(existing?.baseUrl ?: "https://openrouter.ai/api/v1")
+    }
+    // Blank on edit = keep the stored key (the server never returns it)
+    var apiKey by remember(existing?.id) { mutableStateOf("") }
+    var model by remember(existing?.id) {
+        mutableStateOf(existing?.model ?: "anthropic/claude-opus-4-7")
+    }
+    var isDefault by remember(existing?.id) { mutableStateOf(existing?.isDefault ?: false) }
 
-    val isValid = name.isNotBlank() && baseUrl.isNotBlank() && apiKey.isNotBlank() && model.isNotBlank()
+    val isValid = name.isNotBlank() && baseUrl.isNotBlank() && model.isNotBlank() &&
+        (isEdit || apiKey.isNotBlank())
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.settings_add_profile)) },
+        title = {
+            Text(
+                stringResource(
+                    if (isEdit) R.string.settings_edit_profile else R.string.settings_add_profile,
+                )
+            )
+        },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 FlowRow(
@@ -638,6 +728,9 @@ private fun CreateProfileDialog(
                     value = apiKey,
                     onValueChange = { apiKey = it },
                     label = { Text(stringResource(R.string.settings_profile_api_key)) },
+                    placeholder = if (isEdit) {
+                        { Text(stringResource(R.string.settings_api_key_keep_hint)) }
+                    } else null,
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),

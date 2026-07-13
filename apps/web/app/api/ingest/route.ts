@@ -9,7 +9,9 @@ import {
 } from '@/lib/google/drive-auth';
 
 export const maxDuration = 300;
+import { generateText } from 'ai';
 import { urlToMarkdown } from '@/lib/fetch/url-to-markdown';
+import { createLLMClient } from '@/lib/ai/client';
 import { runIngestPipeline } from '@/lib/ai/ingest-pipeline';
 import { getDefaultPrompt } from '@llm-wiki/prompts';
 import { resolveUiLocaleFromRequest } from '@/lib/i18n/ui-locale';
@@ -17,19 +19,80 @@ import { resolveUiLocaleFromRequest } from '@/lib/i18n/ui-locale';
 // Matches the 2 MB client-side caps on web and Android file ingest
 const MAX_TEXT_LENGTH = 2 * 1024 * 1024;
 
+const TargetFields = {
+  // Explicit target, or auto_route + fallback_workspace_id (AI picks the target)
+  workspace_id: z.string().uuid().optional(),
+  auto_route: z.boolean().optional(),
+  fallback_workspace_id: z.string().uuid().optional(),
+  profile_id: z.string().uuid().nullish(),
+};
+
 const IngestSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('url'),
     url: z.string().url().max(2048),
-    workspace_id: z.string().uuid(),
+    ...TargetFields,
   }),
   z.object({
     kind: z.literal('text'),
     title: z.string().min(1).max(300),
     content: z.string().min(1).max(MAX_TEXT_LENGTH),
-    workspace_id: z.string().uuid(),
+    ...TargetFields,
   }),
 ]);
+
+/**
+ * Pick the best-fitting workspace for a piece of content with one small LLM
+ * call. Falls back to `fallbackId` on any failure — routing must never block
+ * an ingest.
+ */
+async function routeToWorkspace(
+  supabase: Awaited<ReturnType<typeof getRequestUser>>['supabase'],
+  userId: string,
+  profileRow: Parameters<typeof createLLMClient>[0],
+  sourceTitle: string,
+  sourceContent: string,
+  fallbackId: string,
+): Promise<string> {
+  const { data: workspaces } = await supabase
+    .from('workspaces')
+    .select('id, name')
+    .eq('owner_id', userId);
+  if (!workspaces || workspaces.length <= 1) return fallbackId;
+
+  const { data: pageRows } = await supabase
+    .from('pages')
+    .select('workspace_id, title')
+    .in('workspace_id', workspaces.map((w) => w.id))
+    .eq('zone', 'wiki')
+    .order('updated_at', { ascending: false })
+    .limit(1200);
+
+  const titlesByWorkspace = new Map<string, string[]>();
+  for (const row of pageRows ?? []) {
+    const list = titlesByWorkspace.get(row.workspace_id) ?? [];
+    if (list.length < 40 && row.title) list.push(row.title);
+    titlesByWorkspace.set(row.workspace_id, list);
+  }
+
+  const workspaceSummary = workspaces
+    .map((w) => `- id: ${w.id}\n  name: ${w.name}\n  pages: ${(titlesByWorkspace.get(w.id) ?? []).join(', ') || '(empty)'}`)
+    .join('\n');
+
+  try {
+    const model = createLLMClient(profileRow);
+    const { text } = await generateText({
+      model,
+      system:
+        'You route incoming content to the best-fitting knowledge workspace. Reply with ONLY the workspace id, nothing else.',
+      prompt: `Workspaces:\n${workspaceSummary}\n\nContent title: ${sourceTitle}\nContent excerpt:\n${sourceContent.slice(0, 1500)}\n\nWhich workspace id fits best?`,
+    });
+    const candidate = workspaces.find((w) => text.includes(w.id));
+    return candidate?.id ?? fallbackId;
+  } catch {
+    return fallbackId;
+  }
+}
 
 export async function POST(request: NextRequest) {
   const locale = resolveUiLocaleFromRequest(request);
@@ -42,53 +105,51 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
 
-  const { workspace_id } = parsed.data;
+  const autoRoute = parsed.data.auto_route === true;
+  const explicitWorkspaceId = parsed.data.workspace_id ?? null;
+  const fallbackWorkspaceId = parsed.data.fallback_workspace_id ?? explicitWorkspaceId;
+  if (!autoRoute && !explicitWorkspaceId) {
+    return NextResponse.json({ error: 'workspace_id required' }, { status: 400 });
+  }
+  if (autoRoute && !fallbackWorkspaceId) {
+    return NextResponse.json({ error: 'fallback_workspace_id required with auto_route' }, { status: 400 });
+  }
 
-  // Verify workspace ownership
-  const { data: workspace } = await supabase
-    .from('workspaces')
-    .select('id, drive_folder_id, ingest_profile_id, default_profile_id')
-    .eq('id', workspace_id)
-    .eq('owner_id', user.id)
-    .single();
-  if (!workspace) return NextResponse.json({ error: 'Workspace not found' }, { status: 404 });
+  const loadWorkspace = async (id: string) =>
+    supabase
+      .from('workspaces')
+      .select('id, name, drive_folder_id, ingest_profile_id, default_profile_id')
+      .eq('id', id)
+      .eq('owner_id', user.id)
+      .single();
 
-  // Resolve LLM profile (allow client-side override with ownership check)
-  const profileIdOverride = z.string().uuid().safeParse(body?.profile_id);
-  let profileId: string | null = null;
+  const loadProfileRow = async (id: string) =>
+    supabase
+      .from('llm_profiles')
+      .select('id, name, base_url, model, api_key_encrypted, extra_headers, extra_headers_encrypted, owner_id')
+      .eq('id', id)
+      .eq('owner_id', user.id)
+      .single();
 
-  if (profileIdOverride.success) {
+  // Ownership-gate BEFORE any outbound fetch, so an attacker can't drive the
+  // server to fetch arbitrary URLs by passing a workspace they don't own.
+  const gateWorkspaceId = autoRoute ? fallbackWorkspaceId! : explicitWorkspaceId!;
+  const { data: gateWorkspace } = await loadWorkspace(gateWorkspaceId);
+  if (!gateWorkspace) return NextResponse.json({ error: 'Workspace not found' }, { status: 404 });
+
+  // Resolve the requested profile override once (ownership-checked)
+  let overrideProfileId: string | null = null;
+  if (parsed.data.profile_id) {
     const { data: overriddenProfile } = await supabase
       .from('llm_profiles')
       .select('id')
-      .eq('id', profileIdOverride.data)
+      .eq('id', parsed.data.profile_id)
       .eq('owner_id', user.id)
       .single();
-    if (overriddenProfile) {
-      profileId = overriddenProfile.id;
-    }
+    if (overriddenProfile) overrideProfileId = overriddenProfile.id;
   }
 
-  if (!profileId) {
-    profileId = workspace.ingest_profile_id ?? workspace.default_profile_id ?? null;
-  }
-
-  if (!profileId) {
-    return NextResponse.json(
-      { error: 'No LLM profile configured. Go to Settings to add one.' },
-      { status: 422 }
-    );
-  }
-
-  const { data: profile } = await supabase
-    .from('llm_profiles')
-    .select('id, name, base_url, model, api_key_encrypted, extra_headers, extra_headers_encrypted, owner_id')
-    .eq('id', profileId)
-    .eq('owner_id', user.id)
-    .single();
-  if (!profile) return NextResponse.json({ error: 'LLM profile not found' }, { status: 404 });
-
-  // Fetch source content
+  // Fetch source content (auto routing needs it) — only after ownership passes
   let sourceContent: string;
   let sourceTitle: string;
   let sourceUrl: string | undefined;
@@ -109,6 +170,59 @@ export async function POST(request: NextRequest) {
     sourceContent = parsed.data.content;
     sourceTitle = parsed.data.title;
   }
+
+  // Resolve target workspace (auto routing uses the gate workspace's profile)
+  let workspace_id: string;
+  let routedWorkspaceName: string | undefined;
+  let workspace: NonNullable<Awaited<ReturnType<typeof loadWorkspace>>['data']>;
+
+  if (autoRoute) {
+    const routingProfileId =
+      overrideProfileId ?? gateWorkspace.ingest_profile_id ?? gateWorkspace.default_profile_id;
+    if (!routingProfileId) {
+      return NextResponse.json(
+        { error: 'No LLM profile configured. Go to Settings to add one.' },
+        { status: 422 },
+      );
+    }
+    const { data: routingProfile } = await loadProfileRow(routingProfileId);
+    if (!routingProfile) return NextResponse.json({ error: 'LLM profile not found' }, { status: 404 });
+
+    workspace_id = await routeToWorkspace(
+      supabase,
+      user.id,
+      routingProfile as Parameters<typeof createLLMClient>[0],
+      sourceTitle,
+      sourceContent,
+      gateWorkspace.id,
+    );
+    // routeToWorkspace only ever returns an id from the user's own workspaces,
+    // but re-verify to be safe (and to get the routed workspace's profile row).
+    if (workspace_id === gateWorkspace.id) {
+      workspace = gateWorkspace;
+    } else {
+      const { data: routed } = await loadWorkspace(workspace_id);
+      if (!routed) return NextResponse.json({ error: 'Workspace not found' }, { status: 404 });
+      workspace = routed;
+    }
+    routedWorkspaceName = workspace.name;
+  } else {
+    workspace_id = explicitWorkspaceId!;
+    workspace = gateWorkspace;
+  }
+
+  const profileId =
+    overrideProfileId ?? workspace.ingest_profile_id ?? workspace.default_profile_id ?? null;
+
+  if (!profileId) {
+    return NextResponse.json(
+      { error: 'No LLM profile configured. Go to Settings to add one.' },
+      { status: 422 }
+    );
+  }
+
+  const { data: profile } = await loadProfileRow(profileId);
+  if (!profile) return NextResponse.json({ error: 'LLM profile not found' }, { status: 404 });
 
   // Store raw source in Drive
   let drive: Awaited<ReturnType<typeof createDriveClientForUser>>;
@@ -214,7 +328,16 @@ export async function POST(request: NextRequest) {
     }
   });
 
-  return NextResponse.json({ jobId: job.id, status: 'running' }, { status: 202 });
+  return NextResponse.json(
+    {
+      jobId: job.id,
+      status: 'running',
+      ...(routedWorkspaceName
+        ? { routed_workspace_id: workspace_id, routed_workspace_name: routedWorkspaceName }
+        : {}),
+    },
+    { status: 202 },
+  );
 }
 
 // A running job older than this can no longer be alive (maxDuration 300s + buffer)

@@ -82,6 +82,78 @@ export async function POST(request: NextRequest) {
   return NextResponse.json({ profile, masked_key: maskApiKey(api_key) }, { status: 201 });
 }
 
+const ProfileUpdateSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string().min(1).max(100).optional(),
+  base_url: z.string().url().optional(),
+  // 空字串 = 保留原金鑰
+  api_key: z.string().max(2000).optional(),
+  model: z.string().min(1).max(200).optional(),
+  extra_headers: z
+    .record(z.string().max(2000))
+    .optional()
+    .refine(
+      (headers) => !headers || !Object.keys(headers).some((k) => k.toLowerCase() === 'authorization'),
+      { message: 'Put the Authorization credential in the API key field instead of extra_headers' },
+    ),
+  is_default: z.boolean().optional(),
+});
+
+export async function PATCH(request: NextRequest) {
+  const { supabase, user } = await getRequestUser(request);
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const body = await request.json().catch(() => null);
+  const parsed = ProfileUpdateSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
+  }
+
+  const { id, api_key, extra_headers, is_default, ...rest } = parsed.data;
+  const updates: Record<string, unknown> = { ...rest };
+  try {
+    if (api_key) updates.api_key_encrypted = encryptApiKey(api_key);
+    if (extra_headers) {
+      updates.extra_headers = {};
+      updates.extra_headers_encrypted =
+        Object.keys(extra_headers).length > 0 ? encryptApiKey(JSON.stringify(extra_headers)) : null;
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Encryption failed';
+    return NextResponse.json({ error: `Server configuration error: ${msg}` }, { status: 500 });
+  }
+  if (typeof is_default === 'boolean') updates.is_default = is_default;
+
+  // Verify the target profile is owned BEFORE clearing everyone's default —
+  // otherwise a bad id would leave the user with zero default profiles.
+  const { data: owned } = await supabase
+    .from('llm_profiles')
+    .select('id')
+    .eq('id', id)
+    .eq('owner_id', user.id)
+    .maybeSingle();
+  if (!owned) return NextResponse.json({ error: 'Profile not found' }, { status: 404 });
+
+  if (is_default) {
+    await supabase
+      .from('llm_profiles')
+      .update({ is_default: false })
+      .eq('owner_id', user.id);
+  }
+
+  const { data: profile, error } = await supabase
+    .from('llm_profiles')
+    .update(updates)
+    .eq('id', id)
+    .eq('owner_id', user.id)
+    .select('id, name, base_url, model, is_default')
+    .single();
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (!profile) return NextResponse.json({ error: 'Profile not found' }, { status: 404 });
+  return NextResponse.json({ profile });
+}
+
 export async function DELETE(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const id = searchParams.get('id');

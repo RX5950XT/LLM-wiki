@@ -29,25 +29,30 @@ apps/web/
 │   ├── w/[wid]/        Workspace 主介面（workspace-shell.tsx）
 │   ├── api/
 │   │   ├── search/     GET: 全文搜尋（RPC search_pages + ilike fallback）
-│   │   ├── ingest/     LLM ingest pipeline（支援 kind: url/text）
-│   │   ├── query/      LLM query（streaming，支援 profile_id override）
+│   │   ├── ingest/     LLM ingest pipeline（kind: url/text；支援 auto_route 由 AI 選工作區）
+│   │   ├── query/      LLM query（streaming；current_slug + context_workspace_ids）
+│   │   ├── agent/execute/  POST: 執行使用者確認過的破壞性動作
+│   │   ├── organize/   POST/GET: 跨工作區自動分類＋去重複 job
 │   │   ├── lint/       週期健康檢查
-│   │   └── workspaces/ CRUD + synthesis
-│   └── settings/       LLM profile 管理
+│   │   └── workspaces/ CRUD + synthesis + reorder
+│   └── settings/       LLM profile 管理（含 PATCH 編輯）+ AI 權限開關
 ├── components/
 │   ├── wiki/
-│   │   ├── conversation-panel.tsx  ← 聊天 + icon-only 模型選擇器 + 批次上傳佇列 + citations
+│   │   ├── conversation-panel.tsx  ← 對話中心：citations + 確認卡片 + @ 工作區標記 + Bot 多功能選單
+│   │   ├── import-dialog.tsx       ← 統一導入入口（貼上/拖曳/檔案 + 自動判斷工作區）
 │   │   ├── page-viewer.tsx         ← staleness banner + lock toggle + ReactMarkdown（GFM、frontmatter strip、[[wikilink]] 路由）
-│   │   ├── page-tree.tsx           ← 左側導航樹
-│   │   └── graph-view.tsx          ← react-force-graph-2d（動態 import）
+│   │   ├── page-tree.tsx           ← 左側導航樹（只顯示 wiki zone；無 icon）
+│   │   └── graph-view.tsx          ← react-force-graph-2d（動態 import；degree sizing + hover 高亮）
 │   └── workspace/
 │       ├── create-form.tsx         ← 新建 workspace + Drive re-auth
 │       └── workspace-card.tsx
 └── lib/
     ├── ai/
-    │   ├── tools.ts          ← 6 個 AI 工具（read/write/search/list/delete/move）
-    │   ├── client.ts         ← LLM client factory
-    │   └── citation-parser.ts
+    │   ├── tools.ts             ← 跨工作區 AI 工具（6 頁面 + 5 workspace 管理）
+    │   ├── organize-pipeline.ts ← 跨工作區去重＋重新分類
+    │   ├── client.ts            ← LLM client factory
+    │   └── citation-parser.ts   ← 解析 \x00NAME\x00 metadata blocks
+    ├── workspaces/manage.ts  ← create/rename/delete workspace 共用函式
     ├── crypto/               ← AES-256-GCM API key 加解密
     ├── drive/                ← Google Drive API wrapper
     ├── supabase/             ← server/browser client factories
@@ -65,9 +70,9 @@ packages/
 2. **Query file back**：問答結果可一鍵存成 synthesis page
 3. **LLM 主宰 wiki**：使用者只導演，`updated_by='human'` 標記的頁面 LLM 不覆寫
 4. **Sources immutable**：ingest 完成後原始來源不可編輯
-5. **分離原則**：`wiki/`（LLM 寫）、`notes/`（使用者寫，LLM 唯讀）物理分離
+5. **分離原則**：`wiki/`（LLM 寫）、`notes/`（LLM 禁區）物理分離。**Phase 14 起筆記 UI 已移除、資料保留**；`notes/` 仍是工具層硬性禁區，不可讓 LLM 寫入
 6. **Schema 共同演化**：`_schema/ingest.md` 等可由使用者修改
-7. **Conversation + Live Wiki**：右欄對話，左中欄 wiki 即時更新
+7. **Conversation + Live Wiki**：右欄對話，左中欄 wiki 即時更新。**產品重心是對話**：使用者在對話講想法 → AI 判斷有價值的內容 → 直接整理成知識頁
 
 ## 重要技術差異
 
@@ -115,18 +120,29 @@ CRON_SECRET=                # /api/lint GET（Vercel Cron 自動帶 Bearer）驗
 - **Production 2026-04-29** ✅：`0004_fulltext_search.sql` 已套用至 Supabase production；臨時 `/api/migrate` route 已移除。
 - **Phase 12** ✅（2026-07-12）：全專案健檢——非同步 ingest（`202 { jobId }` + `GET /api/ingest?job_id=` 輪詢，手機匯入不再逾時、可背景執行）、P0 cron 漏洞（`/api/lint/cron` 已刪除）、SSRF 全面強化、tools 層 lock/zone 硬性防護、movePage 反向連結 regex 修復、Web/Android UX 大修、backlinks 面板、migration `0012` 已套用 production。細節見 CLAUDE.md「非同步 Ingest 協定」與「安全注意事項（Phase 12）」。
 - **Phase 13** ✅（2026-07-12）：漏洞續掃 + 功能補完 + Web/Android 對齊——`extra_headers` AES-256-GCM 加密（migration `0013`）、SSRF TOCTOU 關窗（undici Agent connect-time lookup）、`broadcast_page_metadata_change` revoke（migration `0014`）、Sources 管理列表（Web `sources-dialog.tsx` + Android `SourcesListDialog`）、Ingest 即時進度（`onStepFinish` 逐步寫回 `touched_pages`）、Android backlinks 面板、離線冷啟 workspace 持久化（DataStore）、chat 草稿 hoist 至 ViewModel。migrations 0013/0014 已套用 production。細節見 CLAUDE.md「安全注意事項（Phase 13）」。
+- **Phase 14** ✅（2026-07-13）：對話中心化 + 跨工作區 AI——移除筆記 UI（資料保留）、跨工作區 AI 工具（建立/改名/刪除工作區、跨工作區搬頁）、破壞性操作確認卡片（`\x00ACTIONS\x00` + `/api/agent/execute`）、對話預設帶當前頁 context + `@` 工作區標記、統一導入入口（AI 自動判斷目標工作區）、自動分類＋去重複 job（`/api/organize` + migration `0015` agent_jobs，已套用 production）、LLM profile 編輯、效能修復（Drive 呼叫移出 server component 請求路徑）、工作區拖曳 FLIP 動畫、Graph Obsidian 化。細節見 CLAUDE.md。
 
 ## 關鍵功能
 
-### 模型選擇器
-- `conversation-panel.tsx` 輸入框左側 `Bot` 按鈕
-- 從 `/api/settings/profiles` 取得 profile 列表，預設選中 `is_default=true`
-- Query/Ingest API 支援 `profile_id` override，檢查 `owner_id` 權限
+### Bot 多功能選單（模型 + 導入）
+- `conversation-panel.tsx` 輸入框左側 `Bot` 按鈕 =「導入內容」＋「選擇模型」（Android chat sheet 的 `SmartToy` 同理，另有「從檔案匯入」）
+- profile 列表來自 `/api/settings/profiles`，預設選中 `is_default=true`
+- Query / Ingest / Organize API 支援 `profile_id` override，檢查 `owner_id` 權限
+- **不要再加獨立的導入輸入框**：舊版把導入 textarea 疊在對話輸入框上方，使用者會誤認成「輸入框重複顯示兩次」
 
-### 批次檔案攝取
-- `<input type="file" multiple>` + 拖曳到 textarea
-- `uploadQueue` 顯示每檔進度（pending/uploading/done/error）
-- 每檔獨立 POST `/api/ingest`（`kind: 'text'`），支援 `profile_id`
+### 統一導入 + 智慧路由
+- `import-dialog.tsx`：貼上 URL/文字/Markdown、拖曳檔案、多檔佇列（pending/uploading/done/error）
+- 目標工作區預設「自動判斷」：POST `/api/ingest` 帶 `{ auto_route: true, fallback_workspace_id }`，server 用一次 LLM 呼叫選工作區，**失敗一律 fallback，不可擋掉匯入**；回應帶 `routed_workspace_name` 供 UI 顯示「已導入到 X」
+
+### 跨工作區 AI + 破壞性操作確認
+- `lib/ai/tools.ts` 的頁面工具都吃可選 `workspace_id`；`resolveScope()` 必帶 `.eq('owner_id', userId)`
+- 新增 workspace 管理工具：`listWorkspaces` / `createWorkspace` / `renameWorkspace` / `deleteWorkspace` / `movePageToWorkspace`
+- 破壞性操作（刪頁 / 刪工作區）預設需確認：工具不執行 → 串流尾端送 `\x00ACTIONS\x00[...]` → 前端確認卡片 → `POST /api/agent/execute` 用**同一份 core 函式**重跑（guard 全部再驗一次，client 無法竄改繞過）
+- 偏好存在 auth `user_metadata.ai_confirm_destructive`（Web/Android 共用）
+
+### 自動分類＋去重複
+- `POST /api/organize` → `agent_jobs`（migration `0015`）→ `after()` 背景跑 → `GET ?job_id=` 輪詢 → 報告頁 `_organize/YYYYMMDD.md`
+- 入口：Web 頂列 `Wand2`、Android drawer `AutoFixHigh`
 
 ### 全文搜尋
 - **DB**：`pages.search_text TEXT` + `pages_fts_idx` GIN index + `search_pages` RPC
@@ -135,19 +151,21 @@ CRON_SECRET=                # /api/lint GET（Vercel Cron 自動帶 Bearer）驗
 
 ### AI 工具（`lib/ai/tools.ts`）
 
+頁面工具都吃可選 `workspace_id`（省略＝當前）。workspace 管理工具只在 `crossWorkspace: true` + `userId` 時掛載（query / organize 有，ingest pipeline 沒有）。
+
 | 工具 | 說明 |
 |------|------|
-| `readPage` | 讀取 Drive file 內容 |
-| `writePage` | 建立/覆寫，自動同步 `page_links` + `search_text` |
-| `searchPages` | `ilike` 搜尋 title + slug |
-| `listPages` | 列出 wiki 頁面，可選 kind 篩選 |
-| `deletePage` | 清理 `page_links`、刪除 Drive file、刪除 DB record |
-| `movePage` | 重命名/移動，自動重寫所有 incoming `[[wikilink]]`（同時匹配帶/不帶 `.md` 的連結） |
+| `readPage` / `writePage` / `searchPages` / `listPages` | 讀 / 寫（同步 `page_links`+`search_text`）/ ilike 搜尋 / 列頁 |
+| `deletePage` | 清理 `page_links`、刪 Drive file、刪 DB record（**破壞性**，走確認） |
+| `movePage` | 重命名/移動，重寫所有 incoming `[[wikilink]]`（帶/不帶 `.md` 都匹配） |
+| `listWorkspaces` / `createWorkspace` / `renameWorkspace` | 列 / 建（走 `manage.ts`）/ 改名工作區 |
+| `deleteWorkspace` | 刪工作區：先 trash Drive 再刪 DB（**破壞性**，走確認） |
+| `movePageToWorkspace` | 跨工作區搬頁：讀來源 → 寫目標 → 刪來源 |
 
-**工具層硬性防護（勿移除）**：`writePage`/`deletePage`/`movePage` 拒絕 `notes/`、`_schema/`、`sources/`、`..` slug 與 `locked_by_human` 頁面；`index.md`/`log.md` 不可刪除/移動；slug 自動補 `.md`。
+**工具層硬性防護（勿移除）**：所有寫入/刪除/移動路徑拒絕 `notes/`、`_schema/`、`sources/`、`..` slug 與 `locked_by_human` 頁面；`index.md`/`log.md` 不可刪除/移動；`resolveScope` 必帶 owner 檢查；slug 自動補 `.md`；page write/delete core 是 module-level 函式（`writePageForWorkspace`/`deletePageForWorkspace`），與 `/api/agent/execute` 共用。
 
-### Citation 串流協定
-Query API 文字串流結尾附加 `\x00CITATIONS\x00["entities/karpathy.md",...]`，前端 `citation-parser.ts` 解析。
+### 串流 metadata 協定
+Query API 文字串流結尾依序附加 `\x00CITATIONS\x00[...]`、`\x00ACTIONS\x00[...]`（proposal）。前端 `citation-parser.ts` / Android `parseStreamMeta()` 解析，**未知 block 名稱一律忽略**。串流顯示文字截到第一個 `\x00`。
 
 ### Drive Token 失效處理
 `create-form.tsx` 偵測 403 + "Google Drive" → 顯示「Re-connect Google Drive」按鈕 → `signInWithOAuth({ prompt: 'consent', access_type: 'offline' })` → auth/callback 重新儲存 refresh token。

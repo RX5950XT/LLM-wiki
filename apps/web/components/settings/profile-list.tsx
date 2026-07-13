@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Trash2 } from 'lucide-react';
+import { Pencil, Trash2 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
+import { ProfileForm } from './profile-form';
 
 interface Profile {
   id: string;
@@ -16,6 +17,7 @@ export function ProfileList({ profiles }: { profiles: Profile[] }) {
   const t = useTranslations('settings');
   const [list, setList] = useState(profiles);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   useEffect(() => {
     setList(profiles);
@@ -55,37 +57,51 @@ export function ProfileList({ profiles }: { profiles: Profile[] }) {
       )}
     <ul className="space-y-2">
       {list.map((p) => (
-        <li
-          key={p.id}
-          className="flex items-center justify-between rounded-lg border px-4 py-3"
-          style={{ borderColor: 'var(--border)', background: 'var(--bg-2)' }}
-        >
-          <div className="space-y-0.5">
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-medium" style={{ color: 'var(--fg)' }}>
-                {p.name}
-              </span>
-              {p.is_default && (
-                <span
-                  className="rounded px-1.5 py-0.5 text-xs font-medium"
-                  style={{ background: 'var(--color-accent-muted)', color: 'var(--color-accent)' }}
-                >
-                  {t('default')}
-                </span>
-              )}
-            </div>
-            <p className="text-xs" style={{ color: 'var(--fg-muted)' }}>
-              {p.model} · {p.base_url}
-            </p>
-          </div>
-          <button
-            onClick={() => handleDelete(p.id)}
-            className="rounded p-1.5 transition-opacity hover:opacity-70"
-            style={{ color: 'var(--fg-muted)' }}
-            aria-label={t('deleteProfile')}
+        <li key={p.id} className="space-y-2">
+          <div
+            className="flex items-center justify-between rounded-lg border px-4 py-3"
+            style={{ borderColor: 'var(--border)', background: 'var(--bg-2)' }}
           >
-            <Trash2 size={14} />
-          </button>
+            <div className="space-y-0.5">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium" style={{ color: 'var(--fg)' }}>
+                  {p.name}
+                </span>
+                {p.is_default && (
+                  <span
+                    className="rounded px-1.5 py-0.5 text-xs font-medium"
+                    style={{ background: 'var(--color-accent-muted)', color: 'var(--color-accent)' }}
+                  >
+                    {t('default')}
+                  </span>
+                )}
+              </div>
+              <p className="text-xs" style={{ color: 'var(--fg-muted)' }}>
+                {p.model} · {p.base_url}
+              </p>
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setEditingId((prev) => (prev === p.id ? null : p.id))}
+                className="rounded p-1.5 transition-opacity hover:opacity-70"
+                style={{ color: 'var(--fg-muted)' }}
+                aria-label={t('editProfile')}
+              >
+                <Pencil size={14} />
+              </button>
+              <button
+                onClick={() => handleDelete(p.id)}
+                className="rounded p-1.5 transition-opacity hover:opacity-70"
+                style={{ color: 'var(--fg-muted)' }}
+                aria-label={t('deleteProfile')}
+              >
+                <Trash2 size={14} />
+              </button>
+            </div>
+          </div>
+          {editingId === p.id && (
+            <ProfileForm key={p.id} profile={p} onDone={() => setEditingId(null)} />
+          )}
         </li>
       ))}
     </ul>

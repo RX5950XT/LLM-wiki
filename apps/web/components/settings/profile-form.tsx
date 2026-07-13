@@ -13,20 +13,35 @@ const PROVIDER_PRESETS = [
   { label: 'Ollama (local)', baseUrl: 'http://localhost:11434/v1', model: 'qwen2.5:14b' },
 ];
 
-export function ProfileForm() {
+export interface EditableProfile {
+  id: string;
+  name: string;
+  base_url: string;
+  model: string;
+  is_default: boolean;
+}
+
+export function ProfileForm({
+  profile,
+  onDone,
+}: {
+  profile?: EditableProfile;
+  onDone?: () => void;
+} = {}) {
   const t = useTranslations('settings');
   const tCommon = useTranslations('common');
   const router = useRouter();
-  const [open, setOpen] = useState(false);
+  const isEdit = Boolean(profile);
+  const [open, setOpen] = useState(isEdit);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [fields, setFields] = useState({
-    name: '',
-    base_url: 'https://openrouter.ai/api/v1',
+    name: profile?.name ?? '',
+    base_url: profile?.base_url ?? 'https://openrouter.ai/api/v1',
     api_key: '',
-    model: 'anthropic/claude-opus-4-7',
-    is_default: false,
+    model: profile?.model ?? 'anthropic/claude-opus-4-7',
+    is_default: profile?.is_default ?? false,
   });
 
   const applyPreset = (preset: (typeof PROVIDER_PRESETS)[number]) => {
@@ -39,10 +54,15 @@ export function ProfileForm() {
     setError(null);
 
     try {
+      const payload: Record<string, unknown> = { ...fields };
+      if (isEdit) {
+        payload.id = profile!.id;
+        if (!fields.api_key) delete payload.api_key;
+      }
       const res = await fetch('/api/settings/profiles', {
-        method: 'POST',
+        method: isEdit ? 'PATCH' : 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(fields),
+        body: JSON.stringify(payload),
       });
       const raw = await res.text();
       let data: { error?: unknown } | null = null;
@@ -61,7 +81,10 @@ export function ProfileForm() {
       }
 
       setOpen(false);
-      setFields({ name: '', base_url: 'https://openrouter.ai/api/v1', api_key: '', model: '', is_default: false });
+      if (!isEdit) {
+        setFields({ name: '', base_url: 'https://openrouter.ai/api/v1', api_key: '', model: '', is_default: false });
+      }
+      onDone?.();
       router.refresh();
     } catch {
       setError(t('saveFailed'));
@@ -76,16 +99,23 @@ export function ProfileForm() {
       setFields((f) => ({ ...f, [key]: e.target.value })),
   });
 
+  const close = () => {
+    setOpen(false);
+    onDone?.();
+  };
+
   return (
     <div>
       {!open ? (
-        <button
-          onClick={() => setOpen(true)}
-          className="rounded-lg border px-4 py-2 text-sm font-medium transition-opacity hover:opacity-70"
-          style={{ borderColor: 'var(--border)', color: 'var(--fg-muted)' }}
-        >
-          + {t('addProfile')}
-        </button>
+        !isEdit && (
+          <button
+            onClick={() => setOpen(true)}
+            className="rounded-lg border px-4 py-2 text-sm font-medium transition-opacity hover:opacity-70"
+            style={{ borderColor: 'var(--border)', color: 'var(--fg-muted)' }}
+          >
+            + {t('addProfile')}
+          </button>
+        )
       ) : (
         <form
           onSubmit={handleSubmit}
@@ -93,7 +123,7 @@ export function ProfileForm() {
           style={{ borderColor: 'var(--border)', background: 'var(--bg-2)' }}
         >
           <h3 className="text-sm font-semibold" style={{ color: 'var(--fg)' }}>
-            {t('addProfile')}
+            {isEdit ? t('editProfile') : t('addProfile')}
           </h3>
 
           {/* Provider presets */}
@@ -114,7 +144,7 @@ export function ProfileForm() {
           {[
             { key: 'name' as const, label: t('profileName'), type: 'text', required: true },
             { key: 'base_url' as const, label: t('baseUrl'), type: 'url', required: true },
-            { key: 'api_key' as const, label: t('apiKey'), type: 'password', required: true },
+            { key: 'api_key' as const, label: t('apiKey'), type: 'password', required: !isEdit },
             { key: 'model' as const, label: t('model'), type: 'text', required: true },
           ].map(({ key, label, type, required }) => (
             <div key={key} className="space-y-1.5">
@@ -126,6 +156,7 @@ export function ProfileForm() {
                 {...field(key)}
                 required={required}
                 autoComplete="off"
+                placeholder={key === 'api_key' && isEdit ? t('apiKeyKeepHint') : undefined}
                 className="w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-1"
                 style={{ background: 'var(--bg)', borderColor: 'var(--border)', color: 'var(--fg)' }}
               />
@@ -154,11 +185,11 @@ export function ProfileForm() {
               className="flex-1 rounded-lg px-4 py-2 text-sm font-medium disabled:opacity-50"
               style={{ background: 'var(--color-accent)', color: 'oklch(10% 0.015 250)' }}
             >
-              {submitting ? '...' : t('addProfile')}
+              {submitting ? '...' : isEdit ? tCommon('save') : t('addProfile')}
             </button>
             <button
               type="button"
-              onClick={() => setOpen(false)}
+              onClick={close}
               className="rounded-lg px-4 py-2 text-sm"
               style={{ color: 'var(--fg-muted)' }}
             >

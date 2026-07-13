@@ -3,7 +3,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { PanelLeft, PanelRight, GitFork, FlaskConical, ChevronDown, LogOut, Plus, Settings, Search, Loader2, HelpCircle, Pencil, Trash2, GripVertical, Library } from 'lucide-react';
+import { PanelLeft, PanelRight, GitFork, FlaskConical, ChevronDown, LogOut, Plus, Settings, Search, Loader2, HelpCircle, Pencil, Trash2, GripVertical, Library, Wand2 } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import { PageTree } from '@/components/wiki/page-tree';
 import { PageViewer } from '@/components/wiki/page-viewer';
@@ -58,15 +58,18 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
   const [currentWorkspaceName, setCurrentWorkspaceName] = useState(workspaceName);
   const [renamingWorkspace, setRenamingWorkspace] = useState<WorkspaceEntry | null>(null);
   const [deletingWorkspace, setDeletingWorkspace] = useState<WorkspaceEntry | null>(null);
-  const [creatingNote, setCreatingNote] = useState(false);
-  const [renamingNote, setRenamingNote] = useState<PageEntry | null>(null);
-  const [deletingNote, setDeletingNote] = useState<PageEntry | null>(null);
   const [workspaceActionError, setWorkspaceActionError] = useState<string | null>(null);
   const [workspaceActionLoading, setWorkspaceActionLoading] = useState(false);
+  const [organizeRunning, setOrganizeRunning] = useState(false);
   const [pages, setPages] = useState(initialPages);
   const [leftWidth, setLeftWidth] = useState(240);
   const [rightWidth, setRightWidth] = useState(384);
-  const [draggingWorkspaceId, setDraggingWorkspaceId] = useState<string | null>(null);
+  // Pointer-based workspace drag: which row, where it started, live offset
+  const [wsDrag, setWsDrag] = useState<{ id: string; from: number; to: number; dy: number; rowH: number } | null>(null);
+  const wsDragRef = useRef<{ startY: number; from: number; to: number; rowH: number; id: string } | null>(null);
+  const [reducedMotion] = useState(() =>
+    typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+  );
   const [graphRefreshKey, setGraphRefreshKey] = useState(0);
   const dragging = useRef<{ side: 'left' | 'right'; startX: number; startWidth: number } | null>(null);
   const dragFrame = useRef<number | null>(null);
@@ -109,6 +112,27 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
         }
       });
   }, [locale, workspaceId]);
+
+  // The chat AI can create/rename/delete workspaces — re-sync the switcher list
+  const refreshWorkspaceList = useCallback(() => {
+    fetch('/api/workspaces')
+      .then((r) => r.json())
+      .then((d) => {
+        if (!Array.isArray(d.workspaces)) return;
+        setWorkspaceList(
+          d.workspaces.map((w: { id: string; name: string | null; sort_order?: number }) => ({
+            id: w.id,
+            name: w.name ?? 'Untitled',
+            sort_order: w.sort_order ?? undefined,
+          })),
+        );
+        const current = d.workspaces.find((w: { id: string }) => w.id === workspaceId);
+        if (current?.name) setCurrentWorkspaceName(current.name);
+      })
+      .catch(() => {
+        /* non-fatal: the switcher just keeps the stale list */
+      });
+  }, [workspaceId]);
 
   const resolvePageSlug = useCallback((rawSlug: string) => {
     const normalized = normalizeWikiTarget(rawSlug);
@@ -393,80 +417,41 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
     window.location.href = '/login';
   }, []);
 
-  const createNote = useCallback(async (title: string) => {
-    const trimmed = title.trim();
-    if (!trimmed) {
-      setCreatingNote(false);
-      return;
-    }
-
-    setWorkspaceActionLoading(true);
+  // Cross-workspace organize (dedupe + reclassify) — async job, polled like ingest
+  const runOrganize = useCallback(async () => {
+    if (organizeRunning) return;
+    if (!window.confirm(t('workspace.organizeConfirm'))) return;
+    setOrganizeRunning(true);
     setWorkspaceActionError(null);
     try {
-      const res = await fetch(`/api/pages/${workspaceId}`, {
+      const res = await fetch('/api/organize', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-llm-wiki-locale': locale,
-        },
-        body: JSON.stringify({ zone: 'notes', title: trimmed }),
+        headers: { 'Content-Type': 'application/json', 'x-llm-wiki-locale': locale },
+        body: JSON.stringify({ workspace_id: workspaceId }),
       });
-      const data = await res.json().catch(() => null) as { slug?: string; error?: string } | null;
-      if (!res.ok || !data?.slug) throw new Error(data?.error ?? 'Failed to create note');
-      refreshPageList();
-      selectPage(data.slug);
-      setCreatingNote(false);
-    } catch (error) {
-      setWorkspaceActionError(error instanceof Error ? error.message : 'Failed to create note');
-    } finally {
-      setWorkspaceActionLoading(false);
-    }
-  }, [locale, refreshPageList, selectPage, workspaceId]);
+      const data = await res.json().catch(() => null) as { jobId?: string; error?: string } | null;
+      if (!res.ok || !data?.jobId) throw new Error(data?.error ?? t('workspace.organizeFailed'));
 
-  const renameNote = useCallback(async (page: PageEntry, title: string) => {
-    const trimmed = title.trim();
-    if (!trimmed || trimmed === page.title) {
-      setRenamingNote(null);
-      return;
-    }
-
-    setWorkspaceActionLoading(true);
-    setWorkspaceActionError(null);
-    try {
-      const res = await fetch(`/api/pages/${workspaceId}/${encodeSlugPath(page.slug)}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: trimmed }),
-      });
-      const data = await res.json().catch(() => null) as { error?: string } | null;
-      if (!res.ok) throw new Error(data?.error ?? 'Failed to rename note');
-      setPages((prev) => prev.map((item) => (item.slug === page.slug ? { ...item, title: trimmed } : item)));
-      setRenamingNote(null);
-      refreshPageList();
+      const deadline = Date.now() + 6 * 60 * 1000;
+      while (Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 3000));
+        const pollRes = await fetch(`/api/organize?job_id=${encodeURIComponent(data.jobId)}`);
+        if (!pollRes.ok) continue;
+        const poll = await pollRes.json() as { status?: string; error?: string; report_slug?: string | null };
+        if (poll.status === 'done') {
+          refreshPageList();
+          if (poll.report_slug) selectPage(poll.report_slug);
+          return;
+        }
+        if (poll.status === 'failed') throw new Error(poll.error ?? t('workspace.organizeFailed'));
+      }
+      throw new Error(t('workspace.organizeFailed'));
     } catch (error) {
-      setWorkspaceActionError(error instanceof Error ? error.message : 'Failed to rename note');
+      setWorkspaceActionError(error instanceof Error ? error.message : t('workspace.organizeFailed'));
     } finally {
-      setWorkspaceActionLoading(false);
+      setOrganizeRunning(false);
     }
-  }, [refreshPageList, workspaceId]);
-
-  const deleteNote = useCallback(async (page: PageEntry) => {
-    setWorkspaceActionLoading(true);
-    setWorkspaceActionError(null);
-    try {
-      const res = await fetch(`/api/pages/${workspaceId}/${encodeSlugPath(page.slug)}`, { method: 'DELETE' });
-      const data = await res.json().catch(() => null) as { error?: string } | null;
-      if (!res.ok) throw new Error(data?.error ?? 'Failed to delete note');
-      setPages((prev) => prev.filter((item) => item.slug !== page.slug));
-      if (activePage === page.slug) selectPage('index.md');
-      setDeletingNote(null);
-      refreshPageList();
-    } catch (error) {
-      setWorkspaceActionError(error instanceof Error ? error.message : 'Failed to delete note');
-    } finally {
-      setWorkspaceActionLoading(false);
-    }
-  }, [activePage, refreshPageList, selectPage, workspaceId]);
+  }, [organizeRunning, locale, workspaceId, refreshPageList, selectPage, t]);
 
   const renameWorkspace = useCallback(async (workspace: WorkspaceEntry, name: string) => {
     const trimmed = name.trim();
@@ -533,21 +518,43 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
     }
   }, [workspaceList]);
 
-  const moveWorkspace = useCallback((draggedId: string, targetId: string) => {
-    if (draggedId === targetId) return;
+  // FLIP-style pointer drag: the grabbed row follows the cursor, neighbours
+  // slide out of the way with a transform transition, drop commits the order.
+  const startWorkspaceDrag = useCallback((e: React.PointerEvent, ws: WorkspaceEntry, index: number) => {
+    e.preventDefault();
+    const handle = e.currentTarget as HTMLElement;
+    const row = handle.closest('[data-ws-row]') as HTMLElement | null;
+    const rowH = row?.offsetHeight ?? 44;
+    wsDragRef.current = { startY: e.clientY, from: index, to: index, rowH, id: ws.id };
+    setWsDrag({ id: ws.id, from: index, to: index, dy: 0, rowH });
+    handle.setPointerCapture(e.pointerId);
+  }, []);
 
-    const current = [...workspaceList];
-    const fromIndex = current.findIndex((workspace) => workspace.id === draggedId);
-    const toIndex = current.findIndex((workspace) => workspace.id === targetId);
-    if (fromIndex < 0 || toIndex < 0) return;
+  const moveWorkspaceDrag = useCallback((e: React.PointerEvent) => {
+    const drag = wsDragRef.current;
+    if (!drag) return;
+    const dy = e.clientY - drag.startY;
+    const to = Math.max(
+      0,
+      Math.min(workspaceList.length - 1, drag.from + Math.round(dy / drag.rowH)),
+    );
+    drag.to = to;
+    setWsDrag({ id: drag.id, from: drag.from, to, dy, rowH: drag.rowH });
+  }, [workspaceList.length]);
 
-    const [moved] = current.splice(fromIndex, 1);
-    if (!moved) return;
-    current.splice(toIndex, 0, moved);
-    void persistWorkspaceOrder(current);
+  const endWorkspaceDrag = useCallback(() => {
+    const drag = wsDragRef.current;
+    wsDragRef.current = null;
+    setWsDrag(null);
+    if (drag && drag.to !== drag.from) {
+      const next = [...workspaceList];
+      const [moved] = next.splice(drag.from, 1);
+      if (moved) {
+        next.splice(drag.to, 0, moved);
+        void persistWorkspaceOrder(next);
+      }
+    }
   }, [persistWorkspaceOrder, workspaceList]);
-
-  const activeNote = pages.find((page) => page.slug === activePage && page.zone === 'notes' && page.slug !== 'notes/guide.md') ?? null;
 
   return (
     <div
@@ -597,33 +604,47 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
                   className="animate-dropdown absolute left-0 top-full z-50 mt-2 w-64 overflow-hidden rounded-xl border shadow-lg"
                   style={{ background: 'var(--bg-2)', borderColor: 'var(--border)' }}
                 >
-                  {workspaceList.map((ws) => (
+                  {workspaceList.map((ws, wsIndex) => {
+                    const isDraggedRow = wsDrag?.id === ws.id;
+                    let rowTransform: string | undefined;
+                    if (wsDrag && isDraggedRow) {
+                      rowTransform = `translateY(${wsDrag.dy}px)`;
+                    } else if (wsDrag) {
+                      // Neighbours slide to make room for the dragged row
+                      const { from, to, rowH } = wsDrag;
+                      if (wsIndex > from && wsIndex <= to) rowTransform = `translateY(-${rowH}px)`;
+                      else if (wsIndex < from && wsIndex >= to) rowTransform = `translateY(${rowH}px)`;
+                    }
+                    return (
                     <div
                       key={ws.id}
+                      data-ws-row
                       className="flex items-center gap-1 px-2 py-1.5"
-                      draggable
-                      onDragStart={() => setDraggingWorkspaceId(ws.id)}
-                      onDragOver={(event) => event.preventDefault()}
-                      onDrop={() => {
-                        if (draggingWorkspaceId) moveWorkspace(draggingWorkspaceId, ws.id);
-                        setDraggingWorkspaceId(null);
-                      }}
-                      onDragEnd={() => setDraggingWorkspaceId(null)}
                       style={{
                         background:
-                          draggingWorkspaceId === ws.id
+                          isDraggedRow
                             ? 'var(--bg)'
                             : ws.id === workspaceId
                               ? 'var(--color-accent-glow)'
                               : undefined,
+                        transform: rowTransform,
+                        transition: isDraggedRow || reducedMotion ? 'none' : 'transform 150ms cubic-bezier(0.25, 1, 0.5, 1)',
+                        position: 'relative',
+                        zIndex: isDraggedRow ? 10 : undefined,
+                        boxShadow: isDraggedRow ? '0 4px 16px oklch(0% 0 0 / 0.25)' : undefined,
+                        touchAction: 'none',
                       }}
                     >
                       <button
                         type="button"
                         className="cursor-grab rounded p-1 active:cursor-grabbing"
-                        style={{ color: 'var(--fg-muted)' }}
+                        style={{ color: 'var(--fg-muted)', touchAction: 'none' }}
                         aria-label={t('workspace.reorderWorkspace')}
                         title={t('workspace.reorderWorkspace')}
+                        onPointerDown={(e) => startWorkspaceDrag(e, ws, wsIndex)}
+                        onPointerMove={moveWorkspaceDrag}
+                        onPointerUp={endWorkspaceDrag}
+                        onPointerCancel={endWorkspaceDrag}
                       >
                         <GripVertical size={13} />
                       </button>
@@ -669,7 +690,8 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
                         <Trash2 size={13} />
                       </button>
                     </div>
-                  ))}
+                    );
+                  })}
                   <div className="border-t" style={{ borderColor: 'var(--border)' }} />
                   <a
                     href="/w/create"
@@ -770,37 +792,6 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
             )}
           </div>
 
-          {activeNote && (
-            <>
-              <button
-                type="button"
-                onClick={() => {
-                  setWorkspaceActionError(null);
-                  setRenamingNote(activeNote);
-                }}
-                className="rounded p-1 transition-all duration-100 hover:opacity-70 active:scale-90"
-                style={{ color: 'var(--fg-muted)' }}
-                aria-label={t('wiki.renameNote')}
-                title={t('wiki.renameNote')}
-              >
-                <Pencil size={16} />
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setWorkspaceActionError(null);
-                  setDeletingNote(activeNote);
-                }}
-                className="rounded p-1 transition-all duration-100 hover:opacity-70 active:scale-90"
-                style={{ color: 'oklch(65% 0.18 30)' }}
-                aria-label={t('wiki.deleteNote')}
-                title={t('wiki.deleteNote')}
-              >
-                <Trash2 size={16} />
-              </button>
-            </>
-          )}
-
           {/* Sources list */}
           <button
             onClick={() => setShowSources(true)}
@@ -833,6 +824,18 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
             title={lintRunning ? t('workspace.lintRunning') : t('workspace.runLint')}
           >
             {lintRunning ? <Loader2 size={16} className="animate-spin" /> : <FlaskConical size={16} />}
+          </button>
+
+          {/* Cross-workspace organize (auto-classify + dedupe) */}
+          <button
+            onClick={runOrganize}
+            disabled={organizeRunning}
+            className="rounded p-1 transition-all duration-100 hover:opacity-70 active:scale-90 disabled:opacity-40"
+            style={{ color: 'var(--fg-muted)' }}
+            aria-label={t('workspace.runOrganize')}
+            title={organizeRunning ? t('workspace.organizeRunning') : t('workspace.runOrganize')}
+          >
+            {organizeRunning ? <Loader2 size={16} className="animate-spin" /> : <Wand2 size={16} />}
           </button>
 
           <button
@@ -881,7 +884,7 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
 
       {/* Global action error strip — dialogs render their own copy; this covers
           failures (e.g. lint) that happen with no dialog open */}
-      {workspaceActionError && !renamingWorkspace && !deletingWorkspace && !creatingNote && !renamingNote && !deletingNote && (
+      {workspaceActionError && !renamingWorkspace && !deletingWorkspace && (
         <div
           className="flex items-center justify-between gap-3 border-b px-4 py-2 text-xs"
           style={{ borderColor: 'var(--border)', background: 'var(--bg-2)', color: 'oklch(65% 0.18 30)' }}
@@ -914,18 +917,6 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
                 initialPages={pages}
                 activePage={activePage}
                 onSelectPage={selectPage}
-                onCreateNote={() => {
-                  setWorkspaceActionError(null);
-                  setCreatingNote(true);
-                }}
-                onRenameNote={(page) => {
-                  setWorkspaceActionError(null);
-                  setRenamingNote(page);
-                }}
-                onDeleteNote={(page) => {
-                  setWorkspaceActionError(null);
-                  setDeletingNote(page);
-                }}
               />
             </div>
             <div
@@ -978,9 +969,13 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
             <div style={{ width: rightWidth, maxWidth: '80vw' }} className="shrink-0 overflow-hidden">
               <ConversationPanel
                 workspaceId={workspaceId}
+                workspaceName={currentWorkspaceName}
+                currentSlug={activePage}
+                workspaces={workspaceList}
                 onSourceAdded={refreshPageList}
                 onPageWritten={handlePageWritten}
                 onPageClick={selectPage}
+                onWorkspacesChanged={refreshWorkspaceList}
               />
             </div>
           </>
@@ -1006,38 +1001,8 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
           onConfirm={() => deleteWorkspace(deletingWorkspace)}
         />
       )}
-      {creatingNote && (
-        <NoteCreateDialog
-          loading={workspaceActionLoading}
-          error={workspaceActionError}
-          onClose={() => setCreatingNote(false)}
-          onSubmit={createNote}
-        />
-      )}
-      {renamingNote && (
-        <NoteRenameDialog
-          note={renamingNote}
-          loading={workspaceActionLoading}
-          error={workspaceActionError}
-          onClose={() => setRenamingNote(null)}
-          onSubmit={(title) => renameNote(renamingNote, title)}
-        />
-      )}
-      {deletingNote && (
-        <NoteDeleteDialog
-          note={deletingNote}
-          loading={workspaceActionLoading}
-          error={workspaceActionError}
-          onClose={() => setDeletingNote(null)}
-          onConfirm={() => deleteNote(deletingNote)}
-        />
-      )}
     </div>
   );
-}
-
-function encodeSlugPath(slug: string): string {
-  return slug.split('/').map(encodeURIComponent).join('/');
 }
 
 function normalizeWikiTarget(slug: string): string {
@@ -1196,169 +1161,3 @@ function WorkspaceDeleteDialog({
   );
 }
 
-function NoteCreateDialog({
-  loading,
-  error,
-  onClose,
-  onSubmit,
-}: {
-  loading: boolean;
-  error: string | null;
-  onClose: () => void;
-  onSubmit: (title: string) => void;
-}) {
-  const t = useTranslations();
-  const [title, setTitle] = useState('');
-
-  return (
-    <ModalShell labelId="note-create-title" onClose={onClose}>
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          onSubmit(title);
-        }}
-        className="relative w-full max-w-md rounded-2xl border p-5 shadow-2xl"
-        style={{ background: 'var(--bg-2)', borderColor: 'var(--border)' }}
-      >
-        <h2 id="note-create-title" className="text-sm font-semibold" style={{ color: 'var(--fg)' }}>
-          {t('wiki.createNote')}
-        </h2>
-        <p className="mt-1 text-xs" style={{ color: 'var(--fg-muted)' }}>
-          {t('wiki.createNoteHint')}
-        </p>
-        <input
-          autoFocus
-          value={title}
-          onChange={(event) => setTitle(event.target.value)}
-          placeholder={t('common.untitled')}
-          className="mt-4 w-full rounded-xl border px-3 py-2 text-sm outline-none"
-          style={{ background: 'var(--bg)', borderColor: 'var(--border)', color: 'var(--fg)' }}
-        />
-        {error && (
-          <p className="mt-3 text-xs" style={{ color: 'oklch(70% 0.18 25)' }}>
-            {error}
-          </p>
-        )}
-        <div className="mt-4 flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-lg px-3 py-1.5 text-sm transition-opacity hover:opacity-70"
-            style={{ color: 'var(--fg-muted)' }}
-            disabled={loading}
-          >
-            {t('common.cancel')}
-          </button>
-          <button
-            type="submit"
-            disabled={loading || !title.trim()}
-            className="rounded-lg px-3 py-1.5 text-sm transition-opacity hover:opacity-70 disabled:opacity-40"
-            style={{ background: 'var(--color-accent)', color: 'oklch(10% 0.015 250)' }}
-          >
-            {loading ? t('common.loading') : t('common.save')}
-          </button>
-        </div>
-      </form>
-    </ModalShell>
-  );
-}
-
-function NoteRenameDialog({
-  note,
-  loading,
-  error,
-  onClose,
-  onSubmit,
-}: {
-  note: PageEntry;
-  loading: boolean;
-  error: string | null;
-  onClose: () => void;
-  onSubmit: (title: string) => void;
-}) {
-  const t = useTranslations();
-  const [title, setTitle] = useState(note.title ?? note.slug.replace(/^notes\//, '').replace(/\.md$/, ''));
-
-  return (
-    <ModalShell labelId="note-rename-title" onClose={onClose}>
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          onSubmit(title);
-        }}
-        className="relative w-full max-w-sm space-y-4 rounded-xl border p-5 shadow-2xl"
-        style={{ background: 'var(--bg)', borderColor: 'var(--border)', color: 'var(--fg)' }}
-      >
-        <h2 id="note-rename-title" className="text-base font-semibold">{t('wiki.renameNote')}</h2>
-        <input
-          value={title}
-          onChange={(event) => setTitle(event.target.value)}
-          maxLength={120}
-          className="w-full rounded-md border px-3 py-2 text-sm outline-none"
-          style={{ background: 'var(--bg-2)', borderColor: 'var(--border)', color: 'var(--fg)' }}
-          autoFocus
-        />
-        {error && <p className="text-xs" style={{ color: 'oklch(65% 0.18 30)' }}>{error}</p>}
-        <div className="flex justify-end gap-2">
-          <button type="button" onClick={onClose} className="rounded-md px-3 py-2 text-sm" style={{ color: 'var(--fg-muted)' }}>
-            {t('common.cancel')}
-          </button>
-          <button
-            type="submit"
-            disabled={loading || !title.trim()}
-            className="rounded-md px-3 py-2 text-sm font-medium disabled:opacity-50"
-            style={{ background: 'var(--color-accent)', color: 'oklch(10% 0.015 250)' }}
-          >
-            {t('common.save')}
-          </button>
-        </div>
-      </form>
-    </ModalShell>
-  );
-}
-
-function NoteDeleteDialog({
-  note,
-  loading,
-  error,
-  onClose,
-  onConfirm,
-}: {
-  note: PageEntry;
-  loading: boolean;
-  error: string | null;
-  onClose: () => void;
-  onConfirm: () => void;
-}) {
-  const t = useTranslations();
-
-  return (
-    <ModalShell labelId="note-delete-title" onClose={onClose}>
-      <section
-        className="relative w-full max-w-sm space-y-4 rounded-xl border p-5 shadow-2xl"
-        style={{ background: 'var(--bg)', borderColor: 'var(--border)', color: 'var(--fg)' }}
-      >
-        <h2 id="note-delete-title" className="text-base font-semibold">{t('wiki.deleteNote')}</h2>
-        <p className="text-sm leading-6" style={{ color: 'var(--fg-muted)' }}>
-          {t('wiki.deleteNoteConfirm', { title: note.title ?? note.slug })}
-        </p>
-        {error && <p className="text-xs" style={{ color: 'oklch(65% 0.18 30)' }}>{error}</p>}
-        <div className="flex justify-end gap-2">
-          {/* autoFocus Cancel so Enter can't accidentally delete the note */}
-          <button type="button" autoFocus onClick={onClose} className="rounded-md px-3 py-2 text-sm" style={{ color: 'var(--fg-muted)' }}>
-            {t('common.cancel')}
-          </button>
-          <button
-            type="button"
-            onClick={onConfirm}
-            disabled={loading}
-            className="rounded-md px-3 py-2 text-sm font-medium disabled:opacity-50"
-            style={{ background: 'oklch(65% 0.18 30)', color: 'oklch(10% 0.015 30)' }}
-          >
-            {t('common.delete')}
-          </button>
-        </div>
-      </section>
-    </ModalShell>
-  );
-}

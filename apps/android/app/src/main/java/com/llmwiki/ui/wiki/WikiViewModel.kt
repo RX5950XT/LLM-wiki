@@ -75,6 +75,16 @@ data class ChatMessage(
     val content: String,
     val citedSlugs: List<String> = emptyList(),
     val isStreaming: Boolean = false,
+    val proposals: List<ActionProposal> = emptyList(),
+)
+
+/** Destructive action the AI proposed; executes only after the user confirms. */
+data class ActionProposal(
+    val action: String,
+    val params: Map<String, String>,
+    val label: String,
+    val status: String = "pending", // pending | running | done | error | dismissed
+    val error: String? = null,
 )
 
 data class WikiUiState(
@@ -106,6 +116,11 @@ data class WikiUiState(
     val chatDraft: String = "",
     val sources: List<SourceListItem>? = null,
     val sourcesLoading: Boolean = false,
+    /** Workspaces @-tagged as extra context for the next chat question */
+    val taggedWorkspaceIds: List<String> = emptyList(),
+    /** "已導入到 X" notice after an auto-routed ingest */
+    val ingestRoutedName: String? = null,
+    val organizeRunning: Boolean = false,
 )
 
 private val apiJson = Json { ignoreUnknownKeys = true }
@@ -374,167 +389,6 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
         selectPage(page)
     }
 
-    fun createNote(title: String, onDone: (Boolean) -> Unit = {}) {
-        val trimmed = title.trim()
-        if (trimmed.isBlank()) {
-            onDone(false)
-            return
-        }
-
-        viewModelScope.launch {
-            val wsId = workspaceId.value ?: return@launch
-            _uiState.update { it.copy(pageSaveLoading = true) }
-            try {
-                val bodyJson = buildJsonObject {
-                    put("zone", "notes")
-                    put("title", trimmed)
-                }.toString()
-                val response = sendAuthorizedRequest { accessToken ->
-                    AndroidHttpClient.instance.post(webApiUrl("/api/pages/$wsId")) {
-                        header("Authorization", "Bearer $accessToken")
-                        header("x-llm-wiki-locale", currentUiLocale())
-                        contentType(ContentType.Application.Json)
-                        setBody(bodyJson)
-                    }
-                } ?: run {
-                    _uiState.update {
-                        it.copy(pageSaveLoading = false, syncError = unauthorizedMessage())
-                    }
-                    onDone(false)
-                    return@launch
-                }
-
-                val text = response.bodyAsText()
-                if (response.status.value !in 200..299) {
-                    _uiState.update {
-                        it.copy(
-                            pageSaveLoading = false,
-                            syncError = parseApiError(text, str(R.string.error_op_create_note)),
-                        )
-                    }
-                    onDone(false)
-                    return@launch
-                }
-
-                if (!isJsonObject(text)) {
-                    _uiState.update {
-                        it.copy(
-                            pageSaveLoading = false,
-                            syncError = nonJsonApiMessage(str(R.string.error_op_create_note)),
-                        )
-                    }
-                    onDone(false)
-                    return@launch
-                }
-
-                val slug = apiJson.parseToJsonElement(text).jsonObject["slug"]?.jsonPrimitive?.contentOrNull
-                syncPagesInternal(wsId)
-                if (!slug.isNullOrBlank()) {
-                    db.pageDao().getPage(wsId, accountName, slug)?.let(::selectPage)
-                }
-                _uiState.update { it.copy(pageSaveLoading = false, syncError = null) }
-                onDone(slug != null)
-            } catch (e: Exception) {
-                _uiState.update {
-                    it.copy(
-                        pageSaveLoading = false,
-                        syncError = e.toUserFacingMessage(str(R.string.error_op_create_note)),
-                    )
-                }
-                onDone(false)
-            }
-        }
-    }
-
-    fun renameNote(page: PageEntity, title: String, onDone: (Boolean) -> Unit = {}) {
-        val trimmed = title.trim()
-        if (trimmed.isBlank() || page.zone != "notes" || page.slug == "notes/guide.md") {
-            onDone(false)
-            return
-        }
-
-        viewModelScope.launch {
-            val wsId = workspaceId.value ?: return@launch
-            _uiState.update { it.copy(pageSaveLoading = true, syncError = null) }
-            try {
-                val bodyJson = buildJsonObject { put("title", trimmed) }.toString()
-                val response = sendAuthorizedRequest { accessToken ->
-                    AndroidHttpClient.instance.patch(webApiUrl("/api/pages/$wsId/${page.slug.encodePathSegments()}")) {
-                        header("Authorization", "Bearer $accessToken")
-                        contentType(ContentType.Application.Json)
-                        setBody(bodyJson)
-                    }
-                } ?: run {
-                    _uiState.update { it.copy(pageSaveLoading = false, syncError = unauthorizedMessage()) }
-                    onDone(false)
-                    return@launch
-                }
-                val text = response.bodyAsText()
-                if (response.status.value !in 200..299) {
-                    _uiState.update { it.copy(pageSaveLoading = false, syncError = parseApiError(text, str(R.string.error_op_rename_note))) }
-                    onDone(false)
-                    return@launch
-                }
-
-                syncPagesInternal(wsId)
-                val updated = db.pageDao().getPage(wsId, accountName, page.slug)
-                if (updated != null && _uiState.value.activePage?.slug == page.slug) {
-                    _uiState.update { it.copy(activePage = updated) }
-                }
-                _uiState.update { it.copy(pageSaveLoading = false, syncError = null) }
-                onDone(true)
-            } catch (e: Exception) {
-                _uiState.update {
-                    it.copy(pageSaveLoading = false, syncError = e.toUserFacingMessage(str(R.string.error_op_rename_note)))
-                }
-                onDone(false)
-            }
-        }
-    }
-
-    fun deleteNote(page: PageEntity, onDone: (Boolean) -> Unit = {}) {
-        if (page.zone != "notes" || page.slug == "notes/guide.md") {
-            onDone(false)
-            return
-        }
-
-        viewModelScope.launch {
-            val wsId = workspaceId.value ?: return@launch
-            _uiState.update { it.copy(pageSaveLoading = true, syncError = null) }
-            try {
-                val response = sendAuthorizedRequest { accessToken ->
-                    AndroidHttpClient.instance.delete(webApiUrl("/api/pages/$wsId/${page.slug.encodePathSegments()}")) {
-                        header("Authorization", "Bearer $accessToken")
-                    }
-                } ?: run {
-                    _uiState.update { it.copy(pageSaveLoading = false, syncError = unauthorizedMessage()) }
-                    onDone(false)
-                    return@launch
-                }
-                val text = response.bodyAsText()
-                if (response.status.value !in 200..299) {
-                    _uiState.update { it.copy(pageSaveLoading = false, syncError = parseApiError(text, str(R.string.error_op_delete_note))) }
-                    onDone(false)
-                    return@launch
-                }
-
-                db.pageDao().deletePage(wsId, accountName, page.slug)
-                if (_uiState.value.activePage?.slug == page.slug) {
-                    _uiState.update { it.copy(activePage = null, pageContent = null, contentLoading = false) }
-                }
-                syncPagesInternal(wsId)
-                selectDefaultPageIfNeeded(wsId)
-                _uiState.update { it.copy(pageSaveLoading = false, syncError = null) }
-                onDone(true)
-            } catch (e: Exception) {
-                _uiState.update {
-                    it.copy(pageSaveLoading = false, syncError = e.toUserFacingMessage(str(R.string.error_op_delete_note)))
-                }
-                onDone(false)
-            }
-        }
-    }
-
     fun selectSearchResult(slug: String) {
         val existing = pages.value.find { it.slug == slug }
         if (existing != null) {
@@ -753,6 +607,17 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(chatDraft = value) }
     }
 
+    fun tagWorkspace(wsId: String) {
+        _uiState.update { state ->
+            if (state.taggedWorkspaceIds.contains(wsId) || state.taggedWorkspaceIds.size >= 5) state
+            else state.copy(taggedWorkspaceIds = state.taggedWorkspaceIds + wsId)
+        }
+    }
+
+    fun untagWorkspace(wsId: String) {
+        _uiState.update { it.copy(taggedWorkspaceIds = it.taggedWorkspaceIds - wsId) }
+    }
+
     fun sendQuery(userText: String) {
         if (userText.isBlank()) return
         val wsId = workspaceId.value ?: return
@@ -761,6 +626,8 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
         val history = _uiState.value.chatMessages
         val newHistory = history + userMsg
         val placeholder = ChatMessage(role = "assistant", content = "", isStreaming = true)
+        val taggedIds = _uiState.value.taggedWorkspaceIds
+        val currentSlug = _uiState.value.activePage?.slug
         _uiState.update {
             it.copy(
                 chatMessages = newHistory + placeholder,
@@ -783,6 +650,10 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                     })
                     put("workspace_id", wsId)
                     _uiState.value.selectedProfileId?.let { put("profile_id", it) }
+                    currentSlug?.let { put("current_slug", it) }
+                    if (taggedIds.isNotEmpty()) {
+                        put("context_workspace_ids", buildJsonArray { taggedIds.forEach { add(JsonPrimitive(it)) } })
+                    }
                 }.toString()
 
                 val response = sendAuthorizedRequest { accessToken ->
@@ -826,11 +697,9 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                 while (!channel.isClosedForRead) {
                     val chunk = channel.readUTF8Line() ?: break
                     raw.append(chunk).append("\n")
-                    val displayText = if (raw.contains(citationDelimiter)) {
-                        raw.substring(0, raw.lastIndexOf(citationDelimiter))
-                    } else {
-                        raw.toString()
-                    }
+                    // Hide any trailing NUL-delimited metadata block while streaming
+                    val nulIdx = raw.indexOf(citationDelimiter[0])
+                    val displayText = if (nulIdx >= 0) raw.substring(0, nulIdx) else raw.toString()
                     _uiState.update { state ->
                         val messages = state.chatMessages.dropLast(1) +
                             placeholder.copy(content = displayText.trimEnd())
@@ -838,15 +707,24 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
 
-                val (text, slugs) = parseCitations(raw.toString())
+                val parsed = parseStreamMeta(raw.toString())
                 _uiState.update { state ->
-                    val final = ChatMessage(role = "assistant", content = text.trimEnd(), citedSlugs = slugs)
+                    val final = ChatMessage(
+                        role = "assistant",
+                        content = parsed.text.trimEnd(),
+                        citedSlugs = parsed.citedSlugs,
+                        proposals = parsed.proposals,
+                    )
                     state.copy(
                         chatMessages = state.chatMessages.dropLast(1) + final,
                         chatLoading = false,
                         syncError = null,
+                        taggedWorkspaceIds = emptyList(),
                     )
                 }
+                // The AI may have created/renamed a workspace this turn — refresh the
+                // switcher list (syncSelected=false keeps it cheap unless it changed)
+                refreshWorkspaces(syncSelected = false)
             } catch (e: Exception) {
                 _uiState.update { state ->
                     state.copy(
@@ -857,6 +735,157 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
+    }
+
+    /** Runs a user-confirmed destructive action via the same server path the AI tools use. */
+    fun executeProposal(messageIndex: Int, proposalIndex: Int) {
+        val message = _uiState.value.chatMessages.getOrNull(messageIndex) ?: return
+        val proposal = message.proposals.getOrNull(proposalIndex) ?: return
+        if (proposal.status != "pending") return
+        updateProposalStatus(messageIndex, proposalIndex, "running", null)
+        viewModelScope.launch {
+            try {
+                val bodyJson = buildJsonObject {
+                    put("action", proposal.action)
+                    proposal.params.forEach { (k, v) -> put(k, v) }
+                }.toString()
+                val response = sendAuthorizedRequest { accessToken ->
+                    AndroidHttpClient.instance.post(webApiUrl("/api/agent/execute")) {
+                        header("Authorization", "Bearer $accessToken")
+                        contentType(ContentType.Application.Json)
+                        setBody(bodyJson)
+                    }
+                } ?: run {
+                    updateProposalStatus(messageIndex, proposalIndex, "error", unauthorizedMessage())
+                    return@launch
+                }
+                val text = response.bodyAsText()
+                if (response.status.value !in 200..299) {
+                    updateProposalStatus(
+                        messageIndex,
+                        proposalIndex,
+                        "error",
+                        parseApiError(text, str(R.string.error_op_agent_action)),
+                    )
+                    return@launch
+                }
+                updateProposalStatus(messageIndex, proposalIndex, "done", null)
+                if (proposal.action == "delete_workspace") {
+                    proposal.params["workspace_id"]?.let { deletedId ->
+                        SyncWorker.cancel(getApplication(), accountName, deletedId)
+                        db.pageDao().deleteByWorkspace(deletedId, accountName)
+                    }
+                    refreshWorkspaces(preferredWorkspaceId = null, syncSelected = true)
+                } else {
+                    workspaceId.value?.let { syncPagesInternal(it) }
+                }
+            } catch (e: Exception) {
+                updateProposalStatus(
+                    messageIndex,
+                    proposalIndex,
+                    "error",
+                    e.toUserFacingMessage(str(R.string.error_op_agent_action)),
+                )
+            }
+        }
+    }
+
+    fun dismissProposal(messageIndex: Int, proposalIndex: Int) {
+        updateProposalStatus(messageIndex, proposalIndex, "dismissed", null)
+    }
+
+    private fun updateProposalStatus(messageIndex: Int, proposalIndex: Int, status: String, error: String?) {
+        _uiState.update { state ->
+            state.copy(
+                chatMessages = state.chatMessages.mapIndexed { i, msg ->
+                    if (i != messageIndex) msg
+                    else msg.copy(
+                        proposals = msg.proposals.mapIndexed { j, p ->
+                            if (j != proposalIndex) p else p.copy(status = status, error = error)
+                        },
+                    )
+                },
+            )
+        }
+    }
+
+    /** Cross-workspace auto-classify + dedupe (async job, mirrors the Web Wand2 button). */
+    fun runOrganize(onDone: (Boolean) -> Unit = {}) {
+        val wsId = workspaceId.value ?: return
+        if (_uiState.value.organizeRunning) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(organizeRunning = true, syncError = null) }
+            try {
+                val bodyJson = buildJsonObject { put("workspace_id", wsId) }.toString()
+                val response = sendAuthorizedRequest { accessToken ->
+                    AndroidHttpClient.instance.post(webApiUrl("/api/organize")) {
+                        header("Authorization", "Bearer $accessToken")
+                        header("x-llm-wiki-locale", currentUiLocale())
+                        contentType(ContentType.Application.Json)
+                        setBody(bodyJson)
+                    }
+                } ?: run {
+                    _uiState.update { it.copy(organizeRunning = false, syncError = unauthorizedMessage()) }
+                    onDone(false)
+                    return@launch
+                }
+                val text = response.bodyAsText()
+                val bodyJsonObj = if (isJsonObject(text)) apiJson.parseToJsonElement(text).jsonObject else null
+                val jobId = bodyJsonObj?.get("jobId")?.jsonPrimitive?.contentOrNull
+                if (response.status.value !in 200..299 || jobId == null) {
+                    _uiState.update {
+                        it.copy(organizeRunning = false, syncError = parseApiError(text, str(R.string.error_op_organize)))
+                    }
+                    onDone(false)
+                    return@launch
+                }
+
+                val deadline = System.currentTimeMillis() + 6 * 60 * 1000L
+                while (System.currentTimeMillis() < deadline) {
+                    delay(3_000)
+                    val poll = sendAuthorizedRequest { accessToken ->
+                        AndroidHttpClient.instance.get(webApiUrl("/api/organize?job_id=$jobId")) {
+                            header("Authorization", "Bearer $accessToken")
+                        }
+                    } ?: continue
+                    val pollText = poll.bodyAsText()
+                    if (poll.status.value !in 200..299 || !isJsonObject(pollText)) continue
+                    val obj = apiJson.parseToJsonElement(pollText).jsonObject
+                    when (obj["status"]?.jsonPrimitive?.contentOrNull) {
+                        "done" -> {
+                            val reportSlug = obj["report_slug"]?.jsonPrimitive?.contentOrNull
+                            syncPagesInternal(wsId, forceSync = true)
+                            if (!reportSlug.isNullOrBlank()) {
+                                db.pageDao().getPage(wsId, accountName, reportSlug)?.let(::selectPage)
+                            }
+                            _uiState.update { it.copy(organizeRunning = false, syncError = null) }
+                            onDone(true)
+                            return@launch
+                        }
+                        "failed" -> {
+                            val err = obj["error"]?.jsonPrimitive?.contentOrNull
+                                ?.takeIf { it.isNotBlank() } ?: str(R.string.error_op_organize)
+                            _uiState.update { it.copy(organizeRunning = false, syncError = err) }
+                            onDone(false)
+                            return@launch
+                        }
+                    }
+                }
+                _uiState.update {
+                    it.copy(organizeRunning = false, syncError = str(R.string.error_network_timeout))
+                }
+                onDone(false)
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(organizeRunning = false, syncError = e.toUserFacingMessage(str(R.string.error_op_organize)))
+                }
+                onDone(false)
+            }
+        }
+    }
+
+    fun clearIngestNotice() {
+        _uiState.update { it.copy(ingestRoutedName = null) }
     }
 
     fun saveSynthesis(question: String, answer: String, citedSlugs: List<String>) {
@@ -1056,15 +1085,20 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun ingestUrl(url: String, onDone: (Boolean) -> Unit) {
+    fun ingestUrl(url: String, autoRoute: Boolean = false, onDone: (Boolean) -> Unit) {
         viewModelScope.launch {
             val wsId = workspaceId.value ?: return@launch
-            _uiState.update { it.copy(ingestLoading = true, ingestProgress = 0) }
+            _uiState.update { it.copy(ingestLoading = true, ingestProgress = 0, ingestRoutedName = null) }
             try {
                 val requestBody = buildJsonObject {
                     put("kind", "url")
                     put("url", url)
-                    put("workspace_id", wsId)
+                    if (autoRoute) {
+                        put("auto_route", true)
+                        put("fallback_workspace_id", wsId)
+                    } else {
+                        put("workspace_id", wsId)
+                    }
                     _uiState.value.selectedProfileId?.let { put("profile_id", it) }
                 }.toString()
                 val response = sendAuthorizedRequest { accessToken ->
@@ -1086,16 +1120,21 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun ingestText(title: String, content: String, onDone: (Boolean) -> Unit) {
+    fun ingestText(title: String, content: String, autoRoute: Boolean = false, onDone: (Boolean) -> Unit) {
         viewModelScope.launch {
             val wsId = workspaceId.value ?: return@launch
-            _uiState.update { it.copy(ingestLoading = true, ingestProgress = 0) }
+            _uiState.update { it.copy(ingestLoading = true, ingestProgress = 0, ingestRoutedName = null) }
             try {
                 val requestBody = buildJsonObject {
                     put("kind", "text")
                     put("title", title)
                     put("content", content)
-                    put("workspace_id", wsId)
+                    if (autoRoute) {
+                        put("auto_route", true)
+                        put("fallback_workspace_id", wsId)
+                    } else {
+                        put("workspace_id", wsId)
+                    }
                     _uiState.value.selectedProfileId?.let { put("profile_id", it) }
                 }.toString()
                 val response = sendAuthorizedRequest { accessToken ->
@@ -1142,6 +1181,10 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
         } else null
         val jobId = bodyJson?.get("jobId")?.jsonPrimitive?.contentOrNull
         val initialStatus = bodyJson?.get("status")?.jsonPrimitive?.contentOrNull
+        // Auto-routed ingest: surface which workspace the AI picked
+        bodyJson?.get("routed_workspace_name")?.jsonPrimitive?.contentOrNull?.let { routedName ->
+            _uiState.update { it.copy(ingestRoutedName = routedName) }
+        }
 
         if (jobId != null && initialStatus != "done") {
             val error = pollIngestJob(jobId)
@@ -1561,15 +1604,45 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
     }
 }
 
-private fun parseCitations(raw: String): Pair<String, List<String>> {
-    val delimiter = "\u0000CITATIONS\u0000"
-    val idx = raw.lastIndexOf(delimiter)
-    if (idx < 0) return raw to emptyList()
-    val text = raw.substring(0, idx)
-    val jsonPart = raw.substring(idx + delimiter.length).trim()
-    return try {
-        text to Json.decodeFromString<List<String>>(jsonPart)
-    } catch (_: Exception) {
-        text to emptyList()
+private data class StreamMeta(
+    val text: String,
+    val citedSlugs: List<String>,
+    val proposals: List<ActionProposal>,
+)
+
+@kotlinx.serialization.Serializable
+private data class ProposalWire(
+    val action: String,
+    val params: Map<String, String> = emptyMap(),
+    val label: String = "",
+)
+
+/**
+ * Parses trailing NUL-delimited metadata blocks appended to the query stream
+ * (NUL + CITATIONS + NUL + json, then NUL + ACTIONS + NUL + json).
+ * Unknown block names are ignored for forward compatibility.
+ */
+private fun parseStreamMeta(raw: String): StreamMeta {
+    val nul = 0.toChar()
+    val blockRegex = Regex("$nul([A-Z_]+)$nul")
+    val matches = blockRegex.findAll(raw).toList()
+    if (matches.isEmpty()) return StreamMeta(raw, emptyList(), emptyList())
+
+    val text = raw.substring(0, matches.first().range.first)
+    var cited: List<String> = emptyList()
+    var proposals: List<ActionProposal> = emptyList()
+    matches.forEachIndexed { i, match ->
+        val start = match.range.last + 1
+        val end = if (i + 1 < matches.size) matches[i + 1].range.first else raw.length
+        val jsonPart = raw.substring(start, end).trim()
+        runCatching {
+            when (match.groupValues[1]) {
+                "CITATIONS" -> cited = Json.decodeFromString<List<String>>(jsonPart)
+                "ACTIONS" -> proposals = Json { ignoreUnknownKeys = true }
+                    .decodeFromString<List<ProposalWire>>(jsonPart)
+                    .map { ActionProposal(action = it.action, params = it.params, label = it.label) }
+            }
+        }
     }
+    return StreamMeta(text, cited, proposals)
 }

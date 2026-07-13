@@ -44,6 +44,10 @@
     "graphView": "知識圖譜",
     "runLint": "執行 Wiki 健康檢查",
     "lintRunning": "健康檢查執行中…",
+    "runOrganize": "自動分類＋去重複（全部工作區）",
+    "organizeRunning": "整理中…",
+    "organizeConfirm": "將掃描你的全部工作區，合併重複知識並把放錯位置的頁面歸位，完成後產生報告頁。過程可能需要數分鐘，確定執行？",
+    "organizeFailed": "自動整理失敗",
     "initFailed": "自動初始化失敗，請手動建立工作區。"
   },
   "wiki": {
@@ -111,7 +115,12 @@
     "fileReadError": "讀取檔案失敗",
     "fileTooLarge": "檔案需小於 2 MB",
     "failedGeneric": "匯入失敗",
-    "runningProgress": "整合中…已更新 {count} 個頁面"
+    "runningProgress": "整合中…已更新 {count} 個頁面",
+    "dialogTitle": "導入內容",
+    "target": "目標工作區",
+    "targetAuto": "自動判斷（AI）",
+    "targetCurrent": "目前工作區：{name}",
+    "routedTo": "已導入到「{name}」"
   },
   "sources": {
     "open": "來源清單",
@@ -130,7 +139,13 @@
     "thinking": "思考中…",
     "searchWiki": "搜尋 Wiki...",
     "stop": "停止",
-    "fileBackFailed": "儲存為整合頁失敗"
+    "fileBackFailed": "儲存為整合頁失敗",
+    "actionMenu": "模型與導入",
+    "tagWorkspace": "標記工作區作為上下文",
+    "confirmAction": "確認執行",
+    "actionFailed": "執行失敗",
+    "confirmDeleteWorkspace": "AI 請求刪除工作區「{name}」",
+    "confirmDeletePage": "AI 請求刪除頁面 {slug}"
   },
   "settings": {
     "title": "設定",
@@ -152,6 +167,14 @@
     "noProfiles": "尚無設定檔，請在下方新增。",
     "default": "預設",
     "deleteProfile": "刪除設定檔",
+    "editProfile": "編輯設定檔",
+    "aiPermissions": "AI 權限",
+    "aiPermissionsBody": "AI 執行破壞性操作（刪除頁面、刪除工作區）時的行為。",
+    "aiConfirmOn": "需要我確認",
+    "aiConfirmOnHint": "AI 提出後，由你在對話中按確認才執行",
+    "aiConfirmOff": "直接執行",
+    "aiConfirmOffHint": "AI 可直接刪除；Drive 垃圾桶內仍可救回",
+    "apiKeyKeepHint": "留空保留原金鑰",
     "saveFailed": "儲存設定檔失敗",
     "confirmDeleteProfile": "確定要刪除此 LLM 設定檔嗎？綁定此設定檔的工作區將改用預設設定。",
     "deleteProfileFailed": "刪除設定檔失敗"
@@ -161,11 +184,11 @@
     "open": "開啟使用說明",
     "close": "關閉使用說明",
     "workspaceTitle": "工作區與頁面",
-    "workspaceBody": "用工作區選單切換、排序、新建工作區。知識頁由 LLM 維護。在筆記欄按「+」可新建自訂筆記，自訂筆記旁有鉛筆（重新命名）與垃圾桶（刪除）按鈕；notes/guide.md 為系統頁，不可刪除。每頁右上角的鎖頭可讓你保護該頁不被 LLM 覆寫。",
+    "workspaceBody": "用工作區選單切換、拖曳排序、新建工作區。知識頁全部由 AI 維護；每頁右上角的鎖頭可保護該頁不被 AI 覆寫。也可以直接在對話中請 AI 建立、重新命名或刪除工作區。",
     "ingestTitle": "匯入內容",
-    "ingestBody": "右側輸入列可貼上網址、文字或 Markdown，也可上傳 .txt / .md 檔案。匯入完成後 Wiki 會同步更新相關頁面。",
+    "ingestBody": "點對話輸入框左側的機器人按鈕 →「導入內容」，可貼上網址、文字或 Markdown，也可拖曳或選取 .txt / .md 檔案。目標工作區預設「自動判斷」，由 AI 決定內容該進哪個工作區。",
     "chatTitle": "對話與綜合頁",
-    "chatBody": "右側對話可以詢問目前 Wiki。輸入框旁可選 LLM profile；有引用來源的回答可存成 synthesis page。",
+    "chatBody": "右側對話預設以你正在看的頁面為上下文。輸入「@」可標記其他工作區一起參考。AI 會把有價值的內容整理進知識頁；刪除類操作會先跳出確認卡片（可在設定改成直接執行）。頂列的魔杖按鈕可跨全部工作區自動分類＋去重複。",
     "settingsTitle": "設定與同步",
     "settingsBody": "設定頁可管理 LLM profile、語言、外觀與規則。規則是控制匯入、查詢與健康檢查的提示詞檔。",
     "driveTitle": "Google Drive 重新授權",
