@@ -215,7 +215,7 @@ export async function POST(request: NextRequest) {
   const capabilityNote = [
     '',
     '## Cross-workspace capabilities',
-    'You can manage the user\'s workspaces with tools: listWorkspaces, createWorkspace, renameWorkspace, deleteWorkspace, movePageToWorkspace.',
+    'You can manage the user\'s workspaces with tools: listWorkspaces, createWorkspace, renameWorkspace, deleteWorkspace, reorderWorkspaces, movePageToWorkspace.',
     'Page tools (readPage, writePage, searchPages, listPages, deletePage, movePage) accept an optional workspace_id to operate on other workspaces the user owns.',
     'When the conversation surfaces durable knowledge worth keeping, write it into wiki pages with writePage.',
     confirmDestructive

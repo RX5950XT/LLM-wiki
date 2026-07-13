@@ -2,7 +2,18 @@
 
 > 給下一個 AI Agent 的接手指南。架構與規範細節以 `CLAUDE.md` / `AGENTS.md` 為準，這裡只記「最近做了什麼、為什麼、還缺什麼」。
 
-## 最近一次變更（2026-07-13，Phase 15 連結修復 + 維護整合 + 來源重跑）
+## 最近一次變更（2026-07-13，Phase 16 維護合一 + AI 真權限）
+
+使用者三點回報，全部完成（Web + Android）：兩顆維護按鈕合成一顆、整理去重要真的會動、不要報告頁。
+
+- **一顆按鈕 = 一個 pipeline**：健康檢查（lint）與整理去重（organize）不再是兩支 job。Web 頂列 `Wrench`、Android drawer `Build` 各一顆 → confirm → `POST /api/organize`。`runOrganizePipeline`（`lib/ai/organize-pipeline.ts`）一次做完：修失效連結／矛盾／孤兒／stub → 合併重複 → 跨工作區歸位 → 調整工作區 → 更新 index.md / log.md。
+- **「整理去重沒作用」的 root cause**：`ai_confirm_destructive` 預設 true → 背景 job 沒有 `onProposal` → `gateDestructive` **直接拒絕所有刪除**，模型只能寫「建議刪除」在報告裡；加上 pipeline 當時還手動 strip 掉 create/rename/deleteWorkspace 工具。修法：維護 job 傳 `confirmDestructive: false`（按鈕上的 confirm dialog 就是授權），且不再 strip workspace 工具。現在它真的能刪重複頁、改名／建立／刪除（僅限已清空的）工作區、重排順序。對話流程的確認卡片機制**不受影響**（照舊預設需確認）。
+- **不再產生報告頁**：prompt 硬性禁止 `_lint/*`、`_organize/*`；`report_slug` 永遠 null，pill 改顯示「已變更 N 項」（來自 `agent_jobs.progress` 的工具呼叫紀錄）。
+- **新 AI 工具 `reorderWorkspaces`**（寫 `workspaces.sort_order`）：補齊使用者要求的「AI 可重新排序工作區」。漏傳的 workspace 自動補在尾端，不會從清單消失。
+- **刪除 `/api/lint` route + `vercel.json` cron + `CRON_SECRET`**：週期性、無人看管地跑一個有刪除權的 pipeline 太危險，而且 cron 會持續生報告頁。要恢復排程請先設計破壞性動作的授權模型。⚠️ 舊 Android APK 打 `/api/lint` 會 404，需更新。
+- **`_schema/lint.md` 語意翻轉**：從「只寫報告、不要自動修」改成「檢查並直接修正」的清單，並以參考身分注入維護 pipeline（舊 workspace 的 Drive 內還是舊文案，prompt 已明講忽略其中的「寫報告／不要修」字眼）。
+
+## 上一次變更（2026-07-13，Phase 15 連結修復 + 維護整合 + 來源重跑）
 
 使用者連續回報 5 項，全部完成（Web + Android）。
 
@@ -12,6 +23,8 @@
 - **已匯入來源修復**：2 筆 ingest 失敗（LLM provider 暫時性錯誤，text 來源，內容已在 Drive）。新 route `POST /api/sources/[id]/reingest`：讀 Drive 既有內容 → 建新 ingest_job → 重跑 `runIngestPipeline`，沿用 `/api/ingest?job_id=` 輪詢。Web `SourcesDialog` + Android `SourcesListDialog` 每列加「重新整合」按鈕。
 
 ⚠️ **協定破壞性變更**：`POST /api/lint` 不再回 `{ ok, reportSlug }`，改回 `202 { jobId }`。所有 client caller 已同步改（舊 Android APK 需更新）。cron `GET /api/lint`（Bearer CRON_SECRET）不變。
+
+> Phase 15 的「維護按鈕整合」只是把兩個動作收進同一個選單；Phase 16 才真正合成單一動作與單一 pipeline。以下段落中關於 `/api/lint`、報告頁、`Wand2`/`FlaskConical` 的描述皆已作廢。
 
 ## 上一次變更（2026-07-13，Phase 14 對話中心化 + 跨工作區 AI）
 
@@ -96,4 +109,4 @@ cd apps/android && .\gradlew.bat :app:assembleDebug   # BUILD SUCCESSFUL
 ## 環境
 
 - Supabase production：project `mjuciqffwayydobpxzcz`（llm-wiki, ap-southeast-1）
-- Vercel：apps/web，Fluid Compute，`vercel.json` cron → `/api/lint`
+- Vercel：apps/web，Fluid Compute（無 cron；`vercel.json` 已於 Phase 16 刪除，`CRON_SECRET` 可從 Vercel 環境變數移除）

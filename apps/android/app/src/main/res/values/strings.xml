@@ -74,8 +74,6 @@
     <string name="wiki_search_placeholder">Search pages…</string>
     <string name="wiki_search_close">Close search</string>
     <string name="wiki_search_empty">No results found</string>
-    <string name="wiki_lint">Run wiki health check</string>
-    <string name="wiki_lint_started">Wiki health check started</string>
     <string name="wiki_create_note">New note</string>
     <string name="wiki_create_note_hint">Create a note page first, then edit it in Markdown.</string>
     <string name="wiki_note_created">Note created</string>
@@ -89,14 +87,11 @@
     <string name="wiki_ingest_target_auto">Auto (AI decides workspace)</string>
     <string name="wiki_ingest_target_current">Current workspace</string>
     <string name="wiki_ingest_routed">Imported into "%1$s"</string>
-    <string name="wiki_organize_action">Auto-classify + dedupe</string>
-    <string name="wiki_organize_confirm_title">Auto-classify + dedupe</string>
-    <string name="wiki_organize_confirm_body">This scans ALL your workspaces, merges duplicated knowledge and moves misplaced pages, then writes a report page. It may take a few minutes. Continue?</string>
-    <string name="wiki_organize_running">Organizing…</string>
-    <string name="wiki_organize_done">Organize finished</string>
-    <string name="wiki_maintenance">Maintenance</string>
-    <string name="wiki_health_check">Health check</string>
-    <string name="wiki_lint_running">Health check running…</string>
+    <string name="wiki_maintenance">Tidy knowledge base</string>
+    <string name="wiki_maintenance_confirm_title">Tidy knowledge base</string>
+    <string name="wiki_maintenance_confirm_body">The AI will scan ALL your workspaces and directly fix dead links and contradictions, merge duplicated knowledge, re-file misplaced pages, and adjust workspaces when needed (rename / create / delete empty ones). These changes are written for real and may take a few minutes. Continue?</string>
+    <string name="wiki_maintenance_running">Tidying knowledge base…</string>
+    <string name="wiki_maintenance_done">Knowledge base tidied</string>
     <string name="wiki_maintenance_background_hint">You can leave this screen — it keeps running in the background</string>
     <string name="chat_tag_workspace">Tag a workspace as context</string>
     <string name="chat_confirm_action">Confirm</string>
@@ -192,7 +187,6 @@
     <string name="error_op_query">Query failed</string>
     <string name="error_op_ingest">Import failed</string>
     <string name="error_op_load_sources">Failed to load sources</string>
-    <string name="error_op_lint">Health check failed</string>
     <string name="error_op_sync">Sync failed</string>
     <string name="error_op_lock">Failed to update page lock</string>
     <string name="error_op_synthesis">Failed to save synthesis</string>

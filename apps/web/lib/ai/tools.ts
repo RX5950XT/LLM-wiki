@@ -432,6 +432,35 @@ export function buildWikiTools(ctx: ToolContext) {
       },
     }),
 
+    reorderWorkspaces: tool({
+      description:
+        'Set the display order of the user\'s workspaces. Pass ALL workspace ids in the desired order (call listWorkspaces first).',
+      inputSchema: z.object({
+        workspace_ids: z.array(z.string().uuid()).min(1).describe('Workspace ids, first = top'),
+      }),
+      execute: async ({ workspace_ids }: { workspace_ids: string[] }) => {
+        const { data: owned } = await ctx.supabase
+          .from('workspaces')
+          .select('id')
+          .eq('owner_id', userId);
+        const ownedIds = (owned ?? []).map((w) => w.id);
+        const requested = [...new Set(workspace_ids)].filter((id) => ownedIds.includes(id));
+        if (requested.length === 0) return { error: 'None of the given workspace ids are yours.' };
+        // Workspaces the model left out keep their relative position at the end,
+        // so a partial order never drops a workspace out of the list.
+        const finalOrder = [...requested, ...ownedIds.filter((id) => !requested.includes(id))];
+        for (const [index, id] of finalOrder.entries()) {
+          const { error } = await ctx.supabase
+            .from('workspaces')
+            .update({ sort_order: index })
+            .eq('id', id)
+            .eq('owner_id', userId);
+          if (error) return { error: `Reorder failed: ${error.message}` };
+        }
+        return { ok: true, order: finalOrder };
+      },
+    }),
+
     createWorkspace: tool({
       description: 'Create a new workspace (Drive folders + system pages included).',
       inputSchema: z.object({ name: z.string().min(1).max(100) }),

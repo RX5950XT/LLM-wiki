@@ -3,7 +3,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { PanelLeft, PanelRight, GitFork, FlaskConical, ChevronDown, LogOut, Plus, Settings, Search, Loader2, HelpCircle, Pencil, Trash2, GripVertical, Library, Wand2, Wrench, CheckCircle2, AlertCircle, X } from 'lucide-react';
+import { PanelLeft, PanelRight, GitFork, ChevronDown, LogOut, Plus, Settings, Search, Loader2, HelpCircle, Pencil, Trash2, GripVertical, Library, Wrench, CheckCircle2, AlertCircle, X } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import { PageTree } from '@/components/wiki/page-tree';
 import { PageViewer } from '@/components/wiki/page-viewer';
@@ -31,14 +31,12 @@ interface WorkspaceEntry {
   sort_order?: number;
 }
 
-/** Active health-check / organize job, tracked across reloads via localStorage. */
+/** Active maintenance job (health check + organize), tracked across reloads. */
 interface MaintState {
-  kind: 'lint' | 'organize';
   jobId: string;
   status: 'running' | 'done' | 'failed';
   error?: string | null;
-  reportSlug?: string | null;
-  reportWorkspaceId?: string | null;
+  changes?: number;
 }
 
 const MAINTENANCE_STORAGE_KEY = 'llmwiki:maintenance';
@@ -63,7 +61,6 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
   const [rightOpen, setRightOpen] = useState(true);
   const [showGraph, setShowGraph] = useState(false);
   const [maintenance, setMaintenance] = useState<MaintState | null>(null);
-  const [showMaintMenu, setShowMaintMenu] = useState(false);
   const [showWsMenu, setShowWsMenu] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [showSources, setShowSources] = useState(false);
@@ -73,7 +70,6 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
   const [deletingWorkspace, setDeletingWorkspace] = useState<WorkspaceEntry | null>(null);
   const [workspaceActionError, setWorkspaceActionError] = useState<string | null>(null);
   const [workspaceActionLoading, setWorkspaceActionLoading] = useState(false);
-  const maintMenuRef = useRef<HTMLDivElement | null>(null);
   const [pages, setPages] = useState(initialPages);
   const [leftWidth, setLeftWidth] = useState(240);
   const [rightWidth, setRightWidth] = useState(384);
@@ -399,59 +395,43 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
     [leftWidth, rightWidth],
   );
 
-  // Unified maintenance (health check + organize): both are background jobs in
-  // agent_jobs, tracked by a single pill and recoverable after a page reload.
-  const startMaintenance = useCallback(
-    async (kind: 'lint' | 'organize') => {
-      if (maintenance?.status === 'running') return;
-      setShowMaintMenu(false);
-      if (kind === 'organize' && !window.confirm(t('workspace.organizeConfirm'))) return;
-      setMaintenance(null);
-      setWorkspaceActionError(null);
-      try {
-        const res = await fetch(kind === 'lint' ? '/api/lint' : '/api/organize', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-llm-wiki-locale': locale },
-          body: JSON.stringify({ workspace_id: workspaceId }),
-        });
-        // 409 = a maintenance job is already running; its jobId is returned so
-        // we can adopt and keep tracking it instead of erroring.
-        const data = (await res.json().catch(() => null)) as { jobId?: string; error?: string } | null;
-        if (!data?.jobId) throw new Error(data?.error ?? t('workspace.maintenanceFailed'));
-        localStorage.setItem(MAINTENANCE_STORAGE_KEY, JSON.stringify({ kind, jobId: data.jobId }));
-        setMaintenance({ kind, jobId: data.jobId, status: 'running' });
-      } catch (error) {
-        setWorkspaceActionError(error instanceof Error ? error.message : t('workspace.maintenanceFailed'));
-      }
-    },
-    [maintenance?.status, locale, workspaceId, t],
-  );
+  // One maintenance job = health check + organize/dedupe in a single background
+  // pass. It mutates the wiki directly (no report page) and keeps running
+  // server-side even if this tab is closed.
+  const startMaintenance = useCallback(async () => {
+    if (maintenance?.status === 'running') return;
+    if (!window.confirm(t('workspace.maintenanceConfirm'))) return;
+    setMaintenance(null);
+    setWorkspaceActionError(null);
+    try {
+      const res = await fetch('/api/organize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-llm-wiki-locale': locale },
+        body: JSON.stringify({ workspace_id: workspaceId }),
+      });
+      // 409 = a maintenance job is already running; its jobId is returned so
+      // we can adopt and keep tracking it instead of erroring.
+      const data = (await res.json().catch(() => null)) as { jobId?: string; error?: string } | null;
+      if (!data?.jobId) throw new Error(data?.error ?? t('workspace.maintenanceFailed'));
+      localStorage.setItem(MAINTENANCE_STORAGE_KEY, JSON.stringify({ jobId: data.jobId }));
+      setMaintenance({ jobId: data.jobId, status: 'running' });
+    } catch (error) {
+      setWorkspaceActionError(error instanceof Error ? error.message : t('workspace.maintenanceFailed'));
+    }
+  }, [maintenance?.status, locale, workspaceId, t]);
 
   const dismissMaintenance = useCallback(() => {
     localStorage.removeItem(MAINTENANCE_STORAGE_KEY);
     setMaintenance(null);
   }, []);
 
-  const openMaintenanceReport = useCallback(() => {
-    if (!maintenance?.reportSlug) return;
-    const targetWs = maintenance.reportWorkspaceId ?? workspaceId;
-    if (targetWs !== workspaceId) {
-      router.push(`/w/${targetWs}?page=${encodeURIComponent(maintenance.reportSlug)}`);
-    } else {
-      selectPage(maintenance.reportSlug);
-    }
-    dismissMaintenance();
-  }, [maintenance, workspaceId, router, selectPage, dismissMaintenance]);
-
   // Recover a maintenance job that was started before a reload / tab close.
   useEffect(() => {
     const raw = typeof window !== 'undefined' ? localStorage.getItem(MAINTENANCE_STORAGE_KEY) : null;
     if (!raw) return;
     try {
-      const saved = JSON.parse(raw) as { kind: 'lint' | 'organize'; jobId: string };
-      if (saved?.jobId && (saved.kind === 'lint' || saved.kind === 'organize')) {
-        setMaintenance({ kind: saved.kind, jobId: saved.jobId, status: 'running' });
-      }
+      const saved = JSON.parse(raw) as { jobId?: string };
+      if (saved?.jobId) setMaintenance({ jobId: saved.jobId, status: 'running' });
     } catch {
       localStorage.removeItem(MAINTENANCE_STORAGE_KEY);
     }
@@ -461,32 +441,40 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
   // whether this page is open, so closing the tab never cancels it.
   useEffect(() => {
     if (maintenance?.status !== 'running') return;
-    const { kind, jobId } = maintenance;
-    const endpoint = kind === 'lint' ? '/api/lint' : '/api/organize';
+    const { jobId } = maintenance;
     let cancelled = false;
     const tick = async () => {
       try {
-        const res = await fetch(`${endpoint}?job_id=${encodeURIComponent(jobId)}`);
+        const res = await fetch(`/api/organize?job_id=${encodeURIComponent(jobId)}`);
         if (!res.ok) return;
         const poll = (await res.json()) as {
           status?: string;
           error?: string;
-          report_slug?: string | null;
-          report_workspace_id?: string | null;
+          progress?: string[];
         };
         if (cancelled) return;
+        if (poll.status === 'running') {
+          // Live progress: pages/workspaces already changed by this run
+          setMaintenance((prev) =>
+            prev?.jobId === jobId && prev.status === 'running'
+              ? { ...prev, changes: poll.progress?.length ?? 0 }
+              : prev,
+          );
+          refreshPageList();
+          return;
+        }
         if (poll.status === 'done' || poll.status === 'failed') {
           localStorage.removeItem(MAINTENANCE_STORAGE_KEY);
           setMaintenance({
-            kind,
             jobId,
             status: poll.status,
             error: poll.error ?? null,
-            reportSlug: poll.report_slug ?? null,
-            reportWorkspaceId: poll.report_workspace_id ?? null,
+            changes: poll.progress?.length ?? 0,
           });
           if (poll.status === 'done') {
             refreshPageList();
+            // Maintenance may have renamed/created/deleted/reordered workspaces
+            refreshWorkspaceList();
             setGraphRefreshKey((k) => k + 1);
           }
         }
@@ -500,19 +488,7 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
       cancelled = true;
       window.clearInterval(id);
     };
-  }, [maintenance?.status, maintenance?.jobId, maintenance?.kind, refreshPageList]);
-
-  // Close the maintenance menu on outside click
-  useEffect(() => {
-    if (!showMaintMenu) return;
-    const onClick = (e: MouseEvent) => {
-      if (maintMenuRef.current && !maintMenuRef.current.contains(e.target as Node)) {
-        setShowMaintMenu(false);
-      }
-    };
-    document.addEventListener('mousedown', onClick);
-    return () => document.removeEventListener('mousedown', onClick);
-  }, [showMaintMenu]);
+  }, [maintenance?.status, maintenance?.jobId, refreshPageList, refreshWorkspaceList]);
 
   const handleSignOut = useCallback(async () => {
     const supabase = createClient();
@@ -881,65 +857,21 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
             <GitFork size={16} />
           </button>
 
-          {/* Unified maintenance menu: health check + organize (both background jobs) */}
-          <div className="relative" ref={maintMenuRef}>
-            <button
-              onClick={() => setShowMaintMenu((v) => !v)}
-              className="rounded p-1 transition-all duration-100 hover:opacity-70 active:scale-90"
-              style={{ color: maintenance?.status === 'running' ? 'var(--color-accent)' : 'var(--fg-muted)' }}
-              aria-label={t('workspace.maintenance')}
-              aria-haspopup="menu"
-              aria-expanded={showMaintMenu}
-              title={t('workspace.maintenance')}
-            >
-              {maintenance?.status === 'running' ? (
-                <Loader2 size={16} className="animate-spin" />
-              ) : (
-                <Wrench size={16} />
-              )}
-            </button>
-            {showMaintMenu && (
-              <div
-                className="absolute right-0 top-full z-30 mt-1 w-64 overflow-hidden rounded-lg border shadow-lg"
-                style={{ background: 'var(--bg)', borderColor: 'var(--border)' }}
-                role="menu"
-              >
-                <button
-                  onClick={() => startMaintenance('lint')}
-                  disabled={maintenance?.status === 'running'}
-                  className="flex w-full items-start gap-2.5 px-3 py-2.5 text-left transition-colors hover:bg-[var(--bg-2)] disabled:opacity-40"
-                  role="menuitem"
-                >
-                  <FlaskConical size={15} className="mt-0.5 shrink-0" style={{ color: 'var(--color-accent)' }} />
-                  <span className="min-w-0">
-                    <span className="block text-xs font-medium" style={{ color: 'var(--fg)' }}>
-                      {t('workspace.healthCheckItem')}
-                    </span>
-                    <span className="block text-[11px]" style={{ color: 'var(--fg-muted)' }}>
-                      {t('workspace.healthCheckDesc')}
-                    </span>
-                  </span>
-                </button>
-                <button
-                  onClick={() => startMaintenance('organize')}
-                  disabled={maintenance?.status === 'running'}
-                  className="flex w-full items-start gap-2.5 border-t px-3 py-2.5 text-left transition-colors hover:bg-[var(--bg-2)] disabled:opacity-40"
-                  style={{ borderColor: 'var(--border)' }}
-                  role="menuitem"
-                >
-                  <Wand2 size={15} className="mt-0.5 shrink-0" style={{ color: 'var(--color-accent)' }} />
-                  <span className="min-w-0">
-                    <span className="block text-xs font-medium" style={{ color: 'var(--fg)' }}>
-                      {t('workspace.organizeItem')}
-                    </span>
-                    <span className="block text-[11px]" style={{ color: 'var(--fg-muted)' }}>
-                      {t('workspace.organizeDesc')}
-                    </span>
-                  </span>
-                </button>
-              </div>
+          {/* Maintenance: health check + organize/dedupe in one background pass */}
+          <button
+            onClick={startMaintenance}
+            disabled={maintenance?.status === 'running'}
+            className="rounded p-1 transition-all duration-100 hover:opacity-70 active:scale-90 disabled:cursor-default"
+            style={{ color: maintenance?.status === 'running' ? 'var(--color-accent)' : 'var(--fg-muted)' }}
+            aria-label={t('workspace.maintenance')}
+            title={t('workspace.maintenanceDesc')}
+          >
+            {maintenance?.status === 'running' ? (
+              <Loader2 size={16} className="animate-spin" />
+            ) : (
+              <Wrench size={16} />
             )}
-          </div>
+          </button>
 
           <button
             onClick={() => setRightOpen((o) => !o)}
@@ -1002,26 +934,11 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
           {maintenance.status === 'failed' && <AlertCircle size={14} className="shrink-0" />}
           <span className="min-w-0 flex-1 truncate">
             {maintenance.status === 'running'
-              ? `${
-                  maintenance.kind === 'lint'
-                    ? t('workspace.maintenanceRunningLint')
-                    : t('workspace.maintenanceRunningOrganize')
-                } · ${t('workspace.maintenanceBackgroundHint')}`
+              ? `${t('workspace.maintenanceRunning', { count: maintenance.changes ?? 0 })} · ${t('workspace.maintenanceBackgroundHint')}`
               : maintenance.status === 'done'
-                ? maintenance.kind === 'lint'
-                  ? t('workspace.maintenanceDoneLint')
-                  : t('workspace.maintenanceDoneOrganize')
+                ? t('workspace.maintenanceDone', { count: maintenance.changes ?? 0 })
                 : maintenance.error || t('workspace.maintenanceFailed')}
           </span>
-          {maintenance.status === 'done' && maintenance.reportSlug && (
-            <button
-              type="button"
-              onClick={openMaintenanceReport}
-              className="shrink-0 rounded px-2 py-0.5 font-medium underline-offset-2 hover:underline"
-            >
-              {t('workspace.viewReport')}
-            </button>
-          )}
           {maintenance.status !== 'running' && (
             <button
               type="button"

@@ -5,26 +5,29 @@ import { createLLMClient } from './client';
 import { buildWikiTools } from './tools';
 import type { LLMProfile } from '@llm-wiki/shared-types';
 
-interface OrganizeContext {
+interface MaintainContext {
   supabase: SupabaseClient;
   drive: drive_v3.Drive;
   userId: string;
-  /** Workspace the user triggered from — the report page is written here */
+  /** Workspace the run was triggered from (the model's default scope) */
   workspaceId: string;
   wikiFolderId: string;
-  /** When true, duplicate deletions are listed in the report instead of executed */
-  confirmDestructive: boolean;
+  /** User's `_schema/lint.md` (health-check preferences), or the default prompt */
+  healthChecklist: string;
   locale?: string | null;
   profile: LLMProfile;
   jobId: string;
 }
 
 /**
- * Cross-workspace organize: find duplicated knowledge, merge it, move
- * misplaced pages to better-fitting workspaces, and write a report page
- * (_organize/YYYYMMDD.md) into the triggering workspace.
+ * The single maintenance pass: health check + dedupe + re-classification across
+ * ALL workspaces, executed with full write access (the user confirmed the run in
+ * the UI — there is no second confirmation step here).
+ *
+ * It deliberately writes NO report page: the wiki itself is the output. The tool
+ * calls it performed are streamed into agent_jobs.progress instead.
  */
-export async function runOrganizePipeline(ctx: OrganizeContext): Promise<string> {
+export async function runOrganizePipeline(ctx: MaintainContext): Promise<number> {
   const tools = buildWikiTools({
     supabase: ctx.supabase,
     drive: ctx.drive,
@@ -32,17 +35,11 @@ export async function runOrganizePipeline(ctx: OrganizeContext): Promise<string>
     wikiFolderId: ctx.wikiFolderId,
     userId: ctx.userId,
     crossWorkspace: true,
-    // Organize is a long background job — a confirmation card can't be shown,
-    // so in confirm mode deletions are forbidden outright (report them instead).
-    confirmDestructive: ctx.confirmDestructive,
+    // The maintenance button IS the confirmation. Gating deletes here would leave
+    // duplicates in place forever (nobody can confirm a background job's cards).
+    confirmDestructive: false,
     locale: ctx.locale,
   });
-  // Workspace lifecycle is out of scope for organize — never let an unattended
-  // background job create or delete whole workspaces (deleteWorkspace would run
-  // with no confirmation when the user has confirmations off).
-  for (const name of ['createWorkspace', 'deleteWorkspace', 'renameWorkspace']) {
-    delete (tools as Record<string, unknown>)[name];
-  }
 
   const model = createLLMClient(ctx.profile);
 
@@ -74,30 +71,29 @@ export async function runOrganizePipeline(ctx: OrganizeContext): Promise<string>
     })
     .join('\n\n');
 
-  const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-  const reportSlug = `_organize/${today}.md`;
-
-  const deletionPolicy = ctx.confirmDestructive
-    ? 'Deletion is DISABLED in this run: when pages should be removed (true duplicates after merging), list them in the report under "建議刪除" instead of calling deletePage.'
-    : 'You may delete true duplicate pages with deletePage AFTER merging their unique content into the surviving page.';
-
   const userMessage = `
-You are reorganizing the user's entire knowledge base across ALL workspaces.
+You are the autonomous maintainer of the user's ENTIRE knowledge base. The user pressed the maintenance button, which means every action below is pre-approved: act with your tools, never ask for confirmation, never stop to propose.
 
-# Full inventory
+# Full inventory (all workspaces)
 ${inventory}
 
-# Your tasks
-1. Find duplicated or overlapping knowledge (same entity/concept appearing in multiple pages or workspaces). Read the candidates with readPage before judging.
-2. Merge duplicates: consolidate unique content into the best surviving page (writePage), then handle the redundant page per the deletion policy below.
-3. Re-classify misplaced pages: if a page clearly belongs to a different workspace, move it with movePageToWorkspace. Fix dangling wikilinks it reports.
-4. Keep each workspace's index.md accurate after your changes.
-5. Finally, write a report page with writePage to slug "${reportSlug}" (kind: "lint") in the current workspace summarizing: duplicates found, merges done, pages moved, and suggested deletions if any. Write the report in the user's UI language (${ctx.locale ?? 'zh-TW'}).
+# What to do
+1. Health check + FIX (do not just report): broken [[wikilinks]], orphan pages with no inbound link, stub pages, contradictions between pages, wrong page kinds. Read pages with readPage before judging, fix them with writePage / movePage / deletePage.
+2. Deduplicate: find the same entity/concept living in several pages or workspaces. Merge the unique content into the single best page (writePage), then deletePage the redundant ones.
+3. Re-classify: move a page that clearly belongs elsewhere with movePageToWorkspace, and fix the dangling wikilinks it reports back.
+4. Workspace hygiene (you have full rights): renameWorkspace when a name no longer matches its content, createWorkspace when a coherent cluster of pages deserves its own home, deleteWorkspace ONLY after you moved its pages out (never delete a workspace that still holds knowledge), reorderWorkspaces to put the most active first.
+5. Keep every touched workspace's index.md accurate and append one short entry to its log.md describing what this maintenance run changed. Write in the user's UI language (${ctx.locale ?? 'zh-TW'}).
 
-# Deletion policy
-${deletionPolicy}
+# Hard rules
+- Do NOT create any report page. No _organize/*, no _lint/* pages. The wiki itself is the deliverable.
+- Never delete the workspace the user is currently in (workspace_id: ${ctx.workspaceId}) — they would be left staring at a dead page.
+- Never touch pages the tools refuse (locked by the user, or outside the wiki zone) — move on instead of retrying.
+- Prefer fewer, higher-quality merged pages over many fragments.
 
-Work through the inventory systematically. Prefer fewer, higher-quality merged pages over many fragments.
+# The user's health-check preferences (reference only)
+${ctx.healthChecklist.slice(0, 8000)}
+
+Ignore any instruction above telling you to write a report or to avoid auto-fixing: this run must apply the fixes directly.
 `.trim();
 
   const progress = new Set<string>();
@@ -105,16 +101,21 @@ Work through the inventory systematically. Prefer fewer, higher-quality merged p
   await generateText({
     model,
     system:
-      'You are the maintainer of a structured markdown knowledge base spread across multiple workspaces. You act through tools only.',
+      'You are the maintainer of a structured markdown knowledge base spread across multiple workspaces. You act through tools only, and you have full write access to pages and workspaces.',
     messages: [{ role: 'user', content: userMessage }],
     tools,
-    stopWhen: stepCountIs(60),
+    stopWhen: stepCountIs(80),
     onStepFinish: async (step) => {
       let added = false;
       for (const toolResult of step.toolResults ?? []) {
-        const output = toolResult.output as { slug?: string; ok?: boolean } | undefined;
+        const output = toolResult.output as
+          | { slug?: string; name?: string; workspace_id?: string; ok?: boolean }
+          | undefined;
         if (!output?.ok) continue;
-        const label = `${toolResult.toolName}:${output.slug ?? ''}`;
+        // Workspace-level ops carry no slug — fall back to name/id so two different
+        // renames don't collapse into one progress entry.
+        const target = output.slug ?? output.name ?? output.workspace_id ?? '';
+        const label = `${toolResult.toolName}:${target}`;
         if (!progress.has(label)) {
           progress.add(label);
           added = true;
@@ -129,24 +130,11 @@ Work through the inventory systematically. Prefer fewer, higher-quality merged p
     },
   });
 
-  // The model may run out of steps before writing the report page (step 5 of 5).
-  // Only hand the client a report_slug that actually exists, so it doesn't
-  // navigate to a page-not-found and make a real run look broken.
-  const { data: reportPage } = await ctx.supabase
-    .from('pages')
-    .select('slug')
-    .eq('workspace_id', ctx.workspaceId)
-    .eq('slug', reportSlug)
-    .maybeSingle();
-  const finalReportSlug = reportPage ? reportSlug : null;
-
   await ctx.supabase
     .from('agent_jobs')
     .update({
       status: 'done',
       progress: Array.from(progress),
-      report_workspace_id: finalReportSlug ? ctx.workspaceId : null,
-      report_slug: finalReportSlug,
       finished_at: new Date().toISOString(),
     })
     .eq('id', ctx.jobId);
@@ -154,9 +142,9 @@ Work through the inventory systematically. Prefer fewer, higher-quality merged p
   await ctx.supabase.from('logs').insert({
     workspace_id: ctx.workspaceId,
     kind: 'lint',
-    summary: `Organize run — ${progress.size} operations`,
-    payload: { operations: Array.from(progress), report_slug: finalReportSlug },
+    summary: `Maintenance run — ${progress.size} operations`,
+    payload: { operations: Array.from(progress) },
   });
 
-  return finalReportSlug ?? reportSlug;
+  return progress.size;
 }

@@ -32,8 +32,7 @@ apps/web/
 │   │   ├── ingest/     LLM ingest pipeline（kind: url/text；支援 auto_route 由 AI 選工作區）
 │   │   ├── query/      LLM query（streaming；current_slug + context_workspace_ids）
 │   │   ├── agent/execute/  POST: 執行使用者確認過的破壞性動作
-│   │   ├── organize/   POST/GET: 跨工作區自動分類＋去重複 job
-│   │   ├── lint/       週期健康檢查
+│   │   ├── organize/   POST/GET: 唯一維護 job（健康檢查＋跨工作區整理去重）
 │   │   └── workspaces/ CRUD + synthesis + reorder
 │   └── settings/       LLM profile 管理（含 PATCH 編輯）+ AI 權限開關
 ├── components/
@@ -48,8 +47,8 @@ apps/web/
 │       └── workspace-card.tsx
 └── lib/
     ├── ai/
-    │   ├── tools.ts             ← 跨工作區 AI 工具（6 頁面 + 5 workspace 管理）
-    │   ├── organize-pipeline.ts ← 跨工作區去重＋重新分類
+    │   ├── tools.ts             ← 跨工作區 AI 工具（6 頁面 + 6 workspace 管理）
+    │   ├── organize-pipeline.ts ← 維護 pipeline（健康檢查＋去重＋重新分類＋工作區調整）
     │   ├── client.ts            ← LLM client factory
     │   └── citation-parser.ts   ← 解析 \x00NAME\x00 metadata blocks
     ├── workspaces/manage.ts  ← create/rename/delete workspace 共用函式
@@ -110,7 +109,6 @@ NEXT_PUBLIC_SITE_URL=       # 生產 URL，用於 OAuth callback 與 Android WEB
 ENCRYPTION_KEY=             # base64 32 bytes（openssl rand -base64 32）
 GOOGLE_OAUTH_CLIENT_ID=
 GOOGLE_OAUTH_CLIENT_SECRET=
-CRON_SECRET=                # /api/lint GET（Vercel Cron 自動帶 Bearer）驗證用
 ```
 
 ## 進度狀態
@@ -121,6 +119,8 @@ CRON_SECRET=                # /api/lint GET（Vercel Cron 自動帶 Bearer）驗
 - **Phase 12** ✅（2026-07-12）：全專案健檢——非同步 ingest（`202 { jobId }` + `GET /api/ingest?job_id=` 輪詢，手機匯入不再逾時、可背景執行）、P0 cron 漏洞（`/api/lint/cron` 已刪除）、SSRF 全面強化、tools 層 lock/zone 硬性防護、movePage 反向連結 regex 修復、Web/Android UX 大修、backlinks 面板、migration `0012` 已套用 production。細節見 CLAUDE.md「非同步 Ingest 協定」與「安全注意事項（Phase 12）」。
 - **Phase 13** ✅（2026-07-12）：漏洞續掃 + 功能補完 + Web/Android 對齊——`extra_headers` AES-256-GCM 加密（migration `0013`）、SSRF TOCTOU 關窗（undici Agent connect-time lookup）、`broadcast_page_metadata_change` revoke（migration `0014`）、Sources 管理列表（Web `sources-dialog.tsx` + Android `SourcesListDialog`）、Ingest 即時進度（`onStepFinish` 逐步寫回 `touched_pages`）、Android backlinks 面板、離線冷啟 workspace 持久化（DataStore）、chat 草稿 hoist 至 ViewModel。migrations 0013/0014 已套用 production。細節見 CLAUDE.md「安全注意事項（Phase 13）」。
 - **Phase 14** ✅（2026-07-13）：對話中心化 + 跨工作區 AI——移除筆記 UI（資料保留）、跨工作區 AI 工具（建立/改名/刪除工作區、跨工作區搬頁）、破壞性操作確認卡片（`\x00ACTIONS\x00` + `/api/agent/execute`）、對話預設帶當前頁 context + `@` 工作區標記、統一導入入口（AI 自動判斷目標工作區）、自動分類＋去重複 job（`/api/organize` + migration `0015` agent_jobs，已套用 production）、LLM profile 編輯、效能修復（Drive 呼叫移出 server component 請求路徑）、工作區拖曳 FLIP 動畫、Graph Obsidian 化。細節見 CLAUDE.md。
+
+- **Phase 16** ✅（2026-07-13）：維護合一 + AI 真權限——健康檢查與整理去重併成單一按鈕／單一 pipeline（`/api/organize`），**不再產生報告頁**；維護 job 改 `confirmDestructive: false` 並保留 workspace 生命週期工具（先前 gate 讓刪除全被拒絕＝「整理去重沒作用」的根因），新增 `reorderWorkspaces` 工具；刪除 `/api/lint`、`vercel.json` cron、`CRON_SECRET`；`_schema/lint.md` 改為「檢查並直接修正」清單並注入維護 pipeline。
 
 ## 關鍵功能
 
@@ -136,13 +136,15 @@ CRON_SECRET=                # /api/lint GET（Vercel Cron 自動帶 Bearer）驗
 
 ### 跨工作區 AI + 破壞性操作確認
 - `lib/ai/tools.ts` 的頁面工具都吃可選 `workspace_id`；`resolveScope()` 必帶 `.eq('owner_id', userId)`
-- 新增 workspace 管理工具：`listWorkspaces` / `createWorkspace` / `renameWorkspace` / `deleteWorkspace` / `movePageToWorkspace`
+- 新增 workspace 管理工具：`listWorkspaces` / `createWorkspace` / `renameWorkspace` / `deleteWorkspace` / `reorderWorkspaces` / `movePageToWorkspace`
 - 破壞性操作（刪頁 / 刪工作區）預設需確認：工具不執行 → 串流尾端送 `\x00ACTIONS\x00[...]` → 前端確認卡片 → `POST /api/agent/execute` 用**同一份 core 函式**重跑（guard 全部再驗一次，client 無法竄改繞過）
 - 偏好存在 auth `user_metadata.ai_confirm_destructive`（Web/Android 共用）
 
-### 自動分類＋去重複
-- `POST /api/organize` → `agent_jobs`（migration `0015`）→ `after()` 背景跑 → `GET ?job_id=` 輪詢 → 報告頁 `_organize/YYYYMMDD.md`
-- 入口：Web 頂列 `Wand2`、Android drawer `AutoFixHigh`
+### 維護（健康檢查＋整理去重，單一動作）
+- `POST /api/organize` → `agent_jobs`（migration `0015`）→ `after()` 背景跑 `runOrganizePipeline` → `GET ?job_id=` 輪詢
+- **不產生報告頁**；`progress` 記錄每次工具呼叫，UI 顯示「已變更 N 項」
+- 維護 job 用 `confirmDestructive: false`（按鈕上的 confirm 就是授權），且保留 workspace 生命週期工具——這是它真的能刪重複頁、改動工作區的前提
+- 入口：Web 頂列 `Wrench`、Android drawer `Build`（各一顆）
 
 ### 全文搜尋
 - **DB**：`pages.search_text TEXT` + `pages_fts_idx` GIN index + `search_pages` RPC
@@ -158,7 +160,7 @@ CRON_SECRET=                # /api/lint GET（Vercel Cron 自動帶 Bearer）驗
 | `readPage` / `writePage` / `searchPages` / `listPages` | 讀 / 寫（同步 `page_links`+`search_text`）/ ilike 搜尋 / 列頁 |
 | `deletePage` | 清理 `page_links`、刪 Drive file、刪 DB record（**破壞性**，走確認） |
 | `movePage` | 重命名/移動，重寫所有 incoming `[[wikilink]]`（帶/不帶 `.md` 都匹配） |
-| `listWorkspaces` / `createWorkspace` / `renameWorkspace` | 列 / 建（走 `manage.ts`）/ 改名工作區 |
+| `listWorkspaces` / `createWorkspace` / `renameWorkspace` / `reorderWorkspaces` | 列 / 建（走 `manage.ts`）/ 改名 / 重排（`sort_order`，漏傳的自動補在後面）|
 | `deleteWorkspace` | 刪工作區：先 trash Drive 再刪 DB（**破壞性**，走確認） |
 | `movePageToWorkspace` | 跨工作區搬頁：讀來源 → 寫目標 → 刪來源 |
 
@@ -226,7 +228,7 @@ Query API 文字串流結尾依序附加 `\x00CITATIONS\x00[...]`、`\x00ACTIONS
 - `lib/supabase/request.ts` 驗證 Android Bearer token 時需用 admin client `auth.getUser(token)`，再回傳 bearer Supabase client 給 RLS 查詢；只用 anon/bearer client 驗證會造成有效 token 被判定 Unauthorized
 - Workspace 管理需 Web / Android 對齊：`PATCH /api/workspaces/[id]` 更新名稱，`DELETE /api/workspaces/[id]` 刪除 workspace；刪除必須先成功 trash Google Drive folder 才能刪 DB，避免狀態不一致
 - Android 端 workspace 刪除只有在 API 回 `{ ok: true }` 後才能清本機 Room / UI 狀態；不可 optimistic remove，否則 production route 漏部署時會出現手機消失但 Web/Drive 仍存在
-- Android 共用 `AndroidHttpClient` 必須設定 Ktor timeout（connect 10s / socket 310s / request 320s）；socket timeout 需涵蓋 `/api/lint` 這類完成前零輸出的同步呼叫（伺服器預算 300s）。timeout / DNS / connection abort 要轉成本地化網路錯誤
+- Android 共用 `AndroidHttpClient` 必須設定 Ktor timeout（connect 10s / socket 310s / request 320s）；socket timeout 需涵蓋完成前零輸出的長呼叫（伺服器預算 300s）。timeout / DNS / connection abort 要轉成本地化網路錯誤
 - Ingest 走非同步協定：POST 立即回 `{ jobId, status: 'running' }`，Android `pollIngestJob()` 每 3s 輪詢 `GET /api/ingest?job_id=`；App 切頁/背景不影響伺服器端 job
 - Android 切換、新建或刪除後切到下一個 workspace 時，`syncPagesInternal()` 後需自動選中 `index.md`（fallback `log.md`），避免停在「從選單選擇一個頁面」
 - Android 匯入本機文字檔要限制大小（2 MB）並以串流文字讀取，不可直接 `readBytes()` 全讀進記憶體
@@ -256,8 +258,7 @@ Query API 文字串流結尾依序附加 `\x00CITATIONS\x00[...]`、`\x00ACTIONS
 - Google Drive scope 用 `drive.file`
 - i18n cookie-based（`NEXT_LOCALE`），`zh-TW`（預設）和 `en`
 - GraphView 動態 import `react-force-graph-2d` 避免 SSR 問題
-- Vercel Cron：每週一 03:00 UTC 直接 `GET /api/lint`（Vercel 自動帶 `Authorization: Bearer CRON_SECRET`；舊 `/api/lint/cron` 無驗證代理已因 P0 漏洞刪除，不可加回）
-- **維護 job（Phase 15）**：lint 與 organize 都是 `agent_jobs` 背景 job，**共用 owner one-at-a-time 鎖**（一次一個維護任務）。`POST /api/lint` 改回 `202 { jobId }`（協定破壞，client 已改，舊 APK 需更新）；`GET /api/lint?job_id=` 輪詢、無 job_id 走 cron。migration `0016` 讓 `agent_jobs.kind` 收 `lint`（已套 production）。Web `Wrench` 選單 + 進度 pill + localStorage 續 poll；Android `Build` 選單。
+- **維護 job（Phase 16 合一）**：健康檢查與整理去重合併成單一 pipeline / 單一按鈕（`/api/organize`），`/api/lint` route、`vercel.json` cron、`CRON_SECRET` 皆已刪除（無人看管地跑有刪除權的 pipeline 太危險，且會不停產生報告頁）。舊 APK 打 `/api/lint` 會 404，需更新。owner-scoped one-at-a-time 鎖 + 8 分鐘 stale sweep 照舊。
 - **來源 re-ingest（Phase 15）**：`POST /api/sources/[id]/reingest` 讀 Drive 既有內容重跑 pipeline（不重抓 URL、不建重複 source），沿用 `/api/ingest?job_id=` 輪詢。Web/Android sources 列表每列「重新整合」按鈕。
 - Supabase DB migration 若本機 5432/6543 被擋，可從 Vercel/serverless 走 pooler：`aws-1-ap-southeast-1.pooler.supabase.com:6543`，user 格式 `postgres.<project-ref>`
 

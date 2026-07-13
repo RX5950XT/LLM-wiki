@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse, after } from 'next/server';
 import { z } from 'zod';
-import { findFile } from '@/lib/drive/client';
+import { findFile, readDriveFile } from '@/lib/drive/client';
 import { getRequestUser } from '@/lib/supabase/request';
 import {
   createDriveClientForUser,
@@ -9,6 +9,7 @@ import {
 } from '@/lib/google/drive-auth';
 import { runOrganizePipeline } from '@/lib/ai/organize-pipeline';
 import { resolveUiLocaleFromRequest } from '@/lib/i18n/ui-locale';
+import { getDefaultPrompt } from '@llm-wiki/prompts';
 
 export const maxDuration = 300;
 
@@ -116,6 +117,19 @@ export async function POST(request: NextRequest) {
   );
   if (!wikiFolderId) return NextResponse.json({ error: 'Wiki folder not found' }, { status: 500 });
 
+  // The health-check half of maintenance follows the user's own _schema/lint.md
+  const schemaFolderId = await findFile(
+    drive,
+    '_schema',
+    workspace.drive_folder_id,
+    'application/vnd.google-apps.folder',
+  );
+  let healthChecklist = getDefaultPrompt('lint', locale);
+  if (schemaFolderId) {
+    const lintFileId = await findFile(drive, 'lint.md', schemaFolderId);
+    if (lintFileId) healthChecklist = await readDriveFile(drive, lintFileId);
+  }
+
   const { data: job } = await supabase
     .from('agent_jobs')
     .insert({
@@ -126,9 +140,7 @@ export async function POST(request: NextRequest) {
     })
     .select('id')
     .single();
-  if (!job) return NextResponse.json({ error: 'Failed to create organize job' }, { status: 500 });
-
-  const confirmDestructive = user.user_metadata?.ai_confirm_destructive !== false;
+  if (!job) return NextResponse.json({ error: 'Failed to create maintenance job' }, { status: 500 });
 
   after(async () => {
     try {
@@ -138,7 +150,7 @@ export async function POST(request: NextRequest) {
         userId: user.id,
         workspaceId: workspace.id,
         wikiFolderId,
-        confirmDestructive,
+        healthChecklist,
         locale,
         profile: profile as Parameters<typeof runOrganizePipeline>[0]['profile'],
         jobId: job.id,

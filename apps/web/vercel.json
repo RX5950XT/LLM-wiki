@@ -1,8 +1,0 @@
-{
-  "crons": [
-    {
-      "path": "/api/lint",
-      "schedule": "0 3 * * 1"
-    }
-  ]
-}

@@ -120,10 +120,8 @@ data class WikiUiState(
     val taggedWorkspaceIds: List<String> = emptyList(),
     /** "已導入到 X" notice after an auto-routed ingest */
     val ingestRoutedName: String? = null,
-    /** Shared flag for the background maintenance job (health check OR organize) */
+    /** The background maintenance job (health check + dedupe) is running */
     val organizeRunning: Boolean = false,
-    /** Which maintenance job is running: "lint" | "organize" | null */
-    val maintenanceKind: String? = null,
     /** Source id currently being re-ingested (null = none) */
     val reingestingSourceId: String? = null,
 )
@@ -814,35 +812,28 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** Cross-workspace auto-classify + dedupe (async job, mirrors the Web organize action). */
-    fun runOrganize(onDone: (Boolean) -> Unit = {}) = runMaintenance("organize", onDone)
-
-    /** Wiki health check (async job — the server now runs it in the background like organize). */
-    fun runLint(onDone: (Boolean) -> Unit = {}) = runMaintenance("lint", onDone)
-
     /**
-     * Run a background maintenance job (health check or organize). Both live in
-     * agent_jobs and share the poll protocol + one-at-a-time lock; the server
-     * keeps running even if the app leaves the foreground.
+     * The single maintenance job: health check + dedupe/re-classification across all
+     * workspaces (POST /api/organize). It rewrites the wiki directly — no report page —
+     * and keeps running server-side even if the app leaves the foreground.
      */
-    private fun runMaintenance(kind: String, onDone: (Boolean) -> Unit = {}) {
+    fun runMaintenance(onDone: (Boolean) -> Unit = {}) {
         val wsId = workspaceId.value ?: return
         if (_uiState.value.organizeRunning) return
-        val endpoint = if (kind == "lint") "/api/lint" else "/api/organize"
-        val failMsg = if (kind == "lint") str(R.string.error_op_lint) else str(R.string.error_op_organize)
+        val failMsg = str(R.string.error_op_organize)
         viewModelScope.launch {
-            _uiState.update { it.copy(organizeRunning = true, maintenanceKind = kind, syncError = null) }
+            _uiState.update { it.copy(organizeRunning = true, syncError = null) }
             try {
                 val bodyJson = buildJsonObject { put("workspace_id", wsId) }.toString()
                 val response = sendAuthorizedRequest { accessToken ->
-                    AndroidHttpClient.instance.post(webApiUrl(endpoint)) {
+                    AndroidHttpClient.instance.post(webApiUrl("/api/organize")) {
                         header("Authorization", "Bearer $accessToken")
                         header("x-llm-wiki-locale", currentUiLocale())
                         contentType(ContentType.Application.Json)
                         setBody(bodyJson)
                     }
                 } ?: run {
-                    _uiState.update { it.copy(organizeRunning = false, maintenanceKind = null, syncError = unauthorizedMessage()) }
+                    _uiState.update { it.copy(organizeRunning = false, syncError = unauthorizedMessage()) }
                     onDone(false)
                     return@launch
                 }
@@ -851,7 +842,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                 val jobId = bodyJsonObj?.get("jobId")?.jsonPrimitive?.contentOrNull
                 if (response.status.value !in 200..299 || jobId == null) {
                     _uiState.update {
-                        it.copy(organizeRunning = false, maintenanceKind = null, syncError = parseApiError(text, failMsg))
+                        it.copy(organizeRunning = false, syncError = parseApiError(text, failMsg))
                     }
                     onDone(false)
                     return@launch
@@ -861,7 +852,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                 while (System.currentTimeMillis() < deadline) {
                     delay(3_000)
                     val poll = sendAuthorizedRequest { accessToken ->
-                        AndroidHttpClient.instance.get(webApiUrl("$endpoint?job_id=$jobId")) {
+                        AndroidHttpClient.instance.get(webApiUrl("/api/organize?job_id=$jobId")) {
                             header("Authorization", "Bearer $accessToken")
                         }
                     } ?: continue
@@ -870,31 +861,29 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                     val obj = apiJson.parseToJsonElement(pollText).jsonObject
                     when (obj["status"]?.jsonPrimitive?.contentOrNull) {
                         "done" -> {
-                            val reportSlug = obj["report_slug"]?.jsonPrimitive?.contentOrNull
                             syncPagesInternal(wsId, forceSync = true)
-                            if (!reportSlug.isNullOrBlank()) {
-                                db.pageDao().getPage(wsId, accountName, reportSlug)?.let(::selectPage)
-                            }
-                            _uiState.update { it.copy(organizeRunning = false, maintenanceKind = null, syncError = null) }
+                            // Maintenance may rename / create / delete / reorder workspaces
+                            refreshWorkspaces(syncSelected = false)
+                            _uiState.update { it.copy(organizeRunning = false, syncError = null) }
                             onDone(true)
                             return@launch
                         }
                         "failed" -> {
                             val err = obj["error"]?.jsonPrimitive?.contentOrNull
                                 ?.takeIf { it.isNotBlank() } ?: failMsg
-                            _uiState.update { it.copy(organizeRunning = false, maintenanceKind = null, syncError = err) }
+                            _uiState.update { it.copy(organizeRunning = false, syncError = err) }
                             onDone(false)
                             return@launch
                         }
                     }
                 }
                 _uiState.update {
-                    it.copy(organizeRunning = false, maintenanceKind = null, syncError = str(R.string.error_network_timeout))
+                    it.copy(organizeRunning = false, syncError = str(R.string.error_network_timeout))
                 }
                 onDone(false)
             } catch (e: Exception) {
                 _uiState.update {
-                    it.copy(organizeRunning = false, maintenanceKind = null, syncError = e.toUserFacingMessage(failMsg))
+                    it.copy(organizeRunning = false, syncError = e.toUserFacingMessage(failMsg))
                 }
                 onDone(false)
             }

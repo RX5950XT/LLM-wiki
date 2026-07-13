@@ -74,8 +74,6 @@
     <string name="wiki_search_placeholder">搜尋頁面…</string>
     <string name="wiki_search_close">關閉搜尋</string>
     <string name="wiki_search_empty">找不到結果</string>
-    <string name="wiki_lint">執行 Wiki 健康檢查</string>
-    <string name="wiki_lint_started">已開始執行 Wiki 健康檢查</string>
     <string name="wiki_create_note">新增筆記</string>
     <string name="wiki_create_note_hint">先建立一個新頁面，再用 Markdown 編輯內容。</string>
     <string name="wiki_note_created">已建立筆記</string>
@@ -89,14 +87,11 @@
     <string name="wiki_ingest_target_auto">自動判斷工作區（AI）</string>
     <string name="wiki_ingest_target_current">目前工作區</string>
     <string name="wiki_ingest_routed">已導入到「%1$s」</string>
-    <string name="wiki_organize_action">自動分類＋去重複</string>
-    <string name="wiki_organize_confirm_title">自動分類＋去重複</string>
-    <string name="wiki_organize_confirm_body">將掃描你的全部工作區，合併重複知識並把放錯位置的頁面歸位，完成後產生報告頁。過程可能需要數分鐘，確定執行？</string>
-    <string name="wiki_organize_running">整理中…</string>
-    <string name="wiki_organize_done">自動整理完成</string>
-    <string name="wiki_maintenance">維護</string>
-    <string name="wiki_health_check">健康檢查</string>
-    <string name="wiki_lint_running">健康檢查進行中…</string>
+    <string name="wiki_maintenance">整理知識庫</string>
+    <string name="wiki_maintenance_confirm_title">整理知識庫</string>
+    <string name="wiki_maintenance_confirm_body">AI 將掃描你的全部工作區，直接修正失效連結與矛盾、合併重複知識、把放錯位置的頁面歸位，必要時也會改動工作區（重新命名／建立／刪除空工作區）。這些改動會實際寫入，過程可能需要數分鐘。確定執行？</string>
+    <string name="wiki_maintenance_running">整理知識庫中…</string>
+    <string name="wiki_maintenance_done">知識庫整理完成</string>
     <string name="wiki_maintenance_background_hint">可離開此畫面，任務會在背景繼續執行</string>
     <string name="chat_tag_workspace">標記工作區作為上下文</string>
     <string name="chat_confirm_action">確認執行</string>
@@ -192,7 +187,6 @@
     <string name="error_op_query">查詢失敗</string>
     <string name="error_op_ingest">匯入失敗</string>
     <string name="error_op_load_sources">載入來源清單失敗</string>
-    <string name="error_op_lint">健康檢查失敗</string>
     <string name="error_op_sync">同步失敗</string>
     <string name="error_op_lock">更新頁面鎖定失敗</string>
     <string name="error_op_synthesis">儲存整合頁失敗</string>

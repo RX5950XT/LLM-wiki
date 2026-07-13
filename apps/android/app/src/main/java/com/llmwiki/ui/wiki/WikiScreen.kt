@@ -42,7 +42,6 @@ import androidx.compose.material.icons.automirrored.filled.Help
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.AttachFile
-import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.ChatBubbleOutline
 import androidx.compose.material.icons.filled.Check
@@ -53,7 +52,6 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Science
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SmartToy
@@ -158,8 +156,7 @@ fun WikiScreen(
     var showWorkspaceMenu by remember { mutableStateOf(false) }
     var showHelpDialog by rememberSaveable { mutableStateOf(false) }
     var showSourcesDialog by rememberSaveable { mutableStateOf(false) }
-    var showOrganizeConfirm by rememberSaveable { mutableStateOf(false) }
-    var showMaintenanceMenu by remember { mutableStateOf(false) }
+    var showMaintenanceConfirm by rememberSaveable { mutableStateOf(false) }
     var renameWorkspace by remember { mutableStateOf<WorkspaceRow?>(null) }
     var deleteWorkspace by remember { mutableStateOf<WorkspaceRow?>(null) }
     var inlineEditorPageSlug by rememberSaveable { mutableStateOf<String?>(null) }
@@ -460,41 +457,20 @@ fun WikiScreen(
                             contentDescription = stringResource(R.string.sources_title),
                         )
                     }
-                    Box {
-                        IconButton(
-                            onClick = { showMaintenanceMenu = true },
-                            enabled = !uiState.organizeRunning,
-                        ) {
-                            if (uiState.organizeRunning) {
-                                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                            } else {
-                                Icon(
-                                    Icons.Default.Build,
-                                    contentDescription = stringResource(R.string.wiki_maintenance),
-                                )
-                            }
-                        }
-                        DropdownMenu(
-                            expanded = showMaintenanceMenu,
-                            onDismissRequest = { showMaintenanceMenu = false },
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.wiki_health_check)) },
-                                leadingIcon = { Icon(Icons.Default.Science, contentDescription = null) },
-                                onClick = {
-                                    showMaintenanceMenu = false
-                                    scope.launch { drawerState.close() }
-                                    wikiViewModel.runLint()
-                                },
-                            )
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.wiki_organize_action)) },
-                                leadingIcon = { Icon(Icons.Default.AutoFixHigh, contentDescription = null) },
-                                onClick = {
-                                    showMaintenanceMenu = false
-                                    showOrganizeConfirm = true
-                                    scope.launch { drawerState.close() }
-                                },
+                    // Single maintenance action: health check + dedupe in one pass
+                    IconButton(
+                        onClick = {
+                            showMaintenanceConfirm = true
+                            scope.launch { drawerState.close() }
+                        },
+                        enabled = !uiState.organizeRunning,
+                    ) {
+                        if (uiState.organizeRunning) {
+                            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                        } else {
+                            Icon(
+                                Icons.Default.Build,
+                                contentDescription = stringResource(R.string.wiki_maintenance),
                             )
                         }
                     }
@@ -699,11 +675,7 @@ fun WikiScreen(
                             )
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = if (uiState.maintenanceKind == "lint") {
-                                        stringResource(R.string.wiki_lint_running)
-                                    } else {
-                                        stringResource(R.string.wiki_organize_running)
-                                    },
+                                    text = stringResource(R.string.wiki_maintenance_running),
                                     color = MaterialTheme.colorScheme.onSecondaryContainer,
                                     style = MaterialTheme.typography.bodySmall,
                                 )
@@ -856,18 +828,18 @@ fun WikiScreen(
         )
     }
 
-    if (showOrganizeConfirm) {
+    if (showMaintenanceConfirm) {
         AlertDialog(
-            onDismissRequest = { showOrganizeConfirm = false },
-            title = { Text(stringResource(R.string.wiki_organize_confirm_title)) },
-            text = { Text(stringResource(R.string.wiki_organize_confirm_body)) },
+            onDismissRequest = { showMaintenanceConfirm = false },
+            title = { Text(stringResource(R.string.wiki_maintenance_confirm_title)) },
+            text = { Text(stringResource(R.string.wiki_maintenance_confirm_body)) },
             confirmButton = {
                 Button(onClick = {
-                    showOrganizeConfirm = false
-                    wikiViewModel.runOrganize { success ->
+                    showMaintenanceConfirm = false
+                    wikiViewModel.runMaintenance { success ->
                         if (success) {
                             scope.launch {
-                                snackbarHostState.showSnackbar(context.getString(R.string.wiki_organize_done))
+                                snackbarHostState.showSnackbar(context.getString(R.string.wiki_maintenance_done))
                             }
                         }
                     }
@@ -876,7 +848,7 @@ fun WikiScreen(
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showOrganizeConfirm = false }) {
+                TextButton(onClick = { showMaintenanceConfirm = false }) {
                     Text(stringResource(R.string.action_cancel))
                 }
             },

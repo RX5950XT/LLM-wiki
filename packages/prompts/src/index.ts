@@ -97,57 +97,24 @@ sources: [source-id-1, source-id-2]
 `,
     lint: `# 健康檢查規則
 
-你正在審查 wiki 的結構健康，不是新增知識。
+按下「整理知識庫」時，AI 會依這份清單檢查所有工作區，並**直接修正**問題。
 
-## 要檢查的項目
+## 要檢查並修正的項目
 
-1. 矛盾
-2. 孤兒頁
-3. Stub：\`index.md\` 裡有列出但內容很薄的頁面
-4. 缺失概念
-5. 過時主張
-6. 壞掉的 wikilinks：\`[[links]]\`
-7. Zone 違規：例如 \`/notes/\` 被 LLM 改寫，或出現 \`updated_by: llm\`
+1. 壞掉的 wikilinks：\`[[link]]\` 指向不存在的頁面 → 改成正確 slug 或拿掉連結。
+2. 重複知識：同一個實體／概念散在多頁或多個工作區 → 合併到最完整的一頁，刪掉多餘頁。
+3. 矛盾：兩頁對同一件事說法衝突 → 併成單一正確說法。
+4. 孤兒頁：沒有任何頁連進來 → 從相關頁或 \`index.md\` 補上連結。
+5. Stub：內容過薄的頁 → 併進更合適的頁，或補完。
+6. 錯置：頁面明顯屬於別的工作區 → 搬過去。
+7. \`index.md\` 與 \`log.md\`：改完要保持正確，並在 \`log.md\` 追加一筆本次整理紀錄。
 
-## 流程
+## 規則
 
-1. 先讀 \`/wiki/index.md\`。
-2. 抽樣最多 30 頁。
-3. 跑完檢查。
-4. 在 \`/wiki/_lint/YYYY-MM-DD.md\` 產出繁體中文報告：
-
-\`\`\`markdown
----
-title: "健康檢查 YYYY-MM-DD"
-kind: lint
-created: YYYY-MM-DD
----
-
-# 健康檢查
-
-## 矛盾 ({n})
-- \`page-a.md\` vs \`page-b.md\`：...
-
-## 孤兒頁 ({n})
-- \`orphan-page.md\` — 建議從 \`[[parent]]\` 補連結
-
-## Stub ({n})
-- \`stub-page.md\` — 建議補強
-
-## 缺失概念 ({n})
-- "term" — 建議建立 \`concepts/term.md\`
-
-## 過時主張 ({n})
-- \`page.md\` 仍引用 \`sources/old.md\`，但 \`sources/new.md\` 說法不同
-
-## 壞掉的 wikilinks ({n})
-- \`page.md\` 指向 \`[[nonexistent]]\`
-
-## Zone 違規 ({n})
-- 若不為空要明確警示
-\`\`\`
-
-5. 不要自動修正，只寫報告。
+- 直接用工具修正，**不要產生報告頁**（不要建 \`_lint/\` 或 \`_organize/\`）。
+- \`locked_by_human: true\` 的頁面不可改。
+- 只能寫 \`wiki/\`；\`notes/\`、\`_schema/\`、\`sources/\` 不可寫。
+- 寧可少而精，不要留一堆碎片頁。
 `,
   },
   en: {
@@ -236,59 +203,26 @@ The user is asking a question against the wiki. Read the wiki itself and produce
 
 Reply in English while keeping \`[[wikilinks]]\`, slugs, code identifiers, and proper nouns in their original form when appropriate.
 `,
-    lint: `# Lint Schema
+    lint: `# Health Check Schema
 
-You are auditing the wiki for structural health, not adding new knowledge.
+When the user presses "Tidy knowledge base", the AI walks every workspace with this checklist and **fixes what it finds** directly.
 
-## Checks
+## Check and fix
 
-1. Contradictions
-2. Orphans
-3. Stubs: pages listed in \`index.md\` with very thin content
-4. Missing concepts
-5. Stale claims
-6. Broken wikilinks such as \`[[links]]\`
-7. Zone violations, for example the LLM writing into \`/notes/\`
+1. Broken wikilinks: \`[[link]]\` pointing at a page that does not exist → repair the slug or drop the link.
+2. Duplicated knowledge: the same entity/concept spread over several pages or workspaces → merge into the best page, delete the redundant ones.
+3. Contradictions: two pages disagreeing about the same thing → reconcile into one correct statement.
+4. Orphans: pages with no inbound link → link them from a related page or \`index.md\`.
+5. Stubs: very thin pages → merge them into a better home, or flesh them out.
+6. Misplaced pages: a page that clearly belongs to another workspace → move it there.
+7. Keep \`index.md\` accurate and append one \`log.md\` entry describing this run.
 
-## Workflow
+## Rules
 
-1. Read \`/wiki/index.md\`.
-2. Sample up to 30 pages.
-3. Run the checks.
-4. Write an English report to \`/wiki/_lint/YYYY-MM-DD.md\`:
-
-\`\`\`markdown
----
-title: "Lint report YYYY-MM-DD"
-kind: lint
-created: YYYY-MM-DD
----
-
-# Lint report
-
-## Contradictions ({n})
-- \`page-a.md\` vs \`page-b.md\`: ...
-
-## Orphans ({n})
-- \`orphan-page.md\` — suggest adding an inbound link from \`[[parent]]\`
-
-## Stubs ({n})
-- \`stub-page.md\` — candidate for expansion
-
-## Missing concepts ({n})
-- "term" — suggest creating \`concepts/term.md\`
-
-## Stale claims ({n})
-- \`page.md\` still cites \`sources/old.md\`, but \`sources/new.md\` says otherwise
-
-## Broken wikilinks ({n})
-- \`page.md\` references \`[[nonexistent]]\`
-
-## Zone violations ({n})
-- Flag loudly if this is not empty
-\`\`\`
-
-5. Do not auto-fix anything; only write the report.
+- Fix things with tools. **Never write a report page** (no \`_lint/\`, no \`_organize/\`).
+- Never modify pages with \`locked_by_human: true\`.
+- Write only under \`wiki/\`; \`notes/\`, \`_schema/\` and \`sources/\` are off limits.
+- Prefer fewer, higher-quality pages over many fragments.
 `,
   },
 };
