@@ -48,6 +48,20 @@
     "organizeRunning": "Organizing…",
     "organizeConfirm": "This scans ALL your workspaces, merges duplicated knowledge and moves misplaced pages, then writes a report page. It may take a few minutes. Continue?",
     "organizeFailed": "Organize failed",
+    "maintenance": "Maintenance",
+    "maintenanceMenu": "Maintenance tools",
+    "healthCheckItem": "Health check",
+    "healthCheckDesc": "Find dead links, orphan pages and contradictions",
+    "organizeItem": "Organize + dedupe",
+    "organizeDesc": "Merge duplicates and re-file pages across all workspaces",
+    "maintenanceRunningLint": "Health check running…",
+    "maintenanceRunningOrganize": "Organizing…",
+    "maintenanceBackgroundHint": "You can close this page — it keeps running in the background",
+    "maintenanceDoneLint": "Health check complete",
+    "maintenanceDoneOrganize": "Organize complete",
+    "maintenanceFailed": "Maintenance job failed",
+    "viewReport": "View report",
+    "dismiss": "Dismiss",
     "initFailed": "Auto-setup failed. Please try creating your workspace manually."
   },
   "wiki": {
@@ -77,6 +91,7 @@
     "zoneEmpty": "No pages yet.",
     "selectPage": "Select a page from the sidebar",
     "pageNotFound": "Page not found",
+    "linkedPageMissing": "This linked page doesn't exist yet. Ask the AI to create it in chat, or run a health check to clean up dead links.",
     "pageUpdated": "This page was updated",
     "refresh": "Refresh",
     "human": "Human",
@@ -129,7 +144,10 @@
     "empty": "No sources ingested yet",
     "statusDone": "{count} pages integrated",
     "statusRunning": "Ingesting…",
-    "statusFailed": "Ingest failed"
+    "statusFailed": "Ingest failed",
+    "reingest": "Re-run",
+    "reingesting": "Re-running…",
+    "reingestFailed": "Re-run failed"
   },
   "query": {
     "placeholder": "Ask your wiki anything...",

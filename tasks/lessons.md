@@ -1,5 +1,16 @@
 # Lessons
 
+## 2026-07-13 Phase 15 連結修復 + 維護整合 + 來源重跑
+
+- **髒資料的正解常常是讀取時 resolve，不是改資料**：225/600 dangling wiki link，直覺是寫 migration 清 `page_links`。但 `writePage` 會從內容重新 parse `[[...]]` 覆寫 `page_links`，清了又髒。真正的 root fix 是在**讀取咽喉點**（`GET /api/pages`）做 alias fallback——一次修所有 client、survives 重寫、零資料風險。動手清資料前先問「這份資料下次被誰重寫」。
+- **模糊比對只在唯一匹配時才動作**：alias fallback 若在 2+ 匹配時亂猜會把使用者導到錯的頁。先用 SQL 量化 collision（本例只有 1 筆），確認「唯一匹配才 resolve」安全再實作。0 或 2+ 一律回原本的 not-found。
+- **force-graph 對 dangling 邊生幽靈節點**：link 的 source/target 指向不存在的 node id 時，react-force-graph 會自動長出無標籤幽靈節點 → 圖「亂七八糟」。修法：client 端先把邊端點解析成真實 node id、解不到就濾掉（別把原始 `page_links` 直接餵進去）。
+- **同步 API 改 job 化＝協定破壞，一定回頭掃所有 caller**：`/api/lint` 從同步 `{ ok, reportSlug }` 改成 `202 { jobId }` 後，Android 舊的「HTTP 2xx 就當完成 + syncPages」邏輯會**假完成**（job 還在背景跑，頁面還沒更新）。改回應形狀時，grep 每一個 caller（Web + Android）逐一改成輪詢。
+- **一支 route 多用途要保護既有驗證分支**：`GET /api/lint` 同時服務「cron（Bearer CRON_SECRET）」與新的「job 輪詢（`?job_id=` 使用者驗證）」。用 query param 分流，且新分支不能繞過 cron 的 timingSafeEqual。
+- **共用 job 表 = 免費得到跨功能互斥鎖**：把 lint 放進 organize 既有的 `agent_jobs`（owner-scoped one-at-a-time guard，無 kind filter）後，「健康檢查」與「自動整理」自動變成「一次一個維護任務」，正好符合「兩顆按鈕整合成一顆」的語意，不用另寫鎖。
+- **「背景續跑」= server job + client 記 jobId**：job 本來就跑在 `after()`／server，關頁面不影響。使用者要的「關頁面持續運行」其實只差前端在 `localStorage` 記 `{kind, jobId}`，重載時還原並續 poll。別把「背景」誤解成要 service worker。
+- **來源 re-ingest 重用既有 pipeline，不重抓不重建**：失敗來源的原始內容已在 Drive（`drive_file_id`），re-ingest 只要讀回來 → 建新 job → 跑同一支 `runIngestPipeline`，沿用既有輪詢協定。不重新 fetch URL（避免 SSRF 面）、不建重複 source row（來源 immutable）。
+
 ## 2026-07-13 Phase 14 對話中心化 + 跨工作區 AI
 
 - **AI proposal 的 params 來自 client，執行端不可信任**：破壞性操作確認流程是「工具回 proposal → client 顯示卡片 → client 帶 params 回 execute route」。execute route 必須用 zod 白名單只收允許欄位、重新做 owner 檢查、並呼叫**與工具同一份 core 函式**（zone/lock/protected guard 才會全部再跑一次）。若信任回傳 params 或另寫一份執行邏輯，就能繞過所有防護。

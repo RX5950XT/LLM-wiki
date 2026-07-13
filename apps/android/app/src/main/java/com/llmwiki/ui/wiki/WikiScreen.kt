@@ -43,6 +43,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.AutoFixHigh
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.ChatBubbleOutline
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
@@ -52,6 +53,7 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Science
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SmartToy
@@ -157,6 +159,7 @@ fun WikiScreen(
     var showHelpDialog by rememberSaveable { mutableStateOf(false) }
     var showSourcesDialog by rememberSaveable { mutableStateOf(false) }
     var showOrganizeConfirm by rememberSaveable { mutableStateOf(false) }
+    var showMaintenanceMenu by remember { mutableStateOf(false) }
     var renameWorkspace by remember { mutableStateOf<WorkspaceRow?>(null) }
     var deleteWorkspace by remember { mutableStateOf<WorkspaceRow?>(null) }
     var inlineEditorPageSlug by rememberSaveable { mutableStateOf<String?>(null) }
@@ -457,19 +460,41 @@ fun WikiScreen(
                             contentDescription = stringResource(R.string.sources_title),
                         )
                     }
-                    IconButton(
-                        onClick = {
-                            showOrganizeConfirm = true
-                            scope.launch { drawerState.close() }
-                        },
-                        enabled = !uiState.organizeRunning,
-                    ) {
-                        if (uiState.organizeRunning) {
-                            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                        } else {
-                            Icon(
-                                Icons.Default.AutoFixHigh,
-                                contentDescription = stringResource(R.string.wiki_organize_action),
+                    Box {
+                        IconButton(
+                            onClick = { showMaintenanceMenu = true },
+                            enabled = !uiState.organizeRunning,
+                        ) {
+                            if (uiState.organizeRunning) {
+                                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                            } else {
+                                Icon(
+                                    Icons.Default.Build,
+                                    contentDescription = stringResource(R.string.wiki_maintenance),
+                                )
+                            }
+                        }
+                        DropdownMenu(
+                            expanded = showMaintenanceMenu,
+                            onDismissRequest = { showMaintenanceMenu = false },
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.wiki_health_check)) },
+                                leadingIcon = { Icon(Icons.Default.Science, contentDescription = null) },
+                                onClick = {
+                                    showMaintenanceMenu = false
+                                    scope.launch { drawerState.close() }
+                                    wikiViewModel.runLint()
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.wiki_organize_action)) },
+                                leadingIcon = { Icon(Icons.Default.AutoFixHigh, contentDescription = null) },
+                                onClick = {
+                                    showMaintenanceMenu = false
+                                    showOrganizeConfirm = true
+                                    scope.launch { drawerState.close() }
+                                },
                             )
                         }
                     }
@@ -672,11 +697,22 @@ fun WikiScreen(
                                 strokeWidth = 2.dp,
                                 color = MaterialTheme.colorScheme.onSecondaryContainer,
                             )
-                            Text(
-                                text = stringResource(R.string.wiki_organize_running),
-                                color = MaterialTheme.colorScheme.onSecondaryContainer,
-                                style = MaterialTheme.typography.bodySmall,
-                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = if (uiState.maintenanceKind == "lint") {
+                                        stringResource(R.string.wiki_lint_running)
+                                    } else {
+                                        stringResource(R.string.wiki_organize_running)
+                                    },
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                                Text(
+                                    text = stringResource(R.string.wiki_maintenance_background_hint),
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.75f),
+                                    style = MaterialTheme.typography.labelSmall,
+                                )
+                            }
                         }
                     }
                 }
@@ -917,6 +953,8 @@ fun WikiScreen(
         SourcesListDialog(
             sources = uiState.sources,
             isLoading = uiState.sourcesLoading,
+            reingestingSourceId = uiState.reingestingSourceId,
+            onReingest = { wikiViewModel.reingestSource(it) },
             onDismiss = { showSourcesDialog = false },
         )
     }
@@ -1747,6 +1785,8 @@ private fun ChatBubble(
 private fun SourcesListDialog(
     sources: List<SourceListItem>?,
     isLoading: Boolean,
+    reingestingSourceId: String?,
+    onReingest: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
     AlertDialog(
@@ -1793,15 +1833,39 @@ private fun SourcesListDialog(
                                     stringResource(R.string.sources_status_done, item.touchedCount)
                                 else -> stringResource(R.string.sources_status_running)
                             }
-                            Text(
-                                text = statusText,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = when {
-                                    item.jobStatus == "failed" -> MaterialTheme.colorScheme.error
-                                    item.source.ingestedAt != null -> MaterialTheme.colorScheme.primary
-                                    else -> MaterialTheme.colorScheme.onSurfaceVariant
-                                },
-                            )
+                            val isReingesting = reingestingSourceId == item.source.id
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = if (isReingesting) stringResource(R.string.sources_reingesting) else statusText,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = when {
+                                        isReingesting -> MaterialTheme.colorScheme.primary
+                                        item.jobStatus == "failed" -> MaterialTheme.colorScheme.error
+                                        item.source.ingestedAt != null -> MaterialTheme.colorScheme.primary
+                                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                    },
+                                    modifier = Modifier.weight(1f),
+                                )
+                                TextButton(
+                                    onClick = { onReingest(item.source.id) },
+                                    enabled = reingestingSourceId == null,
+                                ) {
+                                    if (isReingesting) {
+                                        CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                                    } else {
+                                        Icon(
+                                            Icons.Default.Refresh,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(14.dp),
+                                        )
+                                    }
+                                    Text(
+                                        text = stringResource(R.string.sources_reingest),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        modifier = Modifier.padding(start = 4.dp),
+                                    )
+                                }
+                            }
                             HorizontalDivider(Modifier.padding(top = 8.dp))
                         }
                     }

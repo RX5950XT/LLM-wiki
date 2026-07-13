@@ -39,6 +39,9 @@
     <string name="sources_status_done">%1$d pages integrated</string>
     <string name="sources_status_running">Ingesting…</string>
     <string name="sources_status_failed">Ingest failed</string>
+    <string name="sources_reingest">Re-run</string>
+    <string name="sources_reingesting">Re-running…</string>
+    <string name="sources_reingest_failed">Re-run failed</string>
     <string name="query_placeholder">Ask your wiki anything…</string>
     <string name="query_file_back">Save as synthesis page</string>
 
@@ -91,6 +94,10 @@
     <string name="wiki_organize_confirm_body">This scans ALL your workspaces, merges duplicated knowledge and moves misplaced pages, then writes a report page. It may take a few minutes. Continue?</string>
     <string name="wiki_organize_running">Organizing…</string>
     <string name="wiki_organize_done">Organize finished</string>
+    <string name="wiki_maintenance">Maintenance</string>
+    <string name="wiki_health_check">Health check</string>
+    <string name="wiki_lint_running">Health check running…</string>
+    <string name="wiki_maintenance_background_hint">You can leave this screen — it keeps running in the background</string>
     <string name="chat_tag_workspace">Tag a workspace as context</string>
     <string name="chat_confirm_action">Confirm</string>
     <string name="chat_proposal_delete_page">AI wants to delete page %1$s</string>

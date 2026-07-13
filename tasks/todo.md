@@ -1,66 +1,37 @@
-# 大改版：對話中心化 + 跨工作區 AI + UI 精修（2026-07-13）
+# 修復批次：連結 / 圖譜 / 來源 / 維護按鈕（2026-07-13）
 
-計畫全文：`C:\Users\rx595\.claude\plans\imperative-forging-corbato.md`
+使用者連續回報 5 項。診斷完成，依 root cause 分組。
 
-## A — 效能修復
-- [x] A1: `[wid]/page.tsx` drive_folder_id 併入 Promise.all + ensureWorkspaceSystemPages 改 after()
-- [x] A2: `settings/page.tsx` schema backfill 改 after()（樂觀渲染）
+## 診斷數據（production mjuciqffwayydobpxzcz）
+- 189 頁、600 page_links，**225 條 dangling（37.5%）**
+- dangling 拆解：126 條「格式不符但頁面存在」（缺 `concepts/` 前綴／大小寫／`.md`）、99 條真失連
+- 唯一可 alias 解析 35 個 distinct slug、1 個撞頁、68 個真失連
+- sources：49 筆，2 筆 ingest 失敗（要 re-ingest 入口）
+- lint route 是**同步** `await generateText`（關頁面即斷），organize 已是 job
 
-## B — LLM Profile 編輯
-- [x] B1: `/api/settings/profiles` 加 PATCH（api_key 留空保留、is_default 互斥、先驗 id owner）
-- [x] B2: Web ProfileList 編輯按鈕 + ProfileForm 預填模式
-- [x] B3: Android SettingsScreen/ViewModel updateProfile
+## Group 1 — 藍色連結 PAGE_NOT_FOUND + 圖譜亂（同一 root cause）
+- [x] 1a. 共用 `lib/wiki/slug.ts`（canonicalWikiAlias）
+- [x] 1b. `/api/pages/[...slug]` GET：exact miss → 唯一 alias 匹配才 resolve（共用咽喉點，修所有 client）
+- [x] 1c. `page-viewer.tsx`：真失連顯示友善訊息，不再噴 `[PAGE_NOT_FOUND]`
+- [x] 4a. `graph-view.tsx`：邊的端點經 alias 解析成真實節點；解不到就濾掉（去幽靈節點）
 
-## E — 跨工作區 AI 工具 + 確認流程（核心依賴）
-- [x] E1: tools.ts ToolContext 跨工作區化（folderCache keyed by ws、workspace_id 參數、owner 檢查）
-- [x] E2: lib/workspaces/manage.ts（create/rename/delete 共用函式，route 重構共用）
-- [x] E3: 新工具 listWorkspaces/createWorkspace/renameWorkspace/deleteWorkspace/movePageToWorkspace
-- [x] E4: 破壞性確認：user_metadata 開關 + proposal + \x00ACTIONS\x00 協定 + citation-parser 通用化
-- [x] E5: POST /api/agent/execute（同一份 core 重跑，防竄改）+ Web 確認卡片
-- [x] E6: query prompt 跨工作區章節 + stopWhen 20
-- [x] E7: Web/Android 設定頁確認開關
+## Group 3 — 已匯入來源修復（re-ingest）
+- [x] 5a. Web `sources-dialog.tsx` + Android `SourcesListDialog`：每列加「重新整合」按鈕
+- [x] 5b. 新 route `POST /api/sources/[id]/reingest`：讀 Drive 既有內容 → 建新 ingest_job → 重跑 pipeline，沿用 `/api/ingest?job_id=` 輪詢
 
-## D — Chat context + @ 標記
-- [x] D1: query route current_slug + context_workspace_ids 注入
-- [x] D2: Web @ 選單 + chip + current_slug 傳遞
-- [x] D3: Android @ 選單 + sendQuery 參數
+## Group 2 — 維護按鈕整合（lint + organize 合一 + 進度 + 背景）
+- [x] 2a. lint 改 job 化（migration `0016` 加 `lint` kind、`after()` 背景跑、GET `?job_id=` 輪詢 + stale sweep；cron GET 保留）
+- [x] 2b. Web 頂列一顆 `Wrench` 維護選單（健康檢查 / 自動整理＋去重）；Android drawer `Build` 選單
+- [x] 2c. Web 統一進度 pill：進行中（含「可關頁面背景續跑」提示）/完成（查看報告）/失敗，localStorage 續跑
+- [x] 2d. Android 對齊：`runMaintenance(kind)` 泛化、kind-aware 進行中 banner + 背景提示
 
-## C — 對話面板改版（Web）
-- [x] C1: 移除頂部導入表單（根治「重複輸入框」觀感）
-- [x] C2: Bot 按鈕改多功能選單（選擇模型/導入內容）
-- [x] C3: ImportDialog（貼上/拖曳/檔案 + 自動判斷工作區選項）
-
-## F — 智慧導入路由
-- [x] F1: ingest schema（workspace_id optional + auto_route + fallback + profile_id 入 schema）
-- [x] F2: routeToWorkspace generateText + 回應 routed_workspace_*（先驗 ownership 再抓 URL）
-- [x] F3: Web/Android 顯示「已導入到 X」
-
-## G — 自動分類＋去重複
-- [x] G1: migration 0015_agent_jobs（GRANT+RLS，單支 apply production，檔案 idempotent）
-- [x] G2: /api/organize POST/GET（stale sweep + limit(1) guard）+ organize-pipeline（不給 workspace 生命週期工具、報告存在才回 slug）
-- [x] G3: Web Wand2 按鈕 + 確認 + 輪詢 + 跳報告
-- [x] G4: Android 入口（AutoFixHigh）+ 輪詢
-
-## H — 筆記功能移除（UI only）
-- [x] H1: Web page-tree/workspace-shell notes UI 移除
-- [x] H2: Android WikiScreen/WikiViewModel notes UI 移除
-
-## I/J — 視覺（Web only）
-- [x] I1: 工作區拖曳 FLIP 動畫（pointer events + prefers-reduced-motion）
-- [x] I2: PageTree 移除 FileText icon
-- [x] J1: Graph degree sizing + canvas 標籤 + hover 高亮 + 孤兒淡化
-
-## Review（對抗性審查，9 findings 全修）
-- [x] organize stale job 卡死（sweep + limit(1)）／ingest fetch-proxy（先驗 owner）／deletePage 確認前查 lock
-- [x] cross-workspace citations 污染／organize 不給 workspace admin 工具／report_slug 存在才回
-- [x] profiles PATCH 先驗 owner／ACTIONS parser 要求 params／movePageToWorkspace rollback／migration idempotent／AI 建改工作區後刷新選單
-
-## K — 驗證收尾
-- [x] K1: typecheck（5/5）/ web build / Android compileDebugKotlin 全綠
-- [x] K2: 文件同步（CLAUDE.md/AGENTS.md/CONTEXT.md）+ APK release build + commit push
+## 收尾
+- [x] Android 連結解析：走同支 `/api/pages`，自動吃到伺服器 fallback（WikiViewModel 本就有 canonicalWikiAlias 本地解析）
+- [x] typecheck 5/5 / web build 綠 / Android compileDebugKotlin 綠 / migration 0016 已套 production
+- [x] Android release APK + commit push
 
 ## Review 心得
-- 「輸入框重複顯示兩次」不是 render bug 是版面觀感（頂部導入框 + 底部對話框樣式相近）——移除頂部框根治。
-- 破壞性操作確認的關鍵防護：proposal 的 params 從 client 回傳，execute route 必須用 zod 白名單 + 同一份 core 函式重跑所有 guard，不可信任回傳參數。
-- 背景 job（organize）沒有 UI 可確認，`gateDestructive` 必須 fail-closed（無 onProposal 就拒絕），否則會對模型謊稱「已顯示確認卡片」。
-- ingest 為了 auto-route 把抓 URL 提前了，順手引入 fetch-proxy 漏洞——外部 fetch 一律要在 ownership 檢查之後。
+- 連結失效的 root cause 是資料髒（225/600 dangling），但正解不是改資料而是**讀取時在伺服器咽喉點做唯一-alias fallback**——survives writePage 重寫、一次修所有 client（Web/Android/直接 URL）。ambiguity 只有 1 筆，故「唯一匹配才 resolve」安全。
+- 圖譜的「亂」= force-graph 對 dangling 邊生幽靈節點；client 端解析邊端點 + 濾掉解不到的，比清資料更穩。
+- lint 從同步改 job 化後，Android 舊的「2xx 即完成」邏輯會假完成——協定改動一定要回頭掃所有 client caller。
+- 兩顆按鈕合一 + 背景續跑：organize 早就是 job，只要把 lint 也放進 agent_jobs（共用 one-at-a-time 鎖）就自然變「一次一個維護任務」。前端 localStorage 記 jobId → 重載/關頁面回來續 poll。

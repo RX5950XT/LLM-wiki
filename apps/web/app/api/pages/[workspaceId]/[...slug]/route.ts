@@ -4,11 +4,34 @@ import { z } from 'zod';
 import { readDriveFile, writeDriveFile } from '@/lib/drive/client';
 import { DriveReadError } from '@/lib/drive/errors';
 import { getRequestUser } from '@/lib/supabase/request';
+import { canonicalWikiAlias } from '@/lib/wiki/slug';
 import {
   createDriveClientForUser,
   GOOGLE_DRIVE_REAUTH_MESSAGE,
   isGoogleDriveAuthError,
 } from '@/lib/google/drive-auth';
+
+const PAGE_FIELDS = 'slug, title, kind, zone, drive_file_id, updated_by, locked_by_human, version';
+
+/**
+ * Fallback for wiki links whose slug doesn't exactly match a page (wrong folder
+ * prefix, casing, or `.md` suffix). Only resolves when a single page shares the
+ * canonical alias — never guesses between colliding basenames.
+ */
+async function resolvePageByAlias(
+  supabase: Awaited<ReturnType<typeof getRequestUser>>['supabase'],
+  workspaceId: string,
+  slugStr: string,
+) {
+  const alias = canonicalWikiAlias(slugStr);
+  if (!alias) return null;
+  const { data: candidates } = await supabase
+    .from('pages')
+    .select(PAGE_FIELDS)
+    .eq('workspace_id', workspaceId);
+  const matches = (candidates ?? []).filter((p) => canonicalWikiAlias(p.slug as string) === alias);
+  return matches.length === 1 ? matches[0] : null;
+}
 
 const LockSchema = z.object({ locked_by_human: z.boolean() });
 // Matches the 2 MB ingest cap and the web/Android client-side file limits
@@ -35,12 +58,15 @@ export async function GET(
       return jsonError(401, 'AUTH_REQUIRED', 'Authentication required', requestId);
     }
 
-    const { data: page } = await supabase
+    const { data: exact } = await supabase
       .from('pages')
-      .select('slug, title, kind, zone, drive_file_id, updated_by, locked_by_human, version')
+      .select(PAGE_FIELDS)
       .eq('workspace_id', workspaceId)
       .eq('slug', slugStr)
       .single();
+
+    // Fuzzy fallback so links written with a different slug format still resolve
+    const page = exact ?? (await resolvePageByAlias(supabase, workspaceId, slugStr));
 
     if (!page) {
       return jsonError(404, 'PAGE_NOT_FOUND', 'Page not found', requestId);

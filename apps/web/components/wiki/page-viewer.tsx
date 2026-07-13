@@ -396,13 +396,19 @@ export function PageViewer({
 
   if (error || !page) {
     const reconnectRequired = Boolean(error?.includes('DRIVE_RECONNECT_REQUIRED'));
+    // A dead wiki link is expected content, not a system fault — show a calm hint
+    // instead of the raw `[PAGE_NOT_FOUND] …` error string.
+    const missingPage = Boolean(error?.includes('PAGE_NOT_FOUND'));
+    const displayMessage = missingPage
+      ? t('wiki.linkedPageMissing')
+      : (error ?? t('wiki.pageNotFound'));
     return (
       <div
         className="flex h-full items-center justify-center px-6"
         style={{ color: 'var(--fg-muted)' }}
       >
         <div className="space-y-3 text-center">
-          <p className="text-sm">{error ?? t('wiki.pageNotFound')}</p>
+          <p className="text-sm">{displayMessage}</p>
           {reconnectRequired && (
             <button
               type="button"

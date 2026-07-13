@@ -39,6 +39,9 @@
     <string name="sources_status_done">已整合 %1$d 個頁面</string>
     <string name="sources_status_running">整合中…</string>
     <string name="sources_status_failed">整合失敗</string>
+    <string name="sources_reingest">重新整合</string>
+    <string name="sources_reingesting">重新整合中…</string>
+    <string name="sources_reingest_failed">重新整合失敗</string>
     <string name="query_placeholder">問問你的 Wiki 任何問題…</string>
     <string name="query_file_back">存成綜合頁面</string>
 
@@ -91,6 +94,10 @@
     <string name="wiki_organize_confirm_body">將掃描你的全部工作區，合併重複知識並把放錯位置的頁面歸位，完成後產生報告頁。過程可能需要數分鐘，確定執行？</string>
     <string name="wiki_organize_running">整理中…</string>
     <string name="wiki_organize_done">自動整理完成</string>
+    <string name="wiki_maintenance">維護</string>
+    <string name="wiki_health_check">健康檢查</string>
+    <string name="wiki_lint_running">健康檢查進行中…</string>
+    <string name="wiki_maintenance_background_hint">可離開此畫面，任務會在背景繼續執行</string>
     <string name="chat_tag_workspace">標記工作區作為上下文</string>
     <string name="chat_confirm_action">確認執行</string>
     <string name="chat_proposal_delete_page">AI 請求刪除頁面 %1$s</string>

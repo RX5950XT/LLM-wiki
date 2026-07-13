@@ -238,6 +238,7 @@ Query API 文字串流結尾依序附加 `\x00CITATIONS\x00[...]`、`\x00ACTIONS
 - `PageRepository.syncPages()` 不再限制 200 筆，且會刪除本機已過期頁面，避免手機端顯示舊資料
 - Android `refreshAfterForeground()` 回到前景時需同步目前 workspace，否則 Web 端剛匯入完成的 `index.md` / `log.md` 容易被本機舊快取蓋住，看起來像手機沒更新
 - Android / Web 的內部 wiki 連結解析都要接受不帶副檔名的 slug（例如 `entities/foo`），並自動補成 `.md`，否則索引頁連結會顯示但不能跳
+- **Wiki 連結 alias fallback（Phase 15）**：`GET /api/pages/[...slug]` exact miss 時用 `canonicalWikiAlias`（`apps/web/lib/wiki/slug.ts`）做**唯一匹配**才 resolve（缺資料夾前綴/大小寫/`.md` 皆可對上），修 `[PAGE_NOT_FOUND]`；一次修所有 client、survives writePage 重寫。Graph 同樣把邊端點 alias 解析、解不到就濾掉（去幽靈節點）。真失連顯示 `wiki.linkedPageMissing` 友善訊息。
 - Web / Android 建立工作區 UI 不保留 description 欄位；Web `/w/create` 需提供返回 `/w` 的按鈕
 - 使用說明入口需在 Web top bar 與 Android drawer 同步提供，說明內容涵蓋工作區、匯入、對話、設定同步與 Drive 重授權
 
@@ -256,6 +257,8 @@ Query API 文字串流結尾依序附加 `\x00CITATIONS\x00[...]`、`\x00ACTIONS
 - i18n cookie-based（`NEXT_LOCALE`），`zh-TW`（預設）和 `en`
 - GraphView 動態 import `react-force-graph-2d` 避免 SSR 問題
 - Vercel Cron：每週一 03:00 UTC 直接 `GET /api/lint`（Vercel 自動帶 `Authorization: Bearer CRON_SECRET`；舊 `/api/lint/cron` 無驗證代理已因 P0 漏洞刪除，不可加回）
+- **維護 job（Phase 15）**：lint 與 organize 都是 `agent_jobs` 背景 job，**共用 owner one-at-a-time 鎖**（一次一個維護任務）。`POST /api/lint` 改回 `202 { jobId }`（協定破壞，client 已改，舊 APK 需更新）；`GET /api/lint?job_id=` 輪詢、無 job_id 走 cron。migration `0016` 讓 `agent_jobs.kind` 收 `lint`（已套 production）。Web `Wrench` 選單 + 進度 pill + localStorage 續 poll；Android `Build` 選單。
+- **來源 re-ingest（Phase 15）**：`POST /api/sources/[id]/reingest` 讀 Drive 既有內容重跑 pipeline（不重抓 URL、不建重複 source），沿用 `/api/ingest?job_id=` 輪詢。Web/Android sources 列表每列「重新整合」按鈕。
 - Supabase DB migration 若本機 5432/6543 被擋，可從 Vercel/serverless 走 pooler：`aws-1-ap-southeast-1.pooler.supabase.com:6543`，user 格式 `postgres.<project-ref>`
 
 

@@ -48,6 +48,20 @@
     "organizeRunning": "整理中…",
     "organizeConfirm": "將掃描你的全部工作區，合併重複知識並把放錯位置的頁面歸位，完成後產生報告頁。過程可能需要數分鐘，確定執行？",
     "organizeFailed": "自動整理失敗",
+    "maintenance": "維護",
+    "maintenanceMenu": "維護工具",
+    "healthCheckItem": "健康檢查",
+    "healthCheckDesc": "檢查失效連結、孤兒頁與矛盾內容",
+    "organizeItem": "自動整理＋去重",
+    "organizeDesc": "跨全部工作區合併重複、歸位錯置頁面",
+    "maintenanceRunningLint": "健康檢查進行中…",
+    "maintenanceRunningOrganize": "自動整理進行中…",
+    "maintenanceBackgroundHint": "可關閉頁面，任務會在背景繼續執行",
+    "maintenanceDoneLint": "健康檢查完成",
+    "maintenanceDoneOrganize": "自動整理完成",
+    "maintenanceFailed": "維護任務失敗",
+    "viewReport": "查看報告",
+    "dismiss": "關閉",
     "initFailed": "自動初始化失敗，請手動建立工作區。"
   },
   "wiki": {
@@ -77,6 +91,7 @@
     "zoneEmpty": "目前沒有頁面。",
     "selectPage": "從側欄選擇頁面",
     "pageNotFound": "找不到頁面",
+    "linkedPageMissing": "這個連結指向的頁面尚未建立。可在對話中請 AI 建立，或執行健康檢查清理失效連結。",
     "pageUpdated": "此頁面已更新",
     "refresh": "重新整理",
     "human": "使用者",
@@ -129,7 +144,10 @@
     "empty": "尚未匯入任何來源",
     "statusDone": "已整合 {count} 個頁面",
     "statusRunning": "整合中…",
-    "statusFailed": "整合失敗"
+    "statusFailed": "整合失敗",
+    "reingest": "重新整合",
+    "reingesting": "重新整合中…",
+    "reingestFailed": "重新整合失敗"
   },
   "query": {
     "placeholder": "問問你的 Wiki 任何問題...",

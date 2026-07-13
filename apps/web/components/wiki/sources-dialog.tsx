@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
-import { Link2, FileText, Type, Loader2, X } from 'lucide-react';
+import { Link2, FileText, Type, Loader2, RotateCw, X } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 
 interface SourceEntry {
@@ -31,6 +31,8 @@ export function SourcesDialog({
   const t = useTranslations();
   const locale = useLocale();
   const [sources, setSources] = useState<SourceEntry[] | null>(null);
+  const [reingestingId, setReingestingId] = useState<string | null>(null);
+  const [reingestError, setReingestError] = useState<string | null>(null);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -40,50 +42,82 @@ export function SourcesDialog({
     return () => document.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  useEffect(() => {
+  const loadSources = useCallback(async () => {
     const supabase = createClient();
+    const [{ data: rows }, { data: jobs }] = await Promise.all([
+      supabase
+        .from('sources')
+        .select('id, kind, title, url, created_at, ingested_at')
+        .eq('workspace_id', workspaceId)
+        .order('created_at', { ascending: false })
+        .limit(200),
+      supabase
+        .from('ingest_jobs')
+        .select('source_id, status, error, touched_pages, started_at')
+        .eq('workspace_id', workspaceId)
+        .order('started_at', { ascending: false }),
+    ]);
+    const latestJob = new Map<string, { status: string; error: string | null; touched: number }>();
+    for (const job of jobs ?? []) {
+      if (!latestJob.has(job.source_id)) {
+        latestJob.set(job.source_id, {
+          status: job.status,
+          error: job.error,
+          touched: (job.touched_pages as string[] | null)?.length ?? 0,
+        });
+      }
+    }
+    setSources(
+      (rows ?? []).map((row) => {
+        const job = latestJob.get(row.id);
+        return {
+          ...row,
+          jobStatus: job?.status,
+          jobError: job?.error ?? null,
+          touchedCount: job?.touched ?? 0,
+        } as SourceEntry;
+      }),
+    );
+  }, [workspaceId]);
+
+  useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const [{ data: rows }, { data: jobs }] = await Promise.all([
-        supabase
-          .from('sources')
-          .select('id, kind, title, url, created_at, ingested_at')
-          .eq('workspace_id', workspaceId)
-          .order('created_at', { ascending: false })
-          .limit(200),
-        supabase
-          .from('ingest_jobs')
-          .select('source_id, status, error, touched_pages, started_at')
-          .eq('workspace_id', workspaceId)
-          .order('started_at', { ascending: false }),
-      ]);
+      await loadSources();
       if (cancelled) return;
-      const latestJob = new Map<string, { status: string; error: string | null; touched: number }>();
-      for (const job of jobs ?? []) {
-        if (!latestJob.has(job.source_id)) {
-          latestJob.set(job.source_id, {
-            status: job.status,
-            error: job.error,
-            touched: (job.touched_pages as string[] | null)?.length ?? 0,
-          });
-        }
-      }
-      setSources(
-        (rows ?? []).map((row) => {
-          const job = latestJob.get(row.id);
-          return {
-            ...row,
-            jobStatus: job?.status,
-            jobError: job?.error ?? null,
-            touchedCount: job?.touched ?? 0,
-          } as SourceEntry;
-        }),
-      );
     })();
     return () => {
       cancelled = true;
     };
-  }, [workspaceId]);
+  }, [loadSources]);
+
+  const reingest = useCallback(
+    async (sourceId: string) => {
+      setReingestError(null);
+      setReingestingId(sourceId);
+      try {
+        const res = await fetch(`/api/sources/${sourceId}/reingest`, { method: 'POST' });
+        const data = (await res.json().catch(() => null)) as { jobId?: string; error?: string } | null;
+        if (!res.ok || !data?.jobId) {
+          throw new Error(data?.error ?? t('sources.reingestFailed'));
+        }
+        // Poll the shared ingest job protocol until it settles
+        const jobId = data.jobId;
+        for (;;) {
+          await new Promise((r) => setTimeout(r, 3000));
+          const poll = await fetch(`/api/ingest?job_id=${jobId}`);
+          const job = (await poll.json().catch(() => null)) as { status?: string } | null;
+          if (!job || job.status === 'done' || job.status === 'failed') break;
+        }
+        await loadSources();
+      } catch (err) {
+        setReingestError(err instanceof Error ? err.message : t('sources.reingestFailed'));
+      } finally {
+        setReingestingId(null);
+      }
+    },
+    [loadSources, t],
+  );
 
   const kindIcon = (kind: SourceEntry['kind']) =>
     kind === 'url' ? <Link2 size={14} /> : kind === 'file' ? <FileText size={14} /> : <Type size={14} />;
@@ -127,6 +161,11 @@ export function SourcesDialog({
         <p className="px-4 pt-2 text-xs" style={{ color: 'var(--fg-muted)' }}>
           {t('sources.immutableHint')}
         </p>
+        {reingestError && (
+          <p className="mx-4 mt-2 rounded px-2 py-1 text-[11px]" style={{ background: 'var(--bg-2)', color: 'oklch(65% 0.18 30)' }} role="alert">
+            {reingestError}
+          </p>
+        )}
         <div className="flex-1 overflow-y-auto p-3">
           {sources === null ? (
             <div className="flex justify-center py-8">
@@ -164,20 +203,41 @@ export function SourcesDialog({
                       {source.url}
                     </a>
                   )}
-                  <p className="mt-1 text-[10px]">
-                    {source.jobStatus === 'failed' ? (
-                      <span style={{ color: 'oklch(65% 0.18 30)' }}>
-                        {t('sources.statusFailed')}
-                        {source.jobError ? ` — ${source.jobError}` : ''}
-                      </span>
-                    ) : source.ingested_at ? (
-                      <span style={{ color: 'var(--color-accent)' }}>
-                        {t('sources.statusDone', { count: source.touchedCount ?? 0 })}
-                      </span>
-                    ) : (
-                      <span style={{ color: 'var(--fg-muted)' }}>{t('sources.statusRunning')}</span>
-                    )}
-                  </p>
+                  <div className="mt-1 flex items-center justify-between gap-2">
+                    <p className="min-w-0 flex-1 truncate text-[10px]">
+                      {reingestingId === source.id ? (
+                        <span style={{ color: 'var(--color-accent)' }}>{t('sources.reingesting')}</span>
+                      ) : source.jobStatus === 'failed' ? (
+                        <span style={{ color: 'oklch(65% 0.18 30)' }}>
+                          {t('sources.statusFailed')}
+                          {source.jobError ? ` — ${source.jobError}` : ''}
+                        </span>
+                      ) : source.ingested_at ? (
+                        <span style={{ color: 'var(--color-accent)' }}>
+                          {t('sources.statusDone', { count: source.touchedCount ?? 0 })}
+                        </span>
+                      ) : (
+                        <span style={{ color: 'var(--fg-muted)' }}>{t('sources.statusRunning')}</span>
+                      )}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => reingest(source.id)}
+                      disabled={reingestingId !== null}
+                      className="flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[10px] transition-opacity hover:opacity-70 disabled:opacity-40"
+                      style={{
+                        color: source.jobStatus === 'failed' ? 'var(--color-accent)' : 'var(--fg-muted)',
+                      }}
+                      title={t('sources.reingest')}
+                      aria-label={t('sources.reingest')}
+                    >
+                      <RotateCw
+                        size={11}
+                        className={reingestingId === source.id ? 'animate-spin' : undefined}
+                      />
+                      {t('sources.reingest')}
+                    </button>
+                  </div>
                 </li>
               ))}
             </ul>

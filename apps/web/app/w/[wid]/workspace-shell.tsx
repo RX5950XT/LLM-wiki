@@ -3,7 +3,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { PanelLeft, PanelRight, GitFork, FlaskConical, ChevronDown, LogOut, Plus, Settings, Search, Loader2, HelpCircle, Pencil, Trash2, GripVertical, Library, Wand2 } from 'lucide-react';
+import { PanelLeft, PanelRight, GitFork, FlaskConical, ChevronDown, LogOut, Plus, Settings, Search, Loader2, HelpCircle, Pencil, Trash2, GripVertical, Library, Wand2, Wrench, CheckCircle2, AlertCircle, X } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import { PageTree } from '@/components/wiki/page-tree';
 import { PageViewer } from '@/components/wiki/page-viewer';
@@ -31,6 +31,18 @@ interface WorkspaceEntry {
   sort_order?: number;
 }
 
+/** Active health-check / organize job, tracked across reloads via localStorage. */
+interface MaintState {
+  kind: 'lint' | 'organize';
+  jobId: string;
+  status: 'running' | 'done' | 'failed';
+  error?: string | null;
+  reportSlug?: string | null;
+  reportWorkspaceId?: string | null;
+}
+
+const MAINTENANCE_STORAGE_KEY = 'llmwiki:maintenance';
+
 interface WorkspaceShellProps {
   workspaceId: string;
   workspaceName: string;
@@ -50,7 +62,8 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
   const [showGraph, setShowGraph] = useState(false);
-  const [lintRunning, setLintRunning] = useState(false);
+  const [maintenance, setMaintenance] = useState<MaintState | null>(null);
+  const [showMaintMenu, setShowMaintMenu] = useState(false);
   const [showWsMenu, setShowWsMenu] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [showSources, setShowSources] = useState(false);
@@ -60,7 +73,7 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
   const [deletingWorkspace, setDeletingWorkspace] = useState<WorkspaceEntry | null>(null);
   const [workspaceActionError, setWorkspaceActionError] = useState<string | null>(null);
   const [workspaceActionLoading, setWorkspaceActionLoading] = useState(false);
-  const [organizeRunning, setOrganizeRunning] = useState(false);
+  const maintMenuRef = useRef<HTMLDivElement | null>(null);
   const [pages, setPages] = useState(initialPages);
   const [leftWidth, setLeftWidth] = useState(240);
   const [rightWidth, setRightWidth] = useState(384);
@@ -386,72 +399,126 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
     [leftWidth, rightWidth],
   );
 
-  const runLint = useCallback(async () => {
-    setLintRunning(true);
-    try {
-      const res = await fetch('/api/lint', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-llm-wiki-locale': locale,
-        },
-        body: JSON.stringify({ workspace_id: workspaceId }),
-      });
-      const data = await res.json().catch(() => null) as { error?: string; reportSlug?: string | null } | null;
-      if (!res.ok) {
-        throw new Error(data?.error ?? 'Lint failed');
+  // Unified maintenance (health check + organize): both are background jobs in
+  // agent_jobs, tracked by a single pill and recoverable after a page reload.
+  const startMaintenance = useCallback(
+    async (kind: 'lint' | 'organize') => {
+      if (maintenance?.status === 'running') return;
+      setShowMaintMenu(false);
+      if (kind === 'organize' && !window.confirm(t('workspace.organizeConfirm'))) return;
+      setMaintenance(null);
+      setWorkspaceActionError(null);
+      try {
+        const res = await fetch(kind === 'lint' ? '/api/lint' : '/api/organize', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-llm-wiki-locale': locale },
+          body: JSON.stringify({ workspace_id: workspaceId }),
+        });
+        // 409 = a maintenance job is already running; its jobId is returned so
+        // we can adopt and keep tracking it instead of erroring.
+        const data = (await res.json().catch(() => null)) as { jobId?: string; error?: string } | null;
+        if (!data?.jobId) throw new Error(data?.error ?? t('workspace.maintenanceFailed'));
+        localStorage.setItem(MAINTENANCE_STORAGE_KEY, JSON.stringify({ kind, jobId: data.jobId }));
+        setMaintenance({ kind, jobId: data.jobId, status: 'running' });
+      } catch (error) {
+        setWorkspaceActionError(error instanceof Error ? error.message : t('workspace.maintenanceFailed'));
       }
-      refreshPageList();
-      const today = new Date().toISOString().slice(0, 10);
-      selectPage(data?.reportSlug ?? `_lint/${today}.md`);
-    } catch (error) {
-      setWorkspaceActionError(error instanceof Error ? error.message : 'Lint failed');
-    } finally {
-      setLintRunning(false);
+    },
+    [maintenance?.status, locale, workspaceId, t],
+  );
+
+  const dismissMaintenance = useCallback(() => {
+    localStorage.removeItem(MAINTENANCE_STORAGE_KEY);
+    setMaintenance(null);
+  }, []);
+
+  const openMaintenanceReport = useCallback(() => {
+    if (!maintenance?.reportSlug) return;
+    const targetWs = maintenance.reportWorkspaceId ?? workspaceId;
+    if (targetWs !== workspaceId) {
+      router.push(`/w/${targetWs}?page=${encodeURIComponent(maintenance.reportSlug)}`);
+    } else {
+      selectPage(maintenance.reportSlug);
     }
-  }, [locale, workspaceId, refreshPageList]);
+    dismissMaintenance();
+  }, [maintenance, workspaceId, router, selectPage, dismissMaintenance]);
+
+  // Recover a maintenance job that was started before a reload / tab close.
+  useEffect(() => {
+    const raw = typeof window !== 'undefined' ? localStorage.getItem(MAINTENANCE_STORAGE_KEY) : null;
+    if (!raw) return;
+    try {
+      const saved = JSON.parse(raw) as { kind: 'lint' | 'organize'; jobId: string };
+      if (saved?.jobId && (saved.kind === 'lint' || saved.kind === 'organize')) {
+        setMaintenance({ kind: saved.kind, jobId: saved.jobId, status: 'running' });
+      }
+    } catch {
+      localStorage.removeItem(MAINTENANCE_STORAGE_KEY);
+    }
+  }, []);
+
+  // Poll the active job until it settles. The job runs server-side regardless of
+  // whether this page is open, so closing the tab never cancels it.
+  useEffect(() => {
+    if (maintenance?.status !== 'running') return;
+    const { kind, jobId } = maintenance;
+    const endpoint = kind === 'lint' ? '/api/lint' : '/api/organize';
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const res = await fetch(`${endpoint}?job_id=${encodeURIComponent(jobId)}`);
+        if (!res.ok) return;
+        const poll = (await res.json()) as {
+          status?: string;
+          error?: string;
+          report_slug?: string | null;
+          report_workspace_id?: string | null;
+        };
+        if (cancelled) return;
+        if (poll.status === 'done' || poll.status === 'failed') {
+          localStorage.removeItem(MAINTENANCE_STORAGE_KEY);
+          setMaintenance({
+            kind,
+            jobId,
+            status: poll.status,
+            error: poll.error ?? null,
+            reportSlug: poll.report_slug ?? null,
+            reportWorkspaceId: poll.report_workspace_id ?? null,
+          });
+          if (poll.status === 'done') {
+            refreshPageList();
+            setGraphRefreshKey((k) => k + 1);
+          }
+        }
+      } catch {
+        /* transient network error — keep polling */
+      }
+    };
+    void tick();
+    const id = window.setInterval(tick, 3000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [maintenance?.status, maintenance?.jobId, maintenance?.kind, refreshPageList]);
+
+  // Close the maintenance menu on outside click
+  useEffect(() => {
+    if (!showMaintMenu) return;
+    const onClick = (e: MouseEvent) => {
+      if (maintMenuRef.current && !maintMenuRef.current.contains(e.target as Node)) {
+        setShowMaintMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', onClick);
+    return () => document.removeEventListener('mousedown', onClick);
+  }, [showMaintMenu]);
 
   const handleSignOut = useCallback(async () => {
     const supabase = createClient();
     await supabase.auth.signOut();
     window.location.href = '/login';
   }, []);
-
-  // Cross-workspace organize (dedupe + reclassify) — async job, polled like ingest
-  const runOrganize = useCallback(async () => {
-    if (organizeRunning) return;
-    if (!window.confirm(t('workspace.organizeConfirm'))) return;
-    setOrganizeRunning(true);
-    setWorkspaceActionError(null);
-    try {
-      const res = await fetch('/api/organize', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-llm-wiki-locale': locale },
-        body: JSON.stringify({ workspace_id: workspaceId }),
-      });
-      const data = await res.json().catch(() => null) as { jobId?: string; error?: string } | null;
-      if (!res.ok || !data?.jobId) throw new Error(data?.error ?? t('workspace.organizeFailed'));
-
-      const deadline = Date.now() + 6 * 60 * 1000;
-      while (Date.now() < deadline) {
-        await new Promise((resolve) => setTimeout(resolve, 3000));
-        const pollRes = await fetch(`/api/organize?job_id=${encodeURIComponent(data.jobId)}`);
-        if (!pollRes.ok) continue;
-        const poll = await pollRes.json() as { status?: string; error?: string; report_slug?: string | null };
-        if (poll.status === 'done') {
-          refreshPageList();
-          if (poll.report_slug) selectPage(poll.report_slug);
-          return;
-        }
-        if (poll.status === 'failed') throw new Error(poll.error ?? t('workspace.organizeFailed'));
-      }
-      throw new Error(t('workspace.organizeFailed'));
-    } catch (error) {
-      setWorkspaceActionError(error instanceof Error ? error.message : t('workspace.organizeFailed'));
-    } finally {
-      setOrganizeRunning(false);
-    }
-  }, [organizeRunning, locale, workspaceId, refreshPageList, selectPage, t]);
 
   const renameWorkspace = useCallback(async (workspace: WorkspaceEntry, name: string) => {
     const trimmed = name.trim();
@@ -814,29 +881,65 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
             <GitFork size={16} />
           </button>
 
-          {/* Lint trigger */}
-          <button
-            onClick={runLint}
-            disabled={lintRunning}
-            className="rounded p-1 transition-all duration-100 hover:opacity-70 active:scale-90 disabled:opacity-40"
-            style={{ color: 'var(--fg-muted)' }}
-            aria-label={t('workspace.runLint')}
-            title={lintRunning ? t('workspace.lintRunning') : t('workspace.runLint')}
-          >
-            {lintRunning ? <Loader2 size={16} className="animate-spin" /> : <FlaskConical size={16} />}
-          </button>
-
-          {/* Cross-workspace organize (auto-classify + dedupe) */}
-          <button
-            onClick={runOrganize}
-            disabled={organizeRunning}
-            className="rounded p-1 transition-all duration-100 hover:opacity-70 active:scale-90 disabled:opacity-40"
-            style={{ color: 'var(--fg-muted)' }}
-            aria-label={t('workspace.runOrganize')}
-            title={organizeRunning ? t('workspace.organizeRunning') : t('workspace.runOrganize')}
-          >
-            {organizeRunning ? <Loader2 size={16} className="animate-spin" /> : <Wand2 size={16} />}
-          </button>
+          {/* Unified maintenance menu: health check + organize (both background jobs) */}
+          <div className="relative" ref={maintMenuRef}>
+            <button
+              onClick={() => setShowMaintMenu((v) => !v)}
+              className="rounded p-1 transition-all duration-100 hover:opacity-70 active:scale-90"
+              style={{ color: maintenance?.status === 'running' ? 'var(--color-accent)' : 'var(--fg-muted)' }}
+              aria-label={t('workspace.maintenance')}
+              aria-haspopup="menu"
+              aria-expanded={showMaintMenu}
+              title={t('workspace.maintenance')}
+            >
+              {maintenance?.status === 'running' ? (
+                <Loader2 size={16} className="animate-spin" />
+              ) : (
+                <Wrench size={16} />
+              )}
+            </button>
+            {showMaintMenu && (
+              <div
+                className="absolute right-0 top-full z-30 mt-1 w-64 overflow-hidden rounded-lg border shadow-lg"
+                style={{ background: 'var(--bg)', borderColor: 'var(--border)' }}
+                role="menu"
+              >
+                <button
+                  onClick={() => startMaintenance('lint')}
+                  disabled={maintenance?.status === 'running'}
+                  className="flex w-full items-start gap-2.5 px-3 py-2.5 text-left transition-colors hover:bg-[var(--bg-2)] disabled:opacity-40"
+                  role="menuitem"
+                >
+                  <FlaskConical size={15} className="mt-0.5 shrink-0" style={{ color: 'var(--color-accent)' }} />
+                  <span className="min-w-0">
+                    <span className="block text-xs font-medium" style={{ color: 'var(--fg)' }}>
+                      {t('workspace.healthCheckItem')}
+                    </span>
+                    <span className="block text-[11px]" style={{ color: 'var(--fg-muted)' }}>
+                      {t('workspace.healthCheckDesc')}
+                    </span>
+                  </span>
+                </button>
+                <button
+                  onClick={() => startMaintenance('organize')}
+                  disabled={maintenance?.status === 'running'}
+                  className="flex w-full items-start gap-2.5 border-t px-3 py-2.5 text-left transition-colors hover:bg-[var(--bg-2)] disabled:opacity-40"
+                  style={{ borderColor: 'var(--border)' }}
+                  role="menuitem"
+                >
+                  <Wand2 size={15} className="mt-0.5 shrink-0" style={{ color: 'var(--color-accent)' }} />
+                  <span className="min-w-0">
+                    <span className="block text-xs font-medium" style={{ color: 'var(--fg)' }}>
+                      {t('workspace.organizeItem')}
+                    </span>
+                    <span className="block text-[11px]" style={{ color: 'var(--fg-muted)' }}>
+                      {t('workspace.organizeDesc')}
+                    </span>
+                  </span>
+                </button>
+              </div>
+            )}
+          </div>
 
           <button
             onClick={() => setRightOpen((o) => !o)}
@@ -881,6 +984,58 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
           </button>
         </div>
       </header>
+
+      {/* Maintenance status strip: running (background-safe) / done / failed */}
+      {maintenance && (
+        <div
+          className="flex items-center gap-3 border-b px-4 py-2 text-xs"
+          style={{
+            borderColor: 'var(--border)',
+            background: maintenance.status === 'failed' ? 'var(--bg-2)' : 'var(--color-accent-glow)',
+            color: maintenance.status === 'failed' ? 'oklch(65% 0.18 30)' : 'var(--color-accent)',
+          }}
+          role="status"
+          aria-live="polite"
+        >
+          {maintenance.status === 'running' && <Loader2 size={14} className="shrink-0 animate-spin" />}
+          {maintenance.status === 'done' && <CheckCircle2 size={14} className="shrink-0" />}
+          {maintenance.status === 'failed' && <AlertCircle size={14} className="shrink-0" />}
+          <span className="min-w-0 flex-1 truncate">
+            {maintenance.status === 'running'
+              ? `${
+                  maintenance.kind === 'lint'
+                    ? t('workspace.maintenanceRunningLint')
+                    : t('workspace.maintenanceRunningOrganize')
+                } · ${t('workspace.maintenanceBackgroundHint')}`
+              : maintenance.status === 'done'
+                ? maintenance.kind === 'lint'
+                  ? t('workspace.maintenanceDoneLint')
+                  : t('workspace.maintenanceDoneOrganize')
+                : maintenance.error || t('workspace.maintenanceFailed')}
+          </span>
+          {maintenance.status === 'done' && maintenance.reportSlug && (
+            <button
+              type="button"
+              onClick={openMaintenanceReport}
+              className="shrink-0 rounded px-2 py-0.5 font-medium underline-offset-2 hover:underline"
+            >
+              {t('workspace.viewReport')}
+            </button>
+          )}
+          {maintenance.status !== 'running' && (
+            <button
+              type="button"
+              onClick={dismissMaintenance}
+              className="shrink-0 rounded p-1 transition-opacity hover:opacity-70"
+              style={{ color: 'var(--fg-muted)' }}
+              aria-label={t('workspace.dismiss')}
+              title={t('workspace.dismiss')}
+            >
+              <X size={12} />
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Global action error strip — dialogs render their own copy; this covers
           failures (e.g. lint) that happen with no dialog open */}

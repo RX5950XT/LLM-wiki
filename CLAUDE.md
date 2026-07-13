@@ -157,6 +157,7 @@ Android 呼叫與 Web 相同的後端 API（`/api/ingest`、`/api/query`、`/api
 - **Phase 12** ✅：全專案健檢 — 非同步 ingest（jobId + 輪詢，解決手機匯入逾時）、SSRF/cron P0-P2 安全修復、tools 層 lock/zone 硬性防護、Web/Android UX 大修（RWD、a11y、鍵盤、錯誤可見性、瀏覽器返回、backlinks 面板、rememberSaveable、BackHandler、DayNight 主題）
 - **Phase 13** ✅：漏洞續掃 + 功能補完 + Web/Android 對齊 — `extra_headers` AES-256-GCM 加密（migration 0013）、SSRF TOCTOU 關窗（undici pinned-DNS lookup）、broadcast trigger revoke（0014）、Sources 管理列表（Web + Android）、Ingest 即時進度（touched_pages 逐步回報）、Android backlinks 面板、離線冷啟 workspace 持久化（DataStore）、chat 草稿 hoist 至 ViewModel
 - **Phase 14** ✅：對話中心化 + 跨工作區 AI — 移除筆記 UI（資料保留）、跨工作區 AI 工具（建立/改名/刪除工作區、跨工作區搬頁）、破壞性操作確認卡片（`\x00ACTIONS\x00` 協定 + `/api/agent/execute`）、對話預設帶當前頁 context + `@` 工作區標記、統一導入入口（ImportDialog，AI 自動判斷目標工作區）、自動分類＋去重複 job（`/api/organize` + `agent_jobs` migration 0015）、LLM profile 編輯（PATCH）、切換工作區/設定頁效能修復（Drive 呼叫移出請求路徑）、工作區拖曳 FLIP 動畫、Graph Obsidian 化（degree sizing / canvas 標籤 / hover 高亮 / 孤兒淡化）
+- **Phase 15** ✅：連結修復 + 維護整合 + 來源重跑 — wiki 連結伺服器咽喉點 alias fallback（`lib/wiki/slug.ts` + `/api/pages` GET，修 `[PAGE_NOT_FOUND]`）、圖譜邊 alias 解析去幽靈節點、lint job 化（migration `0016`，與 organize 共用 agent_jobs 鎖）、維護按鈕整合（Web `Wrench` 選單 + 進度 pill + localStorage 背景續跑；Android `Build` 選單）、來源重新整合（`/api/sources/[id]/reingest`）
 
 ## 安全注意事項（Phase 10）
 
@@ -258,6 +259,7 @@ apps/android/app/src/main/java/com/llmwiki/
 - `PageRepository.syncPages()` 不再限制 200 筆，且會刪除本機 Room 中伺服器已不存在的頁面，避免 Android 側欄殘留舊頁
 - Android `refreshAfterForeground()` 回到前景時需同步目前 workspace，否則 Web 端剛匯入完成的 `index.md` / `log.md` 容易被本機舊快取蓋住，看起來像手機沒更新
 - Android / Web 的內部 wiki 連結解析都要接受不帶副檔名的 slug（例如 `entities/foo`），並自動補成 `.md`，否則索引頁連結會顯示但不能跳
+- **Wiki 連結 alias fallback（Phase 15，勿移除）**：LLM 常把連結寫成 `[[Agentic AI Transformation]]`（缺 `concepts/` 前綴、大小寫、`.md` 不一致），與實際 slug `concepts/agentic_ai_transformation.md` 對不上。解法在**伺服器咽喉點** `GET /api/pages/[...slug]`：exact miss 時用 `canonicalWikiAlias`（`apps/web/lib/wiki/slug.ts`：取 basename + 小寫 + 去 `[\s_\-()]` + `&→and`）做**唯一匹配**才 resolve（0 或 2+ 匹配則不猜，回 404）。一次修所有 client（Web/Android/直接 URL），且 survives writePage 重寫，不需清資料。Graph（`graph-view.tsx`）同樣把邊端點經 alias 解析成真實節點 id、解不到就濾掉，避免 force-graph 生幽靈節點。真失連時 `page-viewer.tsx` 顯示 `wiki.linkedPageMissing`（友善訊息），不噴原始 `[PAGE_NOT_FOUND]`。
 - `ingestUrl()` / `ingestText()` 呼叫 Web app 的 `/api/ingest`，使用 Supabase session accessToken
 - Web API 端點位址由 `BuildConfig.WEB_API_BASE_URL` 決定（從 `local.properties` 的 `WEB_API_BASE_URL` 或 `NEXT_PUBLIC_SITE_URL` 注入）
 - Chat 串流協定：POST `/api/query` → `text/plain` stream，結尾附 `\x00CITATIONS\x00[...]`（可再接 `\x00ACTIONS\x00[...]`）；Android 用 Ktor `bodyAsChannel()` + `readUTF8Line()` 消費，`parseStreamMeta()` 解析（未知 block 忽略）
@@ -300,6 +302,20 @@ apps/android/app/src/main/java/com/llmwiki/
 `apps/web/vercel.json` 設定每週一 03:00 UTC 直接跑 GET `/api/lint`（Vercel Cron 會自動附上 `Authorization: Bearer CRON_SECRET`，route 內用 `timingSafeEqual` 驗證）。
 需在 Vercel 環境變數設定 `CRON_SECRET`，與 `.env.local` 一致。
 **注意**：舊的 `/api/lint/cron` 代理 route 已刪除——它沒有任何驗證、還替匿名呼叫者附上正確 secret（P0 漏洞），不可再加回來。
+**Phase 15 起 `GET /api/lint` 一支多用**：帶 `?job_id=`（使用者驗證）＝輪詢 lint job；否則走 cron path（Bearer CRON_SECRET）。加東西時別讓 job 輪詢分支破壞 cron 驗證。
+
+## 維護 job（健康檢查 + 自動整理，Phase 15）
+
+lint 與 organize 都是 `agent_jobs` 背景 job，**共用 owner-scoped one-at-a-time 鎖**（POST 前先 stale sweep 8 分鐘、再 `.order().limit(1).maybeSingle()` guard）——語意上「一次一個維護任務」。
+- `POST /api/lint` 不再同步等待，改回 `202 { jobId }` + `after()` 背景跑 `executeLint`，完成寫回 `report_slug`；**協定破壞**，所有 client caller（Web/Android）已改，舊 APK 需更新。
+- lint job 化重構：`setupLint()`（同步驗證 workspace/profile/drive/folder/prompt/index，錯誤直接回 HTTP，不建 job）+ `executeLint()`（`generateText` + log + 查 report slug）。cron path 對每個 workspace 呼叫這兩支同步跑。
+- migration `0016_agent_jobs_lint.sql`：`agent_jobs.kind` check 加 `lint`（drop-if-exists + add，idempotent，**已套 production**）。
+- Web 頂列一顆 `Wrench` 維護選單（健康檢查／自動整理＋去重）取代原 FlaskConical + Wand2 兩顆；統一進度 pill（進行中含背景提示／完成含「查看報告」／失敗），jobId 存 `localStorage['llmwiki:maintenance']` → 重載/關頁面回來續 poll（job 本就在 server 端跑，關頁面不影響）。
+- Android drawer `Build` 選單同兩項；`runMaintenance(kind)` 泛化 `runLint`/`runOrganize`，kind-aware 進行中 banner。
+
+## 來源重新整合（re-ingest，Phase 15）
+
+`POST /api/sources/[id]/reingest`：讀 source 既有 Drive 內容（`drive_file_id`）→ 建新 `ingest_job` → `after()` 重跑 `runIngestPipeline`，沿用 `GET /api/ingest?job_id=` 輪詢。**不重新抓 URL、不建重複 source row**（來源 immutable，只是重跑整合）。用於修 provider 暫時性失敗的來源。Web `SourcesDialog` + Android `SourcesListDialog` 每列「重新整合」按鈕（`reingestingSourceId` 期間 disable 其他列）。
 
 ## 統一導入入口（Phase 14）
 

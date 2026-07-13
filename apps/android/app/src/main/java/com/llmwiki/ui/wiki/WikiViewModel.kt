@@ -120,7 +120,12 @@ data class WikiUiState(
     val taggedWorkspaceIds: List<String> = emptyList(),
     /** "已導入到 X" notice after an auto-routed ingest */
     val ingestRoutedName: String? = null,
+    /** Shared flag for the background maintenance job (health check OR organize) */
     val organizeRunning: Boolean = false,
+    /** Which maintenance job is running: "lint" | "organize" | null */
+    val maintenanceKind: String? = null,
+    /** Source id currently being re-ingested (null = none) */
+    val reingestingSourceId: String? = null,
 )
 
 private val apiJson = Json { ignoreUnknownKeys = true }
@@ -809,23 +814,35 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** Cross-workspace auto-classify + dedupe (async job, mirrors the Web Wand2 button). */
-    fun runOrganize(onDone: (Boolean) -> Unit = {}) {
+    /** Cross-workspace auto-classify + dedupe (async job, mirrors the Web organize action). */
+    fun runOrganize(onDone: (Boolean) -> Unit = {}) = runMaintenance("organize", onDone)
+
+    /** Wiki health check (async job — the server now runs it in the background like organize). */
+    fun runLint(onDone: (Boolean) -> Unit = {}) = runMaintenance("lint", onDone)
+
+    /**
+     * Run a background maintenance job (health check or organize). Both live in
+     * agent_jobs and share the poll protocol + one-at-a-time lock; the server
+     * keeps running even if the app leaves the foreground.
+     */
+    private fun runMaintenance(kind: String, onDone: (Boolean) -> Unit = {}) {
         val wsId = workspaceId.value ?: return
         if (_uiState.value.organizeRunning) return
+        val endpoint = if (kind == "lint") "/api/lint" else "/api/organize"
+        val failMsg = if (kind == "lint") str(R.string.error_op_lint) else str(R.string.error_op_organize)
         viewModelScope.launch {
-            _uiState.update { it.copy(organizeRunning = true, syncError = null) }
+            _uiState.update { it.copy(organizeRunning = true, maintenanceKind = kind, syncError = null) }
             try {
                 val bodyJson = buildJsonObject { put("workspace_id", wsId) }.toString()
                 val response = sendAuthorizedRequest { accessToken ->
-                    AndroidHttpClient.instance.post(webApiUrl("/api/organize")) {
+                    AndroidHttpClient.instance.post(webApiUrl(endpoint)) {
                         header("Authorization", "Bearer $accessToken")
                         header("x-llm-wiki-locale", currentUiLocale())
                         contentType(ContentType.Application.Json)
                         setBody(bodyJson)
                     }
                 } ?: run {
-                    _uiState.update { it.copy(organizeRunning = false, syncError = unauthorizedMessage()) }
+                    _uiState.update { it.copy(organizeRunning = false, maintenanceKind = null, syncError = unauthorizedMessage()) }
                     onDone(false)
                     return@launch
                 }
@@ -834,7 +851,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                 val jobId = bodyJsonObj?.get("jobId")?.jsonPrimitive?.contentOrNull
                 if (response.status.value !in 200..299 || jobId == null) {
                     _uiState.update {
-                        it.copy(organizeRunning = false, syncError = parseApiError(text, str(R.string.error_op_organize)))
+                        it.copy(organizeRunning = false, maintenanceKind = null, syncError = parseApiError(text, failMsg))
                     }
                     onDone(false)
                     return@launch
@@ -844,7 +861,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                 while (System.currentTimeMillis() < deadline) {
                     delay(3_000)
                     val poll = sendAuthorizedRequest { accessToken ->
-                        AndroidHttpClient.instance.get(webApiUrl("/api/organize?job_id=$jobId")) {
+                        AndroidHttpClient.instance.get(webApiUrl("$endpoint?job_id=$jobId")) {
                             header("Authorization", "Bearer $accessToken")
                         }
                     } ?: continue
@@ -858,26 +875,26 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                             if (!reportSlug.isNullOrBlank()) {
                                 db.pageDao().getPage(wsId, accountName, reportSlug)?.let(::selectPage)
                             }
-                            _uiState.update { it.copy(organizeRunning = false, syncError = null) }
+                            _uiState.update { it.copy(organizeRunning = false, maintenanceKind = null, syncError = null) }
                             onDone(true)
                             return@launch
                         }
                         "failed" -> {
                             val err = obj["error"]?.jsonPrimitive?.contentOrNull
-                                ?.takeIf { it.isNotBlank() } ?: str(R.string.error_op_organize)
-                            _uiState.update { it.copy(organizeRunning = false, syncError = err) }
+                                ?.takeIf { it.isNotBlank() } ?: failMsg
+                            _uiState.update { it.copy(organizeRunning = false, maintenanceKind = null, syncError = err) }
                             onDone(false)
                             return@launch
                         }
                     }
                 }
                 _uiState.update {
-                    it.copy(organizeRunning = false, syncError = str(R.string.error_network_timeout))
+                    it.copy(organizeRunning = false, maintenanceKind = null, syncError = str(R.string.error_network_timeout))
                 }
                 onDone(false)
             } catch (e: Exception) {
                 _uiState.update {
-                    it.copy(organizeRunning = false, syncError = e.toUserFacingMessage(str(R.string.error_op_organize)))
+                    it.copy(organizeRunning = false, maintenanceKind = null, syncError = e.toUserFacingMessage(failMsg))
                 }
                 onDone(false)
             }
@@ -987,41 +1004,6 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun runLint(onDone: (Boolean) -> Unit = {}) {
-        val wsId = workspaceId.value ?: return
-        viewModelScope.launch {
-            try {
-                val bodyJson = buildJsonObject {
-                    put("workspace_id", wsId)
-                }.toString()
-                val response = sendAuthorizedRequest { accessToken ->
-                    AndroidHttpClient.instance.post(webApiUrl("/api/lint")) {
-                        header("Authorization", "Bearer $accessToken")
-                        header("x-llm-wiki-locale", currentUiLocale())
-                        contentType(ContentType.Application.Json)
-                        setBody(bodyJson)
-                    }
-                } ?: run {
-                    _uiState.update { it.copy(syncError = unauthorizedMessage()) }
-                    onDone(false)
-                    return@launch
-                }
-                val text = response.bodyAsText()
-                if (response.status.value !in 200..299) {
-                    _uiState.update { it.copy(syncError = parseApiError(text, str(R.string.error_op_lint))) }
-                    onDone(false)
-                    return@launch
-                }
-
-                syncPages()
-                onDone(true)
-            } catch (e: Exception) {
-                _uiState.update { it.copy(syncError = e.toUserFacingMessage(str(R.string.error_op_lint))) }
-                onDone(false)
-            }
-        }
-    }
-
     /** Read-only sources list (immutable after ingest) joined with the latest job state. */
     fun loadSources() {
         val wsId = workspaceId.value ?: return
@@ -1059,6 +1041,61 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                         sourcesLoading = false,
                         sources = emptyList(),
                         syncError = e.toUserFacingMessage(str(R.string.error_op_load_sources)),
+                    )
+                }
+            }
+        }
+    }
+
+    /** Re-run the ingest pipeline for an already-imported source (e.g. a failed one). */
+    fun reingestSource(sourceId: String) {
+        if (_uiState.value.reingestingSourceId != null) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(reingestingSourceId = sourceId, syncError = null) }
+            try {
+                val response = sendAuthorizedRequest { accessToken ->
+                    AndroidHttpClient.instance.post(webApiUrl("/api/sources/$sourceId/reingest")) {
+                        header("Authorization", "Bearer $accessToken")
+                        header("x-llm-wiki-locale", currentUiLocale())
+                    }
+                } ?: run {
+                    _uiState.update { it.copy(reingestingSourceId = null, syncError = unauthorizedMessage()) }
+                    return@launch
+                }
+                val text = response.bodyAsText()
+                val obj = if (isJsonObject(text)) apiJson.parseToJsonElement(text).jsonObject else null
+                val jobId = obj?.get("jobId")?.jsonPrimitive?.contentOrNull
+                if (response.status.value !in 200..299 || jobId == null) {
+                    _uiState.update {
+                        it.copy(
+                            reingestingSourceId = null,
+                            syncError = parseApiError(text, str(R.string.sources_reingest_failed)),
+                        )
+                    }
+                    return@launch
+                }
+                val deadline = System.currentTimeMillis() + 6 * 60 * 1000L
+                while (System.currentTimeMillis() < deadline) {
+                    delay(3_000)
+                    val poll = sendAuthorizedRequest { accessToken ->
+                        AndroidHttpClient.instance.get(webApiUrl("/api/ingest?job_id=$jobId")) {
+                            header("Authorization", "Bearer $accessToken")
+                        }
+                    } ?: continue
+                    val pollText = poll.bodyAsText()
+                    if (poll.status.value !in 200..299 || !isJsonObject(pollText)) continue
+                    val status = apiJson.parseToJsonElement(pollText).jsonObject["status"]
+                        ?.jsonPrimitive?.contentOrNull
+                    if (status == "done" || status == "failed") break
+                }
+                _uiState.update { it.copy(reingestingSourceId = null) }
+                loadSources()
+                workspaceId.value?.let { syncPagesInternal(it, forceSync = true) }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        reingestingSourceId = null,
+                        syncError = e.toUserFacingMessage(str(R.string.sources_reingest_failed)),
                     )
                 }
             }
