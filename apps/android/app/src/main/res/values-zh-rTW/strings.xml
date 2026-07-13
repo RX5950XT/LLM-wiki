@@ -87,6 +87,7 @@
     <string name="wiki_ingest_target_auto">自動判斷工作區（AI）</string>
     <string name="wiki_ingest_target_current">目前工作區</string>
     <string name="wiki_ingest_routed">已導入到「%1$s」</string>
+    <string name="wiki_ingest_routed_new">已建立新工作區「%1$s」並導入</string>
     <string name="wiki_maintenance">整理知識庫</string>
     <string name="wiki_maintenance_confirm_title">整理知識庫</string>
     <string name="wiki_maintenance_confirm_body">AI 將掃描你的全部工作區，直接修正失效連結與矛盾、合併重複知識、把放錯位置的頁面歸位，必要時也會改動工作區（重新命名／建立／刪除空工作區）。這些改動會實際寫入，過程可能需要數分鐘。確定執行？</string>

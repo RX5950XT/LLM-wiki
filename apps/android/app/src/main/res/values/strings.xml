@@ -87,6 +87,7 @@
     <string name="wiki_ingest_target_auto">Auto (AI decides workspace)</string>
     <string name="wiki_ingest_target_current">Current workspace</string>
     <string name="wiki_ingest_routed">Imported into "%1$s"</string>
+    <string name="wiki_ingest_routed_new">Created workspace "%1$s" and imported into it</string>
     <string name="wiki_maintenance">Tidy knowledge base</string>
     <string name="wiki_maintenance_confirm_title">Tidy knowledge base</string>
     <string name="wiki_maintenance_confirm_body">The AI will scan ALL your workspaces and directly fix dead links and contradictions, merge duplicated knowledge, re-file misplaced pages, and adjust workspaces when needed (rename / create / delete empty ones). These changes are written for real and may take a few minutes. Continue?</string>

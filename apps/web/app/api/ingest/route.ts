@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse, after } from 'next/server';
 import { z } from 'zod';
+import type { drive_v3 } from 'googleapis';
 import { writeDriveFile, findFile, readDriveFile } from '@/lib/drive/client';
+import { createWorkspaceForUser } from '@/lib/workspaces/manage';
 import { getRequestUser } from '@/lib/supabase/request';
 import {
   createDriveClientForUser,
@@ -41,35 +43,61 @@ const IngestSchema = z.discriminatedUnion('kind', [
   }),
 ]);
 
+/** Scaffolding every workspace has; not evidence that it holds any knowledge. */
+const SCAFFOLDING_SLUGS = ['index.md', 'log.md'];
+
+/** Ceiling on router-created workspaces, so a misfiring router can't shard the base. */
+const MAX_AUTO_WORKSPACES = 12;
+
+/** `NEW: <name>` — the router's way of saying nothing existing fits. */
+function parseNewWorkspaceName(text: string): string | null {
+  const match = /NEW\s*[:：]\s*(.+)/i.exec(text);
+  if (!match) return null;
+  const name = (match[1]?.split('\n')[0] ?? '')
+    .replace(/^["'「『]+|["'」』]+$/g, '')
+    .trim()
+    .slice(0, 50);
+  return name.length >= 2 ? name : null;
+}
+
 /**
- * Pick the best-fitting workspace for a piece of content with one small LLM
- * call. Falls back to `fallbackId` on any failure — routing must never block
- * an ingest.
+ * Pick the best-fitting workspace for a piece of content with one small LLM call,
+ * creating a new workspace when the content belongs to none of them. Falls back to
+ * `fallbackId` on any failure — routing must never block an ingest.
  */
 async function routeToWorkspace(
   supabase: Awaited<ReturnType<typeof getRequestUser>>['supabase'],
+  drive: drive_v3.Drive,
   userId: string,
   profileRow: Parameters<typeof createLLMClient>[0],
   sourceTitle: string,
   sourceContent: string,
   fallbackId: string,
-): Promise<string> {
+  locale: string,
+): Promise<{ workspaceId: string; created: boolean }> {
+  const stay = { workspaceId: fallbackId, created: false };
+
   const { data: workspaces } = await supabase
     .from('workspaces')
     .select('id, name')
     .eq('owner_id', userId);
-  if (!workspaces || workspaces.length <= 1) return fallbackId;
+  if (!workspaces?.length) return stay;
 
   const { data: pageRows } = await supabase
     .from('pages')
     .select('workspace_id, title')
     .in('workspace_id', workspaces.map((w) => w.id))
     .eq('zone', 'wiki')
+    .not('slug', 'in', `(${SCAFFOLDING_SLUGS.join(',')})`)
     .order('updated_at', { ascending: false })
     .limit(1200);
 
+  // An empty base has nothing to route against — the first import stays put rather
+  // than spawning a second workspace next to the empty one.
+  if (!pageRows?.length) return stay;
+
   const titlesByWorkspace = new Map<string, string[]>();
-  for (const row of pageRows ?? []) {
+  for (const row of pageRows) {
     const list = titlesByWorkspace.get(row.workspace_id) ?? [];
     if (list.length < 40 && row.title) list.push(row.title);
     titlesByWorkspace.set(row.workspace_id, list);
@@ -79,18 +107,37 @@ async function routeToWorkspace(
     .map((w) => `- id: ${w.id}\n  name: ${w.name}\n  pages: ${(titlesByWorkspace.get(w.id) ?? []).join(', ') || '(empty)'}`)
     .join('\n');
 
+  const canCreate = workspaces.length < MAX_AUTO_WORKSPACES;
+
   try {
     const model = createLLMClient(profileRow);
     const { text } = await generateText({
       model,
       system:
-        'You route incoming content to the best-fitting knowledge workspace. Reply with ONLY the workspace id, nothing else.',
-      prompt: `Workspaces:\n${workspaceSummary}\n\nContent title: ${sourceTitle}\nContent excerpt:\n${sourceContent.slice(0, 1500)}\n\nWhich workspace id fits best?`,
+        'You file incoming content into the knowledge workspace where it belongs. Answer with a single line and nothing else.',
+      prompt: `Workspaces:\n${workspaceSummary}\n\nContent title: ${sourceTitle}\nContent excerpt:\n${sourceContent.slice(0, 1500)}\n\nReply with EITHER the id of the workspace this content belongs in${
+        canCreate
+          ? `, OR "NEW: <short workspace name>" if its subject is clearly outside every workspace above. Strongly prefer an existing workspace — related content belongs together, and a new workspace is only right when nothing above covers this subject at all. Name it in the user's language (${locale}).`
+          : '. You must pick one of the ids above.'
+      }`,
     });
+
     const candidate = workspaces.find((w) => text.includes(w.id));
-    return candidate?.id ?? fallbackId;
+    if (candidate) return { workspaceId: candidate.id, created: false };
+
+    const newName = canCreate ? parseNewWorkspaceName(text) : null;
+    if (!newName) return stay;
+
+    // Two files of the same new subject in one batch must not create two workspaces.
+    const sameName = workspaces.find(
+      (w) => w.name.trim().toLowerCase() === newName.toLowerCase(),
+    );
+    if (sameName) return { workspaceId: sameName.id, created: false };
+
+    const created = await createWorkspaceForUser(drive, userId, newName, locale);
+    return created.ok ? { workspaceId: created.id, created: true } : stay;
   } catch {
-    return fallbackId;
+    return stay;
   }
 }
 
@@ -171,9 +218,24 @@ export async function POST(request: NextRequest) {
     sourceTitle = parsed.data.title;
   }
 
+  // Drive client first: routing may need to create the target workspace.
+  let drive: Awaited<ReturnType<typeof createDriveClientForUser>>;
+  try {
+    drive = await createDriveClientForUser(user.id);
+  } catch (error) {
+    if (isGoogleDriveAuthError(error)) {
+      return NextResponse.json(
+        { error: error.message || GOOGLE_DRIVE_REAUTH_MESSAGE },
+        { status: 403 },
+      );
+    }
+    throw error;
+  }
+
   // Resolve target workspace (auto routing uses the gate workspace's profile)
   let workspace_id: string;
   let routedWorkspaceName: string | undefined;
+  let routedWorkspaceCreated = false;
   let workspace: NonNullable<Awaited<ReturnType<typeof loadWorkspace>>['data']>;
 
   if (autoRoute) {
@@ -188,14 +250,18 @@ export async function POST(request: NextRequest) {
     const { data: routingProfile } = await loadProfileRow(routingProfileId);
     if (!routingProfile) return NextResponse.json({ error: 'LLM profile not found' }, { status: 404 });
 
-    workspace_id = await routeToWorkspace(
+    const routing = await routeToWorkspace(
       supabase,
+      drive,
       user.id,
       routingProfile as Parameters<typeof createLLMClient>[0],
       sourceTitle,
       sourceContent,
       gateWorkspace.id,
+      locale,
     );
+    workspace_id = routing.workspaceId;
+    routedWorkspaceCreated = routing.created;
     // routeToWorkspace only ever returns an id from the user's own workspaces,
     // but re-verify to be safe (and to get the routed workspace's profile row).
     if (workspace_id === gateWorkspace.id) {
@@ -211,8 +277,16 @@ export async function POST(request: NextRequest) {
     workspace = gateWorkspace;
   }
 
+  // A freshly created workspace only gets a profile if the user has a default one;
+  // fall back to the workspace the import was triggered from so routing can never
+  // turn a working import into "No LLM profile configured".
   const profileId =
-    overrideProfileId ?? workspace.ingest_profile_id ?? workspace.default_profile_id ?? null;
+    overrideProfileId ??
+    workspace.ingest_profile_id ??
+    workspace.default_profile_id ??
+    gateWorkspace.ingest_profile_id ??
+    gateWorkspace.default_profile_id ??
+    null;
 
   if (!profileId) {
     return NextResponse.json(
@@ -224,21 +298,7 @@ export async function POST(request: NextRequest) {
   const { data: profile } = await loadProfileRow(profileId);
   if (!profile) return NextResponse.json({ error: 'LLM profile not found' }, { status: 404 });
 
-  // Store raw source in Drive
-  let drive: Awaited<ReturnType<typeof createDriveClientForUser>>;
-  try {
-    drive = await createDriveClientForUser(user.id);
-  } catch (error) {
-    if (isGoogleDriveAuthError(error)) {
-      return NextResponse.json(
-        { error: error.message || GOOGLE_DRIVE_REAUTH_MESSAGE },
-        { status: 403 },
-      );
-    }
-    throw error;
-  }
-
-  // Resolve Drive folders in parallel
+  // Store raw source in Drive — resolve its folders in parallel
   const [sourcesFolderId, wikiFolderId, schemaFolderId] = await Promise.all([
     findFile(drive, 'sources', workspace.drive_folder_id, 'application/vnd.google-apps.folder'),
     findFile(drive, 'wiki', workspace.drive_folder_id, 'application/vnd.google-apps.folder'),
@@ -333,7 +393,11 @@ export async function POST(request: NextRequest) {
       jobId: job.id,
       status: 'running',
       ...(routedWorkspaceName
-        ? { routed_workspace_id: workspace_id, routed_workspace_name: routedWorkspaceName }
+        ? {
+            routed_workspace_id: workspace_id,
+            routed_workspace_name: routedWorkspaceName,
+            routed_workspace_created: routedWorkspaceCreated,
+          }
         : {}),
     },
     { status: 202 },

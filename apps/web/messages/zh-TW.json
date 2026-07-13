@@ -123,7 +123,8 @@
     "target": "目標工作區",
     "targetAuto": "自動判斷（AI）",
     "targetCurrent": "目前工作區：{name}",
-    "routedTo": "已導入到「{name}」"
+    "routedTo": "已導入到「{name}」",
+    "routedToNew": "已建立新工作區「{name}」並導入"
   },
   "sources": {
     "open": "來源清單",

@@ -45,11 +45,29 @@ export async function runIngestPipeline(ctx: IngestContext): Promise<string[]> {
     ? await readDriveFile(ctx.drive, indexPage.drive_file_id)
     : '(No index yet)';
 
+  // index.md is hand-maintained by the model and drifts; the pages table is the
+  // truth. Without this list the model cannot see what already exists and happily
+  // writes a second page for an entity it already covered under another slug.
+  const { data: existingPages } = await ctx.supabase
+    .from('pages')
+    .select('slug, title, kind')
+    .eq('workspace_id', ctx.workspaceId)
+    .eq('zone', 'wiki')
+    .order('updated_at', { ascending: false })
+    .limit(400);
+
+  const inventory =
+    (existingPages ?? []).map((p) => `- ${p.slug} (${p.kind}) «${p.title ?? ''}»`).join('\n') ||
+    '(no pages yet)';
+
   const userMessage = `
 ## Current Wiki Index
 \`\`\`markdown
 ${indexContent}
 \`\`\`
+
+## Every page that already exists in this workspace (authoritative)
+${inventory}
 
 ## New Source to Ingest
 Title: ${ctx.sourceTitle}
@@ -59,6 +77,9 @@ ${ctx.sourceContent}
 \`\`\`
 
 Please integrate this source into the wiki following the instructions in your system prompt.
+
+Integrate, do not accumulate: before you writePage a slug that is not in the list above, check whether one of the pages listed already covers that entity/concept — even under a different name, casing or slug. If it does, readPage it and rewrite THAT page with the merged content. Never leave two pages describing the same thing.
+
 Remember: touch at least 5 existing pages (update + new), update index.md, and append to log.md.
 `.trim();
 

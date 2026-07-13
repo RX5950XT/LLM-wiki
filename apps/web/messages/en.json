@@ -123,7 +123,8 @@
     "target": "Target workspace",
     "targetAuto": "Auto (AI decides)",
     "targetCurrent": "Current workspace: {name}",
-    "routedTo": "Imported into \"{name}\""
+    "routedTo": "Imported into \"{name}\"",
+    "routedToNew": "Created workspace \"{name}\" and imported into it"
   },
   "sources": {
     "open": "Sources",

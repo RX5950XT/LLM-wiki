@@ -128,6 +128,8 @@ data class WikiUiState(
     val taggedWorkspaceIds: List<String> = emptyList(),
     /** "已導入到 X" notice after an auto-routed ingest */
     val ingestRoutedName: String? = null,
+    /** The routed workspace was created by the router (nothing existing fit) */
+    val ingestRoutedCreated: Boolean = false,
     /** The background maintenance job (health check + dedupe) is running */
     val organizeRunning: Boolean = false,
     /** Pages / workspaces changed so far by the running maintenance job */
@@ -925,7 +927,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun clearIngestNotice() {
-        _uiState.update { it.copy(ingestRoutedName = null) }
+        _uiState.update { it.copy(ingestRoutedName = null, ingestRoutedCreated = false) }
     }
 
     fun saveSynthesis(question: String, answer: String, citedSlugs: List<String>) {
@@ -1148,7 +1150,14 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
     fun ingestUrl(url: String, autoRoute: Boolean = false, onDone: (Boolean) -> Unit) {
         viewModelScope.launch {
             val wsId = workspaceId.value ?: return@launch
-            _uiState.update { it.copy(ingestLoading = true, ingestProgress = 0, ingestRoutedName = null) }
+            _uiState.update {
+                it.copy(
+                    ingestLoading = true,
+                    ingestProgress = 0,
+                    ingestRoutedName = null,
+                    ingestRoutedCreated = false,
+                )
+            }
             try {
                 val requestBody = buildJsonObject {
                     put("kind", "url")
@@ -1183,7 +1192,14 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
     fun ingestText(title: String, content: String, autoRoute: Boolean = false, onDone: (Boolean) -> Unit) {
         viewModelScope.launch {
             val wsId = workspaceId.value ?: return@launch
-            _uiState.update { it.copy(ingestLoading = true, ingestProgress = 0, ingestRoutedName = null) }
+            _uiState.update {
+                it.copy(
+                    ingestLoading = true,
+                    ingestProgress = 0,
+                    ingestRoutedName = null,
+                    ingestRoutedCreated = false,
+                )
+            }
             try {
                 val requestBody = buildJsonObject {
                     put("kind", "text")
@@ -1242,8 +1258,9 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
         val jobId = bodyJson?.get("jobId")?.jsonPrimitive?.contentOrNull
         val initialStatus = bodyJson?.get("status")?.jsonPrimitive?.contentOrNull
         // Auto-routed ingest: surface which workspace the AI picked
+        val routedCreated = bodyJson?.get("routed_workspace_created")?.jsonPrimitive?.booleanOrNull ?: false
         bodyJson?.get("routed_workspace_name")?.jsonPrimitive?.contentOrNull?.let { routedName ->
-            _uiState.update { it.copy(ingestRoutedName = routedName) }
+            _uiState.update { it.copy(ingestRoutedName = routedName, ingestRoutedCreated = routedCreated) }
         }
 
         if (jobId != null && initialStatus != "done") {
@@ -1259,6 +1276,8 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
         // Force full sync and content reload so the UI reflects ingest results immediately
         syncPagesInternal(wsId, forceSync = true)
         selectDefaultPageIfNeeded(wsId)
+        // Routing created a workspace server-side — the drawer must list it
+        if (routedCreated) refreshWorkspaces(preferredWorkspaceId = wsId, syncSelected = false)
         onDone(true)
     }
 

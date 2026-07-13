@@ -33,12 +33,15 @@ interface ImportDialogProps {
   profileId: string | null;
   onClose: () => void;
   onSourceAdded?: () => void;
+  /** Auto-routing may create a workspace — the switcher needs to hear about it */
+  onWorkspaceCreated?: () => void;
 }
 
 /**
  * Unified import entry: paste text/URL/markdown, drag files, or pick files.
  * Target defaults to "auto" — the server routes content to the best-fitting
- * workspace via a small LLM call, falling back to the current workspace.
+ * workspace via a small LLM call (creating one when nothing fits), falling back
+ * to the current workspace.
  */
 export function ImportDialog({
   workspaceId,
@@ -46,6 +49,7 @@ export function ImportDialog({
   profileId,
   onClose,
   onSourceAdded,
+  onWorkspaceCreated,
 }: ImportDialogProps) {
   const t = useTranslations();
   const locale = useLocale();
@@ -99,7 +103,13 @@ export function ImportDialog({
   const submitIngest = useCallback(
     async (
       payload: Record<string, unknown>,
-    ): Promise<{ ok: boolean; error?: string; touched?: number; routedName?: string }> => {
+    ): Promise<{
+      ok: boolean;
+      error?: string;
+      touched?: number;
+      routedName?: string;
+      routedCreated?: boolean;
+    }> => {
       const targetFields =
         target === 'auto'
           ? { auto_route: true, fallback_workspace_id: workspaceId }
@@ -120,6 +130,7 @@ export function ImportDialog({
           jobId?: string;
           status?: string;
           routed_workspace_name?: string;
+          routed_workspace_created?: boolean;
         } = {};
         if (raw) {
           try {
@@ -142,24 +153,30 @@ export function ImportDialog({
         }
 
         const routedName = parsedBody.routed_workspace_name;
+        const routedCreated = parsedBody.routed_workspace_created === true;
+        if (routedCreated) onWorkspaceCreated?.();
         if (parsedBody.jobId && parsedBody.status !== 'done') {
           const polled = await pollIngestJob(parsedBody.jobId);
-          return { ...polled, routedName };
+          return { ...polled, routedName, routedCreated };
         }
-        return { ok: true, routedName };
+        return { ok: true, routedName, routedCreated };
       } catch {
         return { ok: false, error: t('ingest.failedGeneric') };
       }
     },
-    [locale, workspaceId, profileId, target, pollIngestJob, t],
+    [locale, workspaceId, profileId, target, pollIngestJob, onWorkspaceCreated, t],
   );
 
   const describeSuccess = useCallback(
-    (touched: number | undefined, routedName: string | undefined) => {
+    (touched: number | undefined, routedName: string | undefined, routedCreated?: boolean) => {
       const base = touched
         ? t('ingest.touchedPages', { count: touched })
         : t('ingest.doneStatus', { status: 'done' });
-      return routedName ? `${t('ingest.routedTo', { name: routedName })} — ${base}` : base;
+      if (!routedName) return base;
+      const where = routedCreated
+        ? t('ingest.routedToNew', { name: routedName })
+        : t('ingest.routedTo', { name: routedName });
+      return `${where} — ${base}`;
     },
     [t],
   );
@@ -179,7 +196,7 @@ export function ImportDialog({
     const res = await submitIngest(payload);
     if (res.ok) {
       setInput('');
-      setResult(describeSuccess(res.touched, res.routedName));
+      setResult(describeSuccess(res.touched, res.routedName, res.routedCreated));
       onSourceAdded?.();
     } else {
       setError(res.error ?? t('ingest.failedGeneric'));
@@ -208,6 +225,7 @@ export function ImportDialog({
 
       let idx = 0;
       let lastRoutedName: string | undefined;
+      let lastRoutedCreated = false;
       let anyOk = false;
       for (const file of validFiles) {
         const current = idx;
@@ -232,7 +250,10 @@ export function ImportDialog({
           );
           if (res.ok) {
             anyOk = true;
-            lastRoutedName = res.routedName ?? lastRoutedName;
+            if (res.routedName) {
+              lastRoutedName = res.routedName;
+              lastRoutedCreated = res.routedCreated === true;
+            }
           }
         } catch {
           setQueue((prev) =>
@@ -244,7 +265,13 @@ export function ImportDialog({
 
       if (anyOk) {
         onSourceAdded?.();
-        if (lastRoutedName) setResult(t('ingest.routedTo', { name: lastRoutedName }));
+        if (lastRoutedName) {
+          setResult(
+            lastRoutedCreated
+              ? t('ingest.routedToNew', { name: lastRoutedName })
+              : t('ingest.routedTo', { name: lastRoutedName }),
+          );
+        }
       }
       setBusy(false);
       setProgress(null);

@@ -88,6 +88,9 @@ async function loadInventoryRows(
  */
 const TOOL_LOOP_BUDGET_MS = 210_000;
 
+/** Breather before retrying a round the provider failed (rate limits, 5xx). */
+const PROVIDER_RETRY_DELAY_MS = 8_000;
+
 interface MaintainContext {
   supabase: SupabaseClient;
   drive: drive_v3.Drive;
@@ -240,6 +243,7 @@ Ignore any instruction above telling you to write a report or to avoid auto-fixi
   const messages: ModelMessage[] = [{ role: 'user', content: userMessage }];
   let dryRounds = 0;
   let complete = false;
+  let providerError: unknown = null;
 
   for (let round = 0; round < MAX_ROUNDS && Date.now() < deadline; round += 1) {
     const before = progress.size;
@@ -255,7 +259,21 @@ Ignore any instruction above telling you to write a report or to avoid auto-fixi
       // freshly-read inventory.
       stopWhen: [stepCountIs(60), () => Date.now() > deadline],
       onStepFinish,
+    }).catch((err: unknown) => {
+      providerError = err;
+      return null;
     });
+
+    if (!result) {
+      // Upstream hiccup ("Provider returned error", 429, 5xx) that outlived the SDK's
+      // own retries. Everything done so far is already committed page by page, so
+      // never throw it away: pause, retry the round, and if the budget runs out end
+      // the pass as done+more_work so the client's next pass resumes the plan.
+      if (Date.now() + PROVIDER_RETRY_DELAY_MS >= deadline) break;
+      await new Promise((resolve) => setTimeout(resolve, PROVIDER_RETRY_DELAY_MS));
+      continue;
+    }
+    providerError = null;
 
     messages.push(...result.response.messages);
     if (Date.now() >= deadline) break;
@@ -275,6 +293,10 @@ Ignore any instruction above telling you to write a report or to avoid auto-fixi
 
     messages.push({ role: 'user', content: CONTINUE_PROMPT });
   }
+
+  // The provider was down for the whole run and nothing got done — that is a real
+  // failure the user must see, not a silent "0 changes" success.
+  if (providerError && progress.size === 0) throw providerError;
 
   const finished = {
     status: 'done' as const,

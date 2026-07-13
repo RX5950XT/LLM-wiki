@@ -808,6 +808,7 @@ export function ConversationPanel({
           profileId={selectedProfileId}
           onClose={() => setShowImport(false)}
           onSourceAdded={onSourceAdded}
+          onWorkspaceCreated={onWorkspacesChanged}
         />
       )}
     </div>

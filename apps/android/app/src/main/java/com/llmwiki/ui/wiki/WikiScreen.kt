@@ -649,7 +649,11 @@ fun WikiScreen(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(
-                                text = stringResource(R.string.wiki_ingest_routed, routedName),
+                                text = stringResource(
+                                    if (uiState.ingestRoutedCreated) R.string.wiki_ingest_routed_new
+                                    else R.string.wiki_ingest_routed,
+                                    routedName,
+                                ),
                                 color = MaterialTheme.colorScheme.onPrimaryContainer,
                                 style = MaterialTheme.typography.bodySmall,
                                 modifier = Modifier.weight(1f).padding(vertical = 10.dp),
