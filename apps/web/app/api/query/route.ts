@@ -10,6 +10,7 @@ import {
 } from '@/lib/google/drive-auth';
 import { createLLMClient } from '@/lib/ai/client';
 import { buildWikiTools, type ActionProposal } from '@/lib/ai/tools';
+import { loadDefaultProfileId } from '@/lib/ai/profile';
 import { resolveUiLocaleFromRequest } from '@/lib/i18n/ui-locale';
 import { getDefaultPrompt } from '@llm-wiki/prompts';
 
@@ -80,15 +81,7 @@ export async function POST(request: NextRequest) {
   }
 
   if (!profileId) {
-    // Workspaces usually have no *_profile_id bound at all, so fall back to the
-    // owner's default profile instead of 422-ing a client that didn't send one.
-    const { data: defaultProfile } = await supabase
-      .from('llm_profiles')
-      .select('id')
-      .eq('owner_id', user.id)
-      .eq('is_default', true)
-      .maybeSingle();
-    profileId = defaultProfile?.id ?? null;
+    profileId = await loadDefaultProfileId(supabase, user.id);
   }
 
   if (!profileId) return new Response('No LLM profile configured', { status: 422 });

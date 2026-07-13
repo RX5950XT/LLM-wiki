@@ -8,6 +8,7 @@ import {
   isGoogleDriveAuthError,
 } from '@/lib/google/drive-auth';
 import { runIngestPipeline } from '@/lib/ai/ingest-pipeline';
+import { loadDefaultProfileId } from '@/lib/ai/profile';
 import { getDefaultPrompt } from '@llm-wiki/prompts';
 import { resolveUiLocaleFromRequest } from '@/lib/i18n/ui-locale';
 
@@ -47,7 +48,10 @@ export async function POST(
     .single();
   if (!workspace) return NextResponse.json({ error: 'Workspace not found' }, { status: 404 });
 
-  const profileId = workspace.ingest_profile_id ?? workspace.default_profile_id ?? null;
+  const profileId =
+    workspace.ingest_profile_id ??
+    workspace.default_profile_id ??
+    (await loadDefaultProfileId(supabase, user.id));
   if (!profileId) {
     return NextResponse.json(
       { error: 'No LLM profile configured. Go to Settings to add one.' },
