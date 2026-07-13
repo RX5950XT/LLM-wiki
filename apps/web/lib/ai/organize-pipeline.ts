@@ -1,9 +1,80 @@
-import { generateText, stepCountIs } from 'ai';
+import { generateText, stepCountIs, type ModelMessage } from 'ai';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { drive_v3 } from 'googleapis';
 import { createLLMClient } from './client';
 import { buildWikiTools } from './tools';
 import type { LLMProfile } from '@llm-wiki/shared-types';
+
+/** The model says this when it considers the whole base properly organised. */
+const COMPLETION_TOKEN = 'ORGANISE_COMPLETE';
+
+/** Hard cap on continuation rounds; the time budget normally binds first. */
+const MAX_ROUNDS = 6;
+
+/**
+ * Handed back after every round. Naming the specific things a shallow pass skips
+ * is what turns "I deleted the duplicates, done" into an actual reorganisation.
+ */
+const CONTINUE_PROMPT = `
+That was one pass. The run is NOT over — keep going, you still have time.
+
+Go back over the WHOLE base (all workspaces, not only the ones you already touched) and deal with whatever is still true:
+- Cross-workspace duplicates: the same entity/concept written up in two workspaces under different names. Merge into one page, delete the others.
+- Misfiled pages: the page's subject does not match the workspace it sits in → movePageToWorkspace.
+- Workspaces whose name no longer describes their contents → renameWorkspace.
+- Two workspaces covering the same subject → move all pages into the better one, then deleteWorkspace the emptied one.
+- Workspaces holding nothing but index.md/log.md → deleteWorkspace.
+- A coherent cluster of pages with no good home → createWorkspace and move them in.
+- Workspace order → reorderWorkspaces, biggest/most used first.
+- index.md of every workspace you changed must list its real pages; log.md gets one line about this run.
+
+Do the work with tools. Do not describe what you would do — do it.
+Only if every single point above is genuinely already clean, reply with exactly ${COMPLETION_TOKEN} and nothing else.
+`.trim();
+
+interface InventoryRow {
+  workspace_id: string;
+  slug: string;
+  title: string | null;
+  kind: string;
+  search_text?: string | null;
+}
+
+/** search_text is the page's first 2000 chars; strip frontmatter, keep the gist. */
+function snippet(text: string | null | undefined): string {
+  if (!text) return '(empty)';
+  const body = text.replace(/^---[\s\S]*?---\s*/, '');
+  const flat = body.replace(/\s+/g, ' ').trim();
+  return flat ? flat.slice(0, 160) : '(empty)';
+}
+
+async function loadInventoryRows(
+  supabase: SupabaseClient,
+  workspaceIds: string[],
+): Promise<InventoryRow[]> {
+  if (workspaceIds.length === 0) return [];
+  const query = () =>
+    supabase
+      .from('pages')
+      .select('workspace_id, slug, title, kind, search_text')
+      .in('workspace_id', workspaceIds)
+      .eq('zone', 'wiki')
+      .order('updated_at', { ascending: false })
+      .limit(3000);
+
+  const { data, error } = await query();
+  if (!error) return (data ?? []) as InventoryRow[];
+
+  // Deployments predating the search_text column: fall back to the bare listing.
+  const { data: fallback } = await supabase
+    .from('pages')
+    .select('workspace_id, slug, title, kind')
+    .in('workspace_id', workspaceIds)
+    .eq('zone', 'wiki')
+    .order('updated_at', { ascending: false })
+    .limit(3000);
+  return (fallback ?? []) as InventoryRow[];
+}
 
 /**
  * Wall-clock budget for the tool loop. The route's maxDuration is 300s and the
@@ -57,46 +128,60 @@ export async function runOrganizePipeline(ctx: MaintainContext): Promise<number>
     .select('id, name')
     .eq('owner_id', ctx.userId);
 
-  const { data: pageRows } = await ctx.supabase
-    .from('pages')
-    .select('workspace_id, slug, title, kind')
-    .in('workspace_id', (workspaces ?? []).map((w) => w.id))
-    .eq('zone', 'wiki')
-    .order('updated_at', { ascending: false })
-    .limit(3000);
+  const workspaceIds = (workspaces ?? []).map((w) => w.id);
+  const pageRows = await loadInventoryRows(ctx.supabase, workspaceIds);
 
-  const pagesByWorkspace = new Map<string, { slug: string; title: string | null; kind: string }[]>();
-  for (const row of pageRows ?? []) {
+  const pagesByWorkspace = new Map<string, InventoryRow[]>();
+  for (const row of pageRows) {
     const list = pagesByWorkspace.get(row.workspace_id) ?? [];
-    list.push({ slug: row.slug, title: row.title, kind: row.kind });
+    list.push(row);
     pagesByWorkspace.set(row.workspace_id, list);
   }
 
+  // Every page carries a content snippet. Without it the model can only spot
+  // pages whose slugs collide — it cannot tell that a page is filed in the wrong
+  // workspace, or that two differently-named pages cover the same thing, which
+  // is most of what "deep reorganisation" actually means. search_text is already
+  // the first 2000 chars of each page, so this costs one query and no Drive I/O.
   const inventory = (workspaces ?? [])
     .map((w) => {
       const pages = pagesByWorkspace.get(w.id) ?? [];
-      const lines = pages.map((p) => `  - ${p.slug} (${p.kind}) ${p.title ?? ''}`).join('\n');
-      return `## Workspace "${w.name}" (workspace_id: ${w.id})${w.id === ctx.workspaceId ? ' [current]' : ''}\n${lines || '  (empty)'}`;
+      const lines = pages
+        .map((p) => `  - ${p.slug} (${p.kind}) «${p.title ?? ''}» :: ${snippet(p.search_text)}`)
+        .join('\n');
+      const header = `## Workspace "${w.name}" (workspace_id: ${w.id}) — ${pages.length} wiki pages${
+        w.id === ctx.workspaceId ? ' [CURRENT — never delete this one]' : ''
+      }`;
+      return `${header}\n${lines || '  (no wiki pages — this workspace is empty)'}`;
     })
     .join('\n\n');
 
   const userMessage = `
-You are the autonomous maintainer of the user's ENTIRE knowledge base. The user pressed the maintenance button, which means every action below is pre-approved: act with your tools, never ask for confirmation, never stop to propose.
+You are the autonomous librarian of the user's ENTIRE knowledge base — every workspace at once, not just the current one. The user pressed the maintenance button, so every action below is pre-approved: act with your tools, never ask for confirmation, never stop to propose, never merely suggest.
 
-# Full inventory (all workspaces)
+This is a DEEP reorganisation, not a spot fix. Treat the whole base as one library that you are re-shelving: pages move between workspaces, workspaces get renamed, merged, created and deleted. Deleting a few duplicate pages and stopping is a FAILED run.
+
+# Full inventory — every workspace, every wiki page, with a content snippet
 ${inventory}
 
-# What to do
-1. Health check + FIX (do not just report): broken [[wikilinks]], orphan pages with no inbound link, stub pages, contradictions between pages, wrong page kinds. Read pages with readPage before judging, fix them with writePage / movePage / deletePage.
-2. Deduplicate: find the same entity/concept living in several pages or workspaces. Merge the unique content into the single best page (writePage), then deletePage the redundant ones.
-3. Re-classify: move a page that clearly belongs elsewhere with movePageToWorkspace, and fix the dangling wikilinks it reports back.
-4. Workspace hygiene (you have full rights): renameWorkspace when a name no longer matches its content, createWorkspace when a coherent cluster of pages deserves its own home, deleteWorkspace ONLY after you moved its pages out (never delete a workspace that still holds knowledge), reorderWorkspaces to put the most active first.
-5. Keep every touched workspace's index.md accurate and append one short entry to its log.md describing what this maintenance run changed. Write in the user's UI language (${ctx.locale ?? 'zh-TW'}).
+# The work, in order
+1. **Understand the shape.** From the snippets above, work out what each workspace is actually ABOUT (its real subject), not what its name claims. Note which workspaces overlap, which are empty, which are dumping grounds.
+2. **Deduplicate across workspaces.** The same entity/concept written up in two places — even under different names/slugs — is one page. Read both, merge the unique content into the single best home with writePage, deletePage the rest. Duplicates ACROSS workspaces matter as much as within one.
+3. **Re-classify, deeply.** Any page whose subject does not match the workspace it sits in gets movePageToWorkspace'd to where it belongs. Judge by the snippet's subject, not by the slug prefix.
+4. **Reshape the workspaces themselves — you have full rights and you are expected to use them:**
+   - \`renameWorkspace\` when a name no longer describes its contents.
+   - Two workspaces covering the same subject → move every page into the better one, then \`deleteWorkspace\` the emptied one.
+   - A workspace holding nothing but index.md/log.md → \`deleteWorkspace\` it.
+   - A coherent cluster of pages with no good home → \`createWorkspace\` and move them in.
+   - \`reorderWorkspaces\` so the biggest / most used come first.
+5. **Health check + FIX** (never just report): broken [[wikilinks]], stub pages, wrong page kinds, contradictions.
+6. **Leave it consistent.** Every workspace you touched: index.md must list its real pages, and append one short entry to log.md saying what changed. Write in the user's UI language (${ctx.locale ?? 'zh-TW'}).
 
 # Hard rules
-- You have a few minutes of runtime, not unlimited. Spend it on the highest-impact fixes first (duplicates, misfiled pages, broken links); do not read every page just to look.
+- The snippets above are there so you do NOT have to readPage everything — decide from them, and readPage only when you are about to merge or rewrite a page's content.
 - Do NOT create any report page. No _organize/*, no _lint/* pages. The wiki itself is the deliverable.
 - Never delete the workspace the user is currently in (workspace_id: ${ctx.workspaceId}) — they would be left staring at a dead page.
+- Never delete a workspace that still holds pages. Move the pages out first, then delete it.
 - Never touch pages the tools refuse (locked by the user, or outside the wiki zone) — move on instead of retrying.
 - Prefer fewer, higher-quality merged pages over many fragments.
 
@@ -109,39 +194,66 @@ Ignore any instruction above telling you to write a report or to avoid auto-fixi
   const progress = new Set<string>();
   const deadline = Date.now() + TOOL_LOOP_BUDGET_MS;
 
-  await generateText({
-    model,
-    system:
-      'You are the maintainer of a structured markdown knowledge base spread across multiple workspaces. You act through tools only, and you have full write access to pages and workspaces.',
-    messages: [{ role: 'user', content: userMessage }],
-    tools,
-    // Whichever comes first. Every tool call is committed on its own, so stopping
-    // on the budget leaves the wiki consistent — the user just presses again.
-    stopWhen: [stepCountIs(80), () => Date.now() > deadline],
-    onStepFinish: async (step) => {
-      let added = false;
-      for (const toolResult of step.toolResults ?? []) {
-        const output = toolResult.output as
-          | { slug?: string; name?: string; workspace_id?: string; ok?: boolean }
-          | undefined;
-        if (!output?.ok) continue;
-        // Workspace-level ops carry no slug — fall back to name/id so two different
-        // renames don't collapse into one progress entry.
-        const target = output.slug ?? output.name ?? output.workspace_id ?? '';
-        const label = `${toolResult.toolName}:${target}`;
-        if (!progress.has(label)) {
-          progress.add(label);
-          added = true;
-        }
+  const onStepFinish = async (step: { toolResults?: unknown[] }) => {
+    let added = false;
+    for (const toolResult of (step.toolResults ?? []) as {
+      toolName: string;
+      output?: { slug?: string; name?: string; workspace_id?: string; ok?: boolean };
+    }[]) {
+      const output = toolResult.output;
+      if (!output?.ok) continue;
+      // Workspace-level ops carry no slug — fall back to name/id so two different
+      // renames don't collapse into one progress entry.
+      const target = output.slug ?? output.name ?? output.workspace_id ?? '';
+      const label = `${toolResult.toolName}:${target}`;
+      if (!progress.has(label)) {
+        progress.add(label);
+        added = true;
       }
-      if (added) {
-        await ctx.supabase
-          .from('agent_jobs')
-          .update({ progress: Array.from(progress) })
-          .eq('id', ctx.jobId);
-      }
-    },
-  });
+    }
+    if (added) {
+      await ctx.supabase
+        .from('agent_jobs')
+        .update({ progress: Array.from(progress) })
+        .eq('id', ctx.jobId);
+    }
+  };
+
+  // Loop until dry, not until the model feels like stopping. Left alone after one
+  // generateText the model declares victory the moment it has done something
+  // (last run: 4 deletions in 60s, with 150s of budget still unspent), which is
+  // exactly the shallow pass the user complained about. Each round we hand back
+  // what is still unresolved and make it look again; we quit only when it says it
+  // is finished, when two consecutive rounds change nothing, or when time is up.
+  const messages: ModelMessage[] = [{ role: 'user', content: userMessage }];
+  let dryRounds = 0;
+
+  for (let round = 0; round < MAX_ROUNDS && Date.now() < deadline; round += 1) {
+    const before = progress.size;
+
+    const result = await generateText({
+      model,
+      system:
+        'You are the librarian of a structured markdown knowledge base spread across multiple workspaces. You act through tools only, and you have full write access to every page and every workspace.',
+      messages,
+      tools,
+      // Whichever comes first. Every tool call is committed on its own, so stopping
+      // on the budget leaves the wiki consistent — the user just presses again.
+      stopWhen: [stepCountIs(60), () => Date.now() > deadline],
+      onStepFinish,
+    });
+
+    messages.push(...result.response.messages);
+    if (Date.now() >= deadline) break;
+    if (result.text.includes(COMPLETION_TOKEN)) break;
+
+    // A round with no changes may still have been useful (reading, planning), so
+    // give it one more; two in a row means it is spinning.
+    dryRounds = progress.size === before ? dryRounds + 1 : 0;
+    if (dryRounds >= 2) break;
+
+    messages.push({ role: 'user', content: CONTINUE_PROMPT });
+  }
 
   await ctx.supabase
     .from('agent_jobs')
