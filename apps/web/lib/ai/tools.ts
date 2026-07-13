@@ -64,6 +64,36 @@ function normalizeSlug(slug: string): string {
   return s.endsWith('.md') ? s : `${s}.md`;
 }
 
+/**
+ * Resolve a model-supplied slug to the slug a page is ACTUALLY stored under.
+ *
+ * The model copies slugs out of the page inventory, and a batch of legacy rows
+ * live there without the `.md` suffix. Blindly appending `.md` made those pages
+ * unreachable: readPage/deletePage looked up a row that does not exist, so the
+ * model would writePage a fresh `X.md`, delete that same `X.md` believing it had
+ * removed the duplicate, and churn until the function's 300s budget ran out.
+ * Ask the DB instead of guessing. Returns null when no page matches.
+ */
+async function resolveExistingSlug(
+  supabase: SupabaseClient,
+  workspaceId: string,
+  rawSlug: string,
+): Promise<string | null> {
+  const raw = rawSlug.trim();
+  const normalized = normalizeSlug(raw);
+  const candidates = raw === normalized ? [normalized] : [normalized, raw];
+
+  const { data } = await supabase
+    .from('pages')
+    .select('slug')
+    .eq('workspace_id', workspaceId)
+    .in('slug', candidates);
+  if (!data?.length) return null;
+
+  // Prefer the canonical `.md` row when both forms somehow exist.
+  return data.find((page) => page.slug === normalized)?.slug ?? data[0]!.slug;
+}
+
 const workspaceIdParam = z
   .string()
   .uuid()
@@ -150,15 +180,17 @@ export function buildWikiTools(ctx: ToolContext) {
         // Only record reads from the CURRENT workspace as citations — a cross-
         // workspace read would produce a chip that dead-links in this workspace.
         if (scope.workspaceId === ctx.workspaceId) ctx.onPageRead?.(slug);
+        const storedSlug = await resolveExistingSlug(ctx.supabase, scope.workspaceId, slug);
+        if (!storedSlug) return { error: `Page not found: ${slug}` };
         const { data: page } = await ctx.supabase
           .from('pages')
           .select('drive_file_id, title')
           .eq('workspace_id', scope.workspaceId)
-          .eq('slug', slug)
+          .eq('slug', storedSlug)
           .single();
         if (!page) return { error: `Page not found: ${slug}` };
         const content = await readDriveFile(ctx.drive, page.drive_file_id);
-        return { slug, title: page.title, content };
+        return { slug: storedSlug, title: page.title, content };
       },
     }),
 
@@ -262,11 +294,13 @@ export function buildWikiTools(ctx: ToolContext) {
         }
         // Surface not-found / locked BEFORE proposing — otherwise the confirm
         // card would only fail on click. Mirrors deletePageForWorkspace's guards.
+        const storedSlug = await resolveExistingSlug(ctx.supabase, scope.workspaceId, rawSlug);
+        if (!storedSlug) return { error: `Page not found: ${slug}` };
         const { data: existing } = await ctx.supabase
           .from('pages')
           .select('id, locked_by_human')
           .eq('workspace_id', scope.workspaceId)
-          .eq('slug', slug)
+          .eq('slug', storedSlug)
           .maybeSingle();
         if (!existing) return { error: `Page not found: ${slug}` };
         if (existing.locked_by_human) {
@@ -274,11 +308,11 @@ export function buildWikiTools(ctx: ToolContext) {
         }
         const gated = gateDestructive({
           action: 'delete_page',
-          params: { workspace_id: scope.workspaceId, slug },
-          label: `Delete page ${slug}`,
+          params: { workspace_id: scope.workspaceId, slug: storedSlug },
+          label: `Delete page ${storedSlug}`,
         });
         if (gated) return gated;
-        return deletePageCore(scope, slug);
+        return deletePageCore(scope, storedSlug);
       },
     }),
 
@@ -302,11 +336,13 @@ export function buildWikiTools(ctx: ToolContext) {
         if ('error' in scope) return scope;
         const guardError = guardWikiSlug(rawOldSlug) ?? guardWikiSlug(rawNewSlug);
         if (guardError) return { error: guardError };
-        const oldSlug = normalizeSlug(rawOldSlug);
         const newSlug = normalizeSlug(rawNewSlug);
-        if (PROTECTED_SLUGS.has(oldSlug)) {
-          return { error: `Page "${oldSlug}" is a core wiki page and cannot be moved.` };
+        if (PROTECTED_SLUGS.has(normalizeSlug(rawOldSlug))) {
+          return { error: `Page "${rawOldSlug}" is a core wiki page and cannot be moved.` };
         }
+        // The stored slug may lack the .md suffix (legacy rows) — move THAT row.
+        const oldSlug = await resolveExistingSlug(ctx.supabase, scope.workspaceId, rawOldSlug);
+        if (!oldSlug) return { error: `Page not found: ${rawOldSlug}` };
 
         const { data: page } = await ctx.supabase
           .from('pages')
@@ -545,11 +581,12 @@ export function buildWikiTools(ctx: ToolContext) {
 
         const guardError = guardWikiSlug(rawSlug) ?? (new_slug ? guardWikiSlug(new_slug) : null);
         if (guardError) return { error: guardError };
-        const slug = normalizeSlug(rawSlug);
         const targetSlug = normalizeSlug(new_slug ?? rawSlug);
-        if (PROTECTED_SLUGS.has(slug) || PROTECTED_SLUGS.has(targetSlug)) {
+        if (PROTECTED_SLUGS.has(normalizeSlug(rawSlug)) || PROTECTED_SLUGS.has(targetSlug)) {
           return { error: 'Core wiki pages (index.md, log.md) cannot be moved across workspaces.' };
         }
+        const slug = await resolveExistingSlug(ctx.supabase, fromScope.workspaceId, rawSlug);
+        if (!slug) return { error: `Page not found: ${rawSlug}` };
 
         const { data: page } = await ctx.supabase
           .from('pages')
@@ -636,12 +673,17 @@ export async function writePageForWorkspace(
   if (guardError) return { error: guardError };
   const slug = normalizeSlug(rawSlug);
 
-  const { data: existing } = await deps.supabase
-    .from('pages')
-    .select('id, drive_file_id, version, title, locked_by_human')
-    .eq('workspace_id', scope.workspaceId)
-    .eq('slug', slug)
-    .maybeSingle();
+  // The page may be stored under a legacy suffix-less slug. Overwrite THAT row
+  // (and migrate it to `.md` below) rather than creating a twin next to it.
+  const storedSlug = await resolveExistingSlug(deps.supabase, scope.workspaceId, rawSlug);
+  const { data: existing } = storedSlug
+    ? await deps.supabase
+        .from('pages')
+        .select('id, drive_file_id, version, title, locked_by_human')
+        .eq('workspace_id', scope.workspaceId)
+        .eq('slug', storedSlug)
+        .maybeSingle()
+    : { data: null };
 
   if (existing?.locked_by_human) {
     return {
@@ -664,6 +706,8 @@ export async function writePageForWorkspace(
 
   if (existing) {
     await updatePageRecord(deps, existing.id, {
+      // `slug` (not storedSlug): a legacy row converges to the canonical .md form.
+      slug,
       drive_file_id: fileId,
       content_hash: contentHash,
       version: existing.version + 1,
@@ -685,13 +729,14 @@ export async function writePageForWorkspace(
     });
   }
 
-  // Sync page_links: delete old outgoing links, insert new ones
+  // Sync page_links: delete old outgoing links, insert new ones. A migrated
+  // legacy row still has links filed under its old suffix-less slug.
   const toSlugs = extractWikiLinks(content_md);
   const { error: delError } = await deps.supabase
     .from('page_links')
     .delete()
     .eq('workspace_id', scope.workspaceId)
-    .eq('from_slug', slug);
+    .in('from_slug', storedSlug && storedSlug !== slug ? [slug, storedSlug] : [slug]);
   if (delError) throw new Error(`page_links delete failed: ${delError.message}`);
   if (toSlugs.length > 0) {
     const { error: insError } = await deps.supabase.from('page_links').insert(
@@ -706,10 +751,14 @@ export async function writePageForWorkspace(
 export async function deletePageForWorkspace(deps: PageOpDeps, scope: Scope, rawSlug: string) {
   const guardError = guardWikiSlug(rawSlug);
   if (guardError) return { error: guardError };
-  const slug = normalizeSlug(rawSlug);
-  if (PROTECTED_SLUGS.has(slug)) {
-    return { error: `Page "${slug}" is a core wiki page and cannot be deleted.` };
+  if (PROTECTED_SLUGS.has(normalizeSlug(rawSlug))) {
+    return { error: `Page "${rawSlug}" is a core wiki page and cannot be deleted.` };
   }
+  // Delete the row that actually exists — legacy rows have no .md suffix, and
+  // forcing one made the model delete the page it had just written instead.
+  const slug = await resolveExistingSlug(deps.supabase, scope.workspaceId, rawSlug);
+  if (!slug) return { error: `Page not found: ${rawSlug}` };
+  const linkSlugs = [...new Set([slug, normalizeSlug(slug)])];
 
   const { data: page } = await deps.supabase
     .from('pages')
@@ -726,14 +775,14 @@ export async function deletePageForWorkspace(deps: PageOpDeps, scope: Scope, raw
     .from('page_links')
     .delete()
     .eq('workspace_id', scope.workspaceId)
-    .eq('from_slug', slug);
+    .in('from_slug', linkSlugs);
   if (outgoingLinksError) throw new Error(`page_links delete failed: ${outgoingLinksError.message}`);
 
   const { error: incomingLinksError } = await deps.supabase
     .from('page_links')
     .delete()
     .eq('workspace_id', scope.workspaceId)
-    .eq('to_slug', slug);
+    .in('to_slug', linkSlugs);
   if (incomingLinksError) throw new Error(`page_links delete failed: ${incomingLinksError.message}`);
 
   let driveWarning: string | undefined;

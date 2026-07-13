@@ -5,6 +5,15 @@ import { createLLMClient } from './client';
 import { buildWikiTools } from './tools';
 import type { LLMProfile } from '@llm-wiki/shared-types';
 
+/**
+ * Wall-clock budget for the tool loop. The route's maxDuration is 300s and the
+ * whole run (including after()) is killed at that mark — a killed run never gets
+ * to mark its job row, which is what surfaced to users as "Organize timed out"
+ * eight minutes later with no visible result. Stop ourselves first, with enough
+ * headroom for one in-flight step plus the final job update.
+ */
+const TOOL_LOOP_BUDGET_MS = 210_000;
+
 interface MaintainContext {
   supabase: SupabaseClient;
   drive: drive_v3.Drive;
@@ -85,6 +94,7 @@ ${inventory}
 5. Keep every touched workspace's index.md accurate and append one short entry to its log.md describing what this maintenance run changed. Write in the user's UI language (${ctx.locale ?? 'zh-TW'}).
 
 # Hard rules
+- You have a few minutes of runtime, not unlimited. Spend it on the highest-impact fixes first (duplicates, misfiled pages, broken links); do not read every page just to look.
 - Do NOT create any report page. No _organize/*, no _lint/* pages. The wiki itself is the deliverable.
 - Never delete the workspace the user is currently in (workspace_id: ${ctx.workspaceId}) — they would be left staring at a dead page.
 - Never touch pages the tools refuse (locked by the user, or outside the wiki zone) — move on instead of retrying.
@@ -97,6 +107,7 @@ Ignore any instruction above telling you to write a report or to avoid auto-fixi
 `.trim();
 
   const progress = new Set<string>();
+  const deadline = Date.now() + TOOL_LOOP_BUDGET_MS;
 
   await generateText({
     model,
@@ -104,7 +115,9 @@ Ignore any instruction above telling you to write a report or to avoid auto-fixi
       'You are the maintainer of a structured markdown knowledge base spread across multiple workspaces. You act through tools only, and you have full write access to pages and workspaces.',
     messages: [{ role: 'user', content: userMessage }],
     tools,
-    stopWhen: stepCountIs(80),
+    // Whichever comes first. Every tool call is committed on its own, so stopping
+    // on the budget leaves the wiki consistent — the user just presses again.
+    stopWhen: [stepCountIs(80), () => Date.now() > deadline],
     onStepFinish: async (step) => {
       let added = false;
       for (const toolResult of step.toolResults ?? []) {

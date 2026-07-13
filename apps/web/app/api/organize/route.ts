@@ -167,7 +167,12 @@ export async function POST(request: NextRequest) {
   return NextResponse.json({ jobId: job.id, status: 'running' }, { status: 202 });
 }
 
-const STALE_JOB_MS = 8 * 60 * 1000;
+/**
+ * maxDuration is 300s, so a job still 'running' past this mark was killed
+ * mid-flight and will never finish. Keep it tight: a stale row blocks the
+ * one-at-a-time lock, and the user's next press would 409 until it expires.
+ */
+const STALE_JOB_MS = 6 * 60 * 1000;
 
 export async function GET(request: NextRequest) {
   const { supabase, user } = await getRequestUser(request);
