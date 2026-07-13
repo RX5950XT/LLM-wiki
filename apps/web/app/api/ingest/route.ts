@@ -178,6 +178,19 @@ export async function POST(request: NextRequest) {
       .eq('owner_id', user.id)
       .single();
 
+  // Workspaces routinely carry no *_profile_id (nothing binds one after the profile
+  // is created), so without this the import 422s the moment a client omits
+  // profile_id. /api/organize already falls back this way.
+  const loadDefaultProfileId = async (): Promise<string | null> => {
+    const { data } = await supabase
+      .from('llm_profiles')
+      .select('id')
+      .eq('owner_id', user.id)
+      .eq('is_default', true)
+      .maybeSingle();
+    return data?.id ?? null;
+  };
+
   // Ownership-gate BEFORE any outbound fetch, so an attacker can't drive the
   // server to fetch arbitrary URLs by passing a workspace they don't own.
   const gateWorkspaceId = autoRoute ? fallbackWorkspaceId! : explicitWorkspaceId!;
@@ -240,7 +253,10 @@ export async function POST(request: NextRequest) {
 
   if (autoRoute) {
     const routingProfileId =
-      overrideProfileId ?? gateWorkspace.ingest_profile_id ?? gateWorkspace.default_profile_id;
+      overrideProfileId ??
+      gateWorkspace.ingest_profile_id ??
+      gateWorkspace.default_profile_id ??
+      (await loadDefaultProfileId());
     if (!routingProfileId) {
       return NextResponse.json(
         { error: 'No LLM profile configured. Go to Settings to add one.' },
@@ -286,7 +302,7 @@ export async function POST(request: NextRequest) {
     workspace.default_profile_id ??
     gateWorkspace.ingest_profile_id ??
     gateWorkspace.default_profile_id ??
-    null;
+    (await loadDefaultProfileId());
 
   if (!profileId) {
     return NextResponse.json(
