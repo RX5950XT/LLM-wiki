@@ -20,9 +20,9 @@ That was one pass. The run is NOT over — keep going, you still have time.
 
 Go back over the WHOLE base (all workspaces, not only the ones you already touched) and deal with whatever is still true:
 - Cross-workspace duplicates: the same entity/concept written up in two workspaces under different names. Merge into one page, delete the others.
-- Misfiled pages: the page's subject does not match the workspace it sits in → movePageToWorkspace.
+- Misfiled pages: the page's subject does not match the workspace it sits in → movePageToWorkspace. Only into a workspace that is ABOUT that subject — never into the current workspace as a catch-all.
 - Workspaces whose name no longer describes their contents → renameWorkspace.
-- Two workspaces covering the same subject → move all pages into the better one, then deleteWorkspace the emptied one.
+- Two workspaces covering the SAME subject (not merely both "finance-ish") → move all pages into the better one; the next pass deletes the emptied husk.
 - Workspaces holding nothing but index.md/log.md → deleteWorkspace.
 - A coherent cluster of pages with no good home → createWorkspace and move them in.
 - Workspace order → reorderWorkspaces, biggest/most used first.
@@ -116,19 +116,6 @@ interface MaintainContext {
 export async function runOrganizePipeline(
   ctx: MaintainContext,
 ): Promise<{ changes: number; complete: boolean }> {
-  const tools = buildWikiTools({
-    supabase: ctx.supabase,
-    drive: ctx.drive,
-    workspaceId: ctx.workspaceId,
-    wikiFolderId: ctx.wikiFolderId,
-    userId: ctx.userId,
-    crossWorkspace: true,
-    // The maintenance button IS the confirmation. Gating deletes here would leave
-    // duplicates in place forever (nobody can confirm a background job's cards).
-    confirmDestructive: false,
-    locale: ctx.locale,
-  });
-
   const model = createLLMClient(ctx.profile);
 
   const { data: workspaces } = await ctx.supabase
@@ -145,6 +132,32 @@ export async function runOrganizePipeline(
     list.push(row);
     pagesByWorkspace.set(row.workspace_id, list);
   }
+
+  const knowledgeCount = (workspaceId: string) =>
+    (pagesByWorkspace.get(workspaceId) ?? []).filter((p) => !SCAFFOLDING_SLUGS.has(p.slug)).length;
+
+  // Only workspaces that are ALREADY empty may be deleted by this run. A model that
+  // reads "merge workspaces" as "sweep everything into the one I started from, then
+  // delete the husks" wipes out whole shelves in a single pass and reports it as
+  // progress. Legitimate merges still work: the pages move now, and the next pass
+  // (more_work chains automatically) sees the emptied workspace and deletes it.
+  const deletableWorkspaceIds = new Set(
+    workspaceIds.filter((id) => knowledgeCount(id) === 0 && id !== ctx.workspaceId),
+  );
+
+  const tools = buildWikiTools({
+    supabase: ctx.supabase,
+    drive: ctx.drive,
+    workspaceId: ctx.workspaceId,
+    wikiFolderId: ctx.wikiFolderId,
+    userId: ctx.userId,
+    crossWorkspace: true,
+    // The maintenance button IS the confirmation. Gating deletes here would leave
+    // duplicates in place forever (nobody can confirm a background job's cards).
+    confirmDestructive: false,
+    locale: ctx.locale,
+    deletableWorkspaceIds,
+  });
 
   // Every page carries a content snippet. Without it the model can only spot
   // pages whose slugs collide — it cannot tell that a page is filed in the wrong
@@ -176,6 +189,8 @@ You are the autonomous librarian of the user's ENTIRE knowledge base — every w
 
 This is a DEEP reorganisation, not a spot fix. Treat the whole base as one library that you are re-shelving: pages move between workspaces, workspaces get renamed, merged, created and deleted. Deleting a few duplicate pages and stopping is a FAILED run.
 
+But re-shelving means SORTING, never PILING UP. Fewer workspaces is not the goal — a coherent shelf is. A run that sweeps unrelated subjects into one workspace and deletes the rest has destroyed the library, and that is far worse than doing nothing.
+
 # Full inventory — every workspace, every wiki page, with a content snippet
 ${inventory}
 
@@ -193,6 +208,10 @@ ${inventory}
 6. **Leave it consistent.** Every workspace you touched: index.md must list its real pages, and append one short entry to log.md saying what changed. Write in the user's UI language (${ctx.locale ?? 'zh-TW'}).
 
 # Hard rules
+- **Every move must make the TARGET workspace MORE coherent.** Move a page only into a workspace whose existing pages share its subject. If no workspace fits, leave the page where it is or createWorkspace for the whole cluster — never park it somewhere unrelated.
+- **The current workspace (workspace_id: ${ctx.workspaceId}) is NOT a destination by default.** It is simply where the user happened to press the button. Moving pages into it requires exactly the same subject match as any other workspace. Sweeping the base into it is the single worst thing you can do here.
+- **Merging two workspaces is only correct when they cover the SAME subject.** Personal finance is not geopolitics; semiconductors are not AI research. When two workspaces are about different things, they stay separate — no matter how small one of them is. A workspace with only a handful of pages is fine.
+- Do not empty a workspace in order to delete it. **This run can only delete workspaces that were ALREADY empty when it started** — the tool will refuse the others. If pages genuinely belong elsewhere, move them on the merits; the next pass will find the workspace empty and delete it then.
 - The snippets above are there so you do NOT have to readPage everything — decide from them, and readPage only when you are about to merge or rewrite a page's content.
 - Do NOT create any report page. No _organize/*, no _lint/* pages. The wiki itself is the deliverable.
 - Never delete the workspace the user is currently in (workspace_id: ${ctx.workspaceId}) — they would be left staring at a dead page.

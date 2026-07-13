@@ -33,6 +33,13 @@ interface ToolContext {
   onPageRead?: (slug: string) => void;
   /** UI locale for workspace creation seeds */
   locale?: string | null;
+  /**
+   * Workspaces this run may delete (maintenance: the ones already empty when it
+   * started). Undefined = no restriction. Without it a run can "merge" by sweeping
+   * a workspace's pages into an unrelated one and then deleting the husk — the
+   * user loses a whole shelf and only sees "N changes".
+   */
+  deletableWorkspaceIds?: Set<string>;
 }
 
 export interface Scope {
@@ -532,6 +539,15 @@ export function buildWikiTools(ctx: ToolContext) {
           .eq('owner_id', userId)
           .maybeSingle();
         if (!ws) return { error: `Workspace not found: ${workspace_id}` };
+
+        if (ctx.deletableWorkspaceIds && !ctx.deletableWorkspaceIds.has(workspace_id)) {
+          return {
+            error:
+              `Workspace "${ws.name}" still held knowledge pages when this run started, so it cannot be deleted here. ` +
+              'Only workspaces that were already empty may be deleted. If its pages truly belong elsewhere, move them ' +
+              'on the merits and the next maintenance pass will find it empty.',
+          };
+        }
 
         const gated = gateDestructive({
           action: 'delete_workspace',

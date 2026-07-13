@@ -11,6 +11,8 @@
 3. **路由可以自建工作區**：`routeToWorkspace()` 允許模型回 `NEW: <名稱>` → `createWorkspaceForUser()`。防護：上限 12 個工作區、`NEW:` 名稱與既有工作區不分大小寫比對命中就沿用（批次導入是逐檔序列送出，否則會生同名雙胞胎）、整庫還沒有知識頁時直接 fallback。回應多帶 `routed_workspace_created`，Web/Android 收到就刷新工作區選單。
 4. **`/api/ingest` 補 profile fallback**：production 的工作區**全部**沒有 `default_profile_id`（profile 是工作區建立後才加的），client 只要沒帶 `profile_id` 就 422「No LLM profile configured」。改成跟 `/api/organize` 一樣退回 owner 的 `is_default` profile。
 
+**⚠️ 同一次驗證中踩到的重大問題（已修＋已復原）**：為了驗 provider 容錯，我在 production 按了維護。gemini-3.5-flash 把「合併工作區」執行成「把所有頁面掃進被觸發的那個工作區，再刪掉空殼」——兩輪內把「個人理財與退休規劃」14 頁全倒進「地緣政治與全球貿易」並**刪掉整個工作區**（頁面沒丟，但少了一個書架，UI 只顯示「已變更 N 項」）。修法兩層：(1) 機械式防護 `deletableWorkspaceIds`——維護 job 只能刪「本輪開始時知識頁數＝0」的工作區，合法合併靠 `more_work` 接力在下一輪刪空殼（`apps/web/lib/ai/tools.test.ts` 有測試）；(2) prompt 補「每次搬移必須讓目標工作區更內聚／當前工作區不是垃圾桶／不同主題不可合併／不要為了刪而清空」。復原方式：`/api/workspaces` 重建工作區 + 用 chat 的 `movePageToWorkspace` 把 19 頁精確搬回（本機 Google client secret 已失效，無法跑本地腳本）。最終狀態＝原本的 AI 29 / 科技 33 / 地緣 53 / 理財 14（科技少 1 頁是正常的重複頁合併）。**下次要動維護按鈕前，先確認新防護在真實資料上跑過一次。**
+
 **production 實測**（用瀏覽器直接打 API）：
 - 路由：把一段已存在於「科技產業動態」的 Cloudflare 財報內容，從「地緣政治與全球貿易」用自動判斷導入 → `routed_workspace_name: 科技產業動態`（不是 fallback）。
 - 去重：該次 ingest 觸及 5 個知識頁，**全部是既有 slug**（`entities/cloudflare.md`、`summaries/cloudflare_2026_q1.md`、`concepts/workers_platform.md`…），工作區知識頁數 34 → 34，**零新增重複頁**。

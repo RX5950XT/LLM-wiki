@@ -79,6 +79,18 @@ export async function POST(request: NextRequest) {
     profileId = workspace.query_profile_id ?? workspace.default_profile_id ?? null;
   }
 
+  if (!profileId) {
+    // Workspaces usually have no *_profile_id bound at all, so fall back to the
+    // owner's default profile instead of 422-ing a client that didn't send one.
+    const { data: defaultProfile } = await supabase
+      .from('llm_profiles')
+      .select('id')
+      .eq('owner_id', user.id)
+      .eq('is_default', true)
+      .maybeSingle();
+    profileId = defaultProfile?.id ?? null;
+  }
+
   if (!profileId) return new Response('No LLM profile configured', { status: 422 });
 
   const { data: profile } = await supabase
