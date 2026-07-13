@@ -32,6 +32,9 @@ Do the work with tools. Do not describe what you would do — do it.
 Only if every single point above is genuinely already clean, reply with exactly ${COMPLETION_TOKEN} and nothing else.
 `.trim();
 
+/** Present in every workspace, never movable or deletable — not knowledge. */
+const SCAFFOLDING_SLUGS = new Set(['index.md', 'log.md']);
+
 interface InventoryRow {
   workspace_id: string;
   slug: string;
@@ -148,13 +151,20 @@ export async function runOrganizePipeline(
   const inventory = (workspaces ?? [])
     .map((w) => {
       const pages = pagesByWorkspace.get(w.id) ?? [];
-      const lines = pages
+      // index.md/log.md exist in every workspace and can never be moved or deleted;
+      // counting them as content is what stopped the model from deleting emptied
+      // workspaces (it renamed one "【準備刪除】…" instead).
+      const knowledge = pages.filter((p) => !SCAFFOLDING_SLUGS.has(p.slug));
+      const lines = knowledge
         .map((p) => `  - ${p.slug} (${p.kind}) «${p.title ?? ''}» :: ${snippet(p.search_text)}`)
         .join('\n');
-      const header = `## Workspace "${w.name}" (workspace_id: ${w.id}) — ${pages.length} wiki pages${
+      const header = `## Workspace "${w.name}" (workspace_id: ${w.id}) — ${knowledge.length} knowledge pages${
         w.id === ctx.workspaceId ? ' [CURRENT — never delete this one]' : ''
       }`;
-      return `${header}\n${lines || '  (no wiki pages — this workspace is empty)'}`;
+      const body =
+        lines ||
+        '  (EMPTY — only index.md/log.md scaffolding left. Delete this workspace with deleteWorkspace.)';
+      return `${header}\n${body}`;
     })
     .join('\n\n');
 
@@ -172,8 +182,8 @@ ${inventory}
 3. **Re-classify, deeply.** Any page whose subject does not match the workspace it sits in gets movePageToWorkspace'd to where it belongs. Judge by the snippet's subject, not by the slug prefix.
 4. **Reshape the workspaces themselves — you have full rights and you are expected to use them:**
    - \`renameWorkspace\` when a name no longer describes its contents.
-   - Two workspaces covering the same subject → move every page into the better one, then \`deleteWorkspace\` the emptied one.
-   - A workspace holding nothing but index.md/log.md → \`deleteWorkspace\` it.
+   - Two workspaces covering the same subject → move every knowledge page into the better one, then \`deleteWorkspace\` the emptied one.
+   - **index.md and log.md are scaffolding, not knowledge.** EVERY workspace has them and they can never be moved or deleted. A workspace whose only remaining pages are index.md and log.md is EMPTY — call \`deleteWorkspace\` on it directly. Do not leave it lying around, and never rename it to something like "to be deleted": just delete it.
    - A coherent cluster of pages with no good home → \`createWorkspace\` and move them in.
    - \`reorderWorkspaces\` so the biggest / most used come first.
 5. **Health check + FIX** (never just report): broken [[wikilinks]], stub pages, wrong page kinds, contradictions.
@@ -183,7 +193,7 @@ ${inventory}
 - The snippets above are there so you do NOT have to readPage everything — decide from them, and readPage only when you are about to merge or rewrite a page's content.
 - Do NOT create any report page. No _organize/*, no _lint/* pages. The wiki itself is the deliverable.
 - Never delete the workspace the user is currently in (workspace_id: ${ctx.workspaceId}) — they would be left staring at a dead page.
-- Never delete a workspace that still holds pages. Move the pages out first, then delete it.
+- Never delete a workspace that still holds KNOWLEDGE pages. Move those out first, then delete it. index.md/log.md do not count as knowledge and never block a deletion.
 - Never touch pages the tools refuse (locked by the user, or outside the wiki zone) — move on instead of retrying.
 - Prefer fewer, higher-quality merged pages over many fragments.
 
