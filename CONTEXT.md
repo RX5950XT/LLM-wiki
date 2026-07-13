@@ -2,7 +2,18 @@
 
 > 給下一個 AI Agent 的接手指南。架構與規範細節以 `CLAUDE.md` / `AGENTS.md` 為準，這裡只記「最近做了什麼、為什麼、還缺什麼」。
 
-## 最近一次變更（2026-07-13，Phase 16 維護合一 + AI 真權限）
+## 最近一次變更（2026-07-13，Phase 16b 自動整理逾時修復）
+
+使用者回報：按「自動分類」跑出 `Organize timed out`，而且**看不到任何變化**。查 production `agent_jobs` 發現 job 其實有做 14 個操作、卻在 532 秒被判逾時。兩個獨立的 bug 疊在一起：
+
+- **root cause 1：工具層 slug 盲目補 `.md`（真正讓它「沒有變化」的原因）**。舊資料留著一批**沒有副檔名**的 slug（`concepts/HBM`、`concepts/Advanced_Packaging`、`concepts/Data_Center_Infrastructure`、`synthesis/Crypto_Fintech_2026_Q2`）。inventory 把原始 slug 餵給模型，但 `readPage`/`deletePage`/`movePage` 都先 `normalizeSlug()` 補成 `X.md` 再查 → **永遠查無此頁**。模型的因應是：`writePage` 一個新的 `X.md`（等於製造第三個重複頁），再 `deletePage` 同一個 `X.md` —— **刪掉自己剛寫的頁**，原本的舊頁分毫未動，然後不斷重試直到被砍。失敗 job 的 progress 完全對得上：`writePage:concepts/HBM.md` 緊接 `deletePage:concepts/HBM.md`，四頁皆然。修法：`resolveExistingSlug()` 問 DB 實際存在的 slug（優先 `.md`、退回字面 legacy row），`readPage`/`writePage`/`deletePage`/`movePage`/`movePageToWorkspace` 全部改走它；`writePage` 命中 legacy row 時順手把 slug 收斂成 `.md`（`page_links.from_slug` 一併搬移），資料會自然收斂，不需要 migration。
+- **root cause 2：pipeline 沒有 wall-clock 預算**。Vercel `maxDuration = 300s` 一到直接殺掉整個 invocation（含 `after()`），被殺的 run 來不及寫 job row → 停在 `running` → 8 分鐘後才被 GET 的 stale sweep 掃成 `Organize timed out`。加 `TOOL_LOOP_BUDGET_MS = 210_000` 到 `stopWhen`，自己先優雅停下並標記 `done`（每個工具呼叫各自 commit，中途停下 wiki 仍一致，使用者再按一次即可續做）。stale sweep 8 分鐘 → 6 分鐘，避免死掉的 job 用 one-at-a-time 鎖把下一次按鈕 409 擋住。
+
+驗證方式：以 production 實際資料模擬新舊解析器，「舊版查無此頁」的 slug 恰好就是失敗 job 裡 churn 的那 4 頁，1:1 對上。`bun run typecheck` / `bun run build` / `assembleDebug` 皆通過。
+
+> 未做：沒有替那 4 個 legacy row 寫 migration——工具修好後維護 job 本來就該把它們合併掉，這正是它的工作。若之後發現它仍合不掉，再考慮資料面處理。
+
+## 上一次變更（2026-07-13，Phase 16 維護合一 + AI 真權限）
 
 使用者三點回報，全部完成（Web + Android）：兩顆維護按鈕合成一顆、整理去重要真的會動、不要報告頁。
 
