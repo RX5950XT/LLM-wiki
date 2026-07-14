@@ -56,7 +56,13 @@ export function pickDeletableWorkspaces(
   });
 }
 
-/** Delete the emptied husks. Returns progress labels for agent_jobs.progress. */
+/**
+ * Delete the emptied husks. Returns progress labels for agent_jobs.progress.
+ *
+ * Sweeping is a chore, not the job: a workspace whose Drive folder is gone makes
+ * `deleteWorkspaceForUser` throw, and an uncaught throw here would fail the whole
+ * maintenance run before the model even starts. Skip the husk, keep going.
+ */
 export async function sweepEmptyWorkspaces(
   drive: drive_v3.Drive,
   userId: string,
@@ -68,7 +74,10 @@ export async function sweepEmptyWorkspaces(
   const deletedIds = new Set<string>();
 
   for (const ws of pickDeletableWorkspaces(workspaces, pages, currentWorkspaceId, Date.now())) {
-    const result = await deleteWorkspaceForUser(drive, userId, ws.id);
+    const result = await deleteWorkspaceForUser(drive, userId, ws.id).catch((error: unknown) => ({
+      ok: false as const,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    }));
     if (result.ok) {
       ops.push(`deleteWorkspace:${ws.name}`);
       deletedIds.add(ws.id);
