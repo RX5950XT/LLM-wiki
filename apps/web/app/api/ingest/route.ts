@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse, after } from 'next/server';
 import { z } from 'zod';
-import type { drive_v3 } from 'googleapis';
 import { writeDriveFile, findFile, readDriveFile } from '@/lib/drive/client';
-import { createWorkspaceForUser } from '@/lib/workspaces/manage';
 import { getRequestUser } from '@/lib/supabase/request';
 import {
   createDriveClientForUser,
@@ -11,10 +9,10 @@ import {
 } from '@/lib/google/drive-auth';
 
 export const maxDuration = 300;
-import { generateText } from 'ai';
 import { urlToMarkdown } from '@/lib/fetch/url-to-markdown';
-import { createLLMClient } from '@/lib/ai/client';
+import type { createLLMClient } from '@/lib/ai/client';
 import { runIngestPipeline } from '@/lib/ai/ingest-pipeline';
+import { routeToWorkspace } from '@/lib/ai/route-workspace';
 import { loadDefaultProfileId } from '@/lib/ai/profile';
 import { getDefaultPrompt } from '@llm-wiki/prompts';
 import { resolveUiLocaleFromRequest } from '@/lib/i18n/ui-locale';
@@ -43,104 +41,6 @@ const IngestSchema = z.discriminatedUnion('kind', [
     ...TargetFields,
   }),
 ]);
-
-/** Scaffolding every workspace has; not evidence that it holds any knowledge. */
-const SCAFFOLDING_SLUGS = ['index.md', 'log.md'];
-
-/** Ceiling on router-created workspaces, so a misfiring router can't shard the base. */
-const MAX_AUTO_WORKSPACES = 12;
-
-/** `NEW: <name>` — the router's way of saying nothing existing fits. */
-function parseNewWorkspaceName(text: string): string | null {
-  const match = /NEW\s*[:：]\s*(.+)/i.exec(text);
-  if (!match) return null;
-  const name = (match[1]?.split('\n')[0] ?? '')
-    .replace(/^["'「『]+|["'」』]+$/g, '')
-    .trim()
-    .slice(0, 50);
-  return name.length >= 2 ? name : null;
-}
-
-/**
- * Pick the best-fitting workspace for a piece of content with one small LLM call,
- * creating a new workspace when the content belongs to none of them. Falls back to
- * `fallbackId` on any failure — routing must never block an ingest.
- */
-async function routeToWorkspace(
-  supabase: Awaited<ReturnType<typeof getRequestUser>>['supabase'],
-  drive: drive_v3.Drive,
-  userId: string,
-  profileRow: Parameters<typeof createLLMClient>[0],
-  sourceTitle: string,
-  sourceContent: string,
-  fallbackId: string,
-  locale: string,
-): Promise<{ workspaceId: string; created: boolean }> {
-  const stay = { workspaceId: fallbackId, created: false };
-
-  const { data: workspaces } = await supabase
-    .from('workspaces')
-    .select('id, name')
-    .eq('owner_id', userId);
-  if (!workspaces?.length) return stay;
-
-  const { data: pageRows } = await supabase
-    .from('pages')
-    .select('workspace_id, title')
-    .in('workspace_id', workspaces.map((w) => w.id))
-    .eq('zone', 'wiki')
-    .not('slug', 'in', `(${SCAFFOLDING_SLUGS.join(',')})`)
-    .order('updated_at', { ascending: false })
-    .limit(1200);
-
-  // An empty base has nothing to route against — the first import stays put rather
-  // than spawning a second workspace next to the empty one.
-  if (!pageRows?.length) return stay;
-
-  const titlesByWorkspace = new Map<string, string[]>();
-  for (const row of pageRows) {
-    const list = titlesByWorkspace.get(row.workspace_id) ?? [];
-    if (list.length < 40 && row.title) list.push(row.title);
-    titlesByWorkspace.set(row.workspace_id, list);
-  }
-
-  const workspaceSummary = workspaces
-    .map((w) => `- id: ${w.id}\n  name: ${w.name}\n  pages: ${(titlesByWorkspace.get(w.id) ?? []).join(', ') || '(empty)'}`)
-    .join('\n');
-
-  const canCreate = workspaces.length < MAX_AUTO_WORKSPACES;
-
-  try {
-    const model = createLLMClient(profileRow);
-    const { text } = await generateText({
-      model,
-      system:
-        'You file incoming content into the knowledge workspace where it belongs. Answer with a single line and nothing else.',
-      prompt: `Workspaces:\n${workspaceSummary}\n\nContent title: ${sourceTitle}\nContent excerpt:\n${sourceContent.slice(0, 1500)}\n\nReply with EITHER the id of the workspace this content belongs in${
-        canCreate
-          ? `, OR "NEW: <short workspace name>" if its subject is clearly outside every workspace above. Strongly prefer an existing workspace — related content belongs together, and a new workspace is only right when nothing above covers this subject at all. Name it in the user's language (${locale}).`
-          : '. You must pick one of the ids above.'
-      }`,
-    });
-
-    const candidate = workspaces.find((w) => text.includes(w.id));
-    if (candidate) return { workspaceId: candidate.id, created: false };
-
-    const newName = canCreate ? parseNewWorkspaceName(text) : null;
-    if (!newName) return stay;
-
-    // Two files of the same new subject in one batch must not create two workspaces.
-    const sameName = workspaces.find(
-      (w) => w.name.trim().toLowerCase() === newName.toLowerCase(),
-    );
-    if (sameName) return { workspaceId: sameName.id, created: false };
-
-    const created = await createWorkspaceForUser(drive, userId, newName, locale);
-    return created.ok ? { workspaceId: created.id, created: true } : stay;
-  } catch {
-    return stay;
-  }
-}
 
 export async function POST(request: NextRequest) {
   const locale = resolveUiLocaleFromRequest(request);
@@ -275,7 +175,10 @@ export async function POST(request: NextRequest) {
       if (!routed) return NextResponse.json({ error: 'Workspace not found' }, { status: 404 });
       workspace = routed;
     }
-    routedWorkspaceName = workspace.name;
+    // Only claim a destination when the router actually chose one. A failed routing
+    // call still imports (into the workspace the user was in), but reporting that as
+    // "filed into X" is how silent fallbacks passed for working auto-classification.
+    if (routing.decided) routedWorkspaceName = workspace.name;
   } else {
     workspace_id = explicitWorkspaceId!;
     workspace = gateWorkspace;
