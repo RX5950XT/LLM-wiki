@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import {
+  findDeadLinks,
+  findPagesMissingFromIndex,
   findDuplicateClusters,
   pickDeletableWorkspaces,
   type InventoryRow,
@@ -90,5 +92,50 @@ describe('findDuplicateClusters', () => {
         page('b', 'log.md', 'Log'),
       ]),
     ).toEqual([]);
+  });
+});
+
+describe('findDeadLinks', () => {
+  const pages: InventoryRow[] = [
+    { workspace_id: 'ai', slug: 'concepts/agentic_ai.md', title: 'Agentic AI', kind: 'concept' },
+    { workspace_id: 'chips', slug: 'summaries/dram-crisis.md', title: 'DRAM 市場危機', kind: 'summary' },
+  ];
+
+  it('accepts a link written with the page title (the page API resolves it)', () => {
+    const dead = findDeadLinks(
+      [{ workspace_id: 'chips', from_slug: 'entities/tsmc.md', to_slug: 'DRAM 市場危機' }],
+      pages,
+    );
+    expect(dead).toEqual([]);
+  });
+
+  it('flags a link whose page was re-shelved into another workspace', () => {
+    const dead = findDeadLinks(
+      [{ workspace_id: 'chips', from_slug: 'entities/tsmc.md', to_slug: 'concepts/agentic-ai' }],
+      pages,
+    );
+    expect(dead).toHaveLength(1);
+    expect(dead[0]!.lives_in_workspace_id).toBe('ai');
+  });
+
+  it('flags a link to a page nobody ever wrote', () => {
+    const dead = findDeadLinks(
+      [{ workspace_id: 'ai', from_slug: 'index.md', to_slug: 'concepts/never-written' }],
+      pages,
+    );
+    expect(dead).toHaveLength(1);
+    expect(dead[0]!.lives_in_workspace_id).toBeUndefined();
+  });
+});
+
+describe('findPagesMissingFromIndex', () => {
+  it('lists the pages index.md never links to', () => {
+    const pages: InventoryRow[] = [
+      { workspace_id: 'ai', slug: 'index.md', title: 'Index', kind: 'index' },
+      { workspace_id: 'ai', slug: 'concepts/listed.md', title: 'Listed', kind: 'concept' },
+      { workspace_id: 'ai', slug: 'concepts/orphan.md', title: 'Orphan', kind: 'concept' },
+    ];
+    const links = [{ workspace_id: 'ai', from_slug: 'index.md', to_slug: 'concepts/listed' }];
+    expect(findPagesMissingFromIndex('ai', pages, links)).toEqual(['concepts/orphan.md']);
   });
 });

@@ -14,6 +14,7 @@ import com.llmwiki.data.IngestJobRow
 import com.llmwiki.data.LlmProfileRepository
 import com.llmwiki.data.LlmProfile
 import com.llmwiki.data.PageLinkRow
+import com.llmwiki.data.WikiTargetRow
 import com.llmwiki.data.PageRepository
 import com.llmwiki.data.SourceListItem
 import com.llmwiki.data.SourceRow
@@ -400,8 +401,55 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
 
     fun selectPageBySlug(slug: String) {
         val page = resolvePageSlug(slug)
-            ?: return
-        selectPage(page)
+        if (page != null) {
+            selectPage(page)
+            return
+        }
+        // Not in this workspace — maintenance re-shelves pages across workspaces and
+        // leaves every link behind pointing at nothing. The page still exists, so
+        // follow it there instead of silently doing nothing (the old behaviour).
+        followLinkToOtherWorkspace(slug)
+    }
+
+    private fun followLinkToOtherWorkspace(rawSlug: String) {
+        viewModelScope.launch {
+            val currentId = workspaceId.value
+            val target = runCatching {
+                supabase.requireAccessToken(forceRefresh = false)
+                val others = repository.getWorkspaces().filter { it.id != currentId }
+                if (others.isEmpty()) return@runCatching null
+                supabase.from("pages")
+                    .select(columns = Columns.raw("workspace_id, slug, title")) {
+                        filter {
+                            isIn("workspace_id", others.map { it.id })
+                            eq("zone", "wiki")
+                        }
+                    }
+                    .decodeList<WikiTargetRow>()
+                    .let { rows -> pickWikiTarget(rows, rawSlug) }
+            }.getOrNull()
+
+            if (target == null) {
+                _uiState.update { it.copy(syncError = str(R.string.error_page_not_found)) }
+                return@launch
+            }
+            refreshWorkspaces(
+                preferredWorkspaceId = target.workspaceId,
+                preferredPageSlug = target.slug,
+                syncSelected = true,
+            )
+        }
+    }
+
+    /** Unique alias match on slug, else on title — mirrors the server's link resolver. */
+    private fun pickWikiTarget(rows: List<WikiTargetRow>, rawSlug: String): WikiTargetRow? {
+        val target = canonicalWikiAlias(rawSlug)
+        if (target.isBlank()) return null
+        val bySlug = rows.filter { canonicalWikiAlias(it.slug) == target }
+        if (bySlug.size == 1) return bySlug.first()
+        if (bySlug.size > 1) return null
+        val byTitle = rows.filter { !it.title.isNullOrBlank() && canonicalWikiAlias(it.title) == target }
+        return byTitle.singleOrNull()
     }
 
     fun selectSearchResult(slug: String) {

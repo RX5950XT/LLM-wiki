@@ -4,10 +4,13 @@ import type { drive_v3 } from 'googleapis';
 import { createLLMClient } from './client';
 import { buildWikiTools } from './tools';
 import {
+  findDeadLinks,
   findDuplicateClusters,
+  findPagesMissingFromIndex,
   sweepEmptyWorkspaces,
   SCAFFOLDING_SLUGS,
   type InventoryRow,
+  type LinkRow,
 } from './organize-mechanical';
 import type { LLMProfile } from '@llm-wiki/shared-types';
 
@@ -43,6 +46,19 @@ function snippet(text: string | null | undefined): string {
   const body = text.replace(/^---[\s\S]*?---\s*/, '');
   const flat = body.replace(/\s+/g, ' ').trim();
   return flat ? flat.slice(0, 160) : '(empty)';
+}
+
+async function loadLinkRows(
+  supabase: SupabaseClient,
+  workspaceIds: string[],
+): Promise<LinkRow[]> {
+  if (workspaceIds.length === 0) return [];
+  const { data } = await supabase
+    .from('page_links')
+    .select('workspace_id, from_slug, to_slug')
+    .in('workspace_id', workspaceIds)
+    .limit(5000);
+  return (data ?? []) as LinkRow[];
 }
 
 async function loadInventoryRows(
@@ -221,6 +237,35 @@ export async function runOrganizePipeline(
         .join('\n')
     : '(none — every remaining duplicate is semantic: two different names for one thing. Find those from the snippets.)';
 
+  // Broken links and a stale index are set operations over the pages table, not
+  // judgement calls. The health check was told to "fix broken [[wikilinks]]" and
+  // never fixed one — it cannot cross-reference 580 links against 140 pages by
+  // reading an inventory. Code computes both lists; the model just applies them.
+  const linkRows = await loadLinkRows(ctx.supabase, workspaces.map((w) => w.id));
+  const deadLinks = findDeadLinks(linkRows, pageRows);
+  const deadLinkReport = deadLinks.length
+    ? deadLinks
+        .slice(0, 80)
+        .map((l) => {
+          const where = l.lives_in_workspace_id
+            ? `the page EXISTS in workspace "${workspaceName(l.lives_in_workspace_id)}" (workspace_id: ${l.lives_in_workspace_id}) — it was re-shelved`
+            : 'no page anywhere covers this — write it, or remove the link';
+          return `- ${workspaceName(l.workspace_id)} :: ${l.from_slug} → [[${l.to_slug}]] :: ${where}`;
+        })
+        .join('\n')
+    : '(none)';
+
+  const indexDriftReport = workspaces
+    .map((w) => {
+      const missing = findPagesMissingFromIndex(w.id, pageRows, linkRows);
+      if (!missing.length) return null;
+      return `- "${w.name}" (workspace_id: ${w.id}) — index.md does not link to ${missing.length} of its pages: ${missing
+        .slice(0, 30)
+        .join(', ')}`;
+    })
+    .filter(Boolean)
+    .join('\n');
+
   // Every page carries a content snippet. Without it the model can only spot
   // pages whose slugs collide — it cannot tell that a page is filed in the wrong
   // workspace, or that two differently-named pages cover the same thing, which
@@ -254,6 +299,12 @@ ${inventory}
 
 # Exact duplicates the system already found for you (same page written twice)
 ${duplicateReport}
+
+# Dead [[wikilinks]] the system already found for you — every one of these is broken TODAY
+${deadLinkReport}
+
+# index.md is out of date in these workspaces (pages exist but the index never mentions them)
+${indexDriftReport || '(none)'}
 ${
   frozenMoveSlugs.size
     ? `\n# Already re-shelved by an earlier pass of THIS run — the decision is made, do not move them again\n${Array.from(
@@ -274,8 +325,11 @@ ${
    - Two workspaces covering the same subject → move every knowledge page into the better one. Leave the emptied workspace alone: **the system deletes empty workspaces by itself** — you have no tool for it and you do not need one.
    - A coherent cluster of pages with no good home → \`createWorkspace\` and move them in.
    - \`reorderWorkspaces\` so the biggest / most used come first.
-5. **Health check + FIX** (never just report): broken [[wikilinks]], stub pages, wrong page kinds, contradictions.
-6. **Leave it consistent.** Every workspace you touched: index.md must list its real pages, and append one short entry to log.md saying what changed. Write in the user's UI language (${ctx.locale ?? 'zh-TW'}).
+5. **Fix the dead links listed above** (never just report them). For each one, open the page it lives on with readPage and rewrite it with writePage:
+   - target exists in another workspace → the link cannot reach it; either drop the \`[[…]]\` brackets (keep the words) or, if the subject really belongs here too, write a short page for it in this workspace.
+   - target exists nowhere → either write the page (if the subject deserves one) or remove the brackets. Never leave the link pointing at nothing.
+   Also fix stub pages, wrong page kinds and contradictions you notice while you are in there.
+6. **Bring index.md up to date** in every workspace listed under "index.md is out of date" — the pages named there exist and readers cannot find them. Also drop index entries for pages that no longer exist. Then append one short entry to log.md saying what changed. Write in the user's UI language (${ctx.locale ?? 'zh-TW'}).
 
 # Hard rules
 - **Every move must make the TARGET workspace MORE coherent.** Move a page only into a workspace whose existing pages share its subject. If no workspace fits, leave the page where it is or createWorkspace for the whole cluster — never park it somewhere unrelated.

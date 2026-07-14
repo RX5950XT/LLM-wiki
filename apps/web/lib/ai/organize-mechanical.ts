@@ -102,6 +102,75 @@ export async function sweepEmptyWorkspaces(
   return { ops, deletedIds };
 }
 
+export interface LinkRow {
+  workspace_id: string;
+  from_slug: string;
+  to_slug: string;
+}
+
+export interface DeadLink extends LinkRow {
+  /** Present when the target exists in a DIFFERENT workspace (maintenance moved it). */
+  lives_in_workspace_id?: string;
+}
+
+/**
+ * Links that point at nothing.
+ *
+ * The health check was told to "fix broken [[wikilinks]]" and never fixed any:
+ * finding them means cross-referencing every link against every page, which the
+ * model cannot do by eyeballing an inventory. Code can, exactly, in one pass —
+ * so code does it and hands over the list.
+ *
+ * A link is alive if some page in the same workspace matches it by slug alias or
+ * by title alias (that is what the page API resolves at read time, so anything it
+ * resolves must not be reported as broken here). What is left is genuinely dead:
+ * either the page sits in another workspace, or nobody ever wrote it.
+ */
+export function findDeadLinks(links: LinkRow[], pages: InventoryRow[]): DeadLink[] {
+  const aliasesByWorkspace = new Map<string, Set<string>>();
+  const workspacesByAlias = new Map<string, string>();
+
+  for (const page of pages) {
+    const set = aliasesByWorkspace.get(page.workspace_id) ?? new Set<string>();
+    for (const alias of [canonicalWikiAlias(page.slug), page.title ? canonicalWikiAlias(page.title) : '']) {
+      if (!alias) continue;
+      set.add(alias);
+      if (!workspacesByAlias.has(alias)) workspacesByAlias.set(alias, page.workspace_id);
+    }
+    aliasesByWorkspace.set(page.workspace_id, set);
+  }
+
+  const dead: DeadLink[] = [];
+  for (const link of links) {
+    const alias = canonicalWikiAlias(link.to_slug);
+    if (!alias) continue;
+    if (aliasesByWorkspace.get(link.workspace_id)?.has(alias)) continue;
+    const elsewhere = workspacesByAlias.get(alias);
+    dead.push(elsewhere ? { ...link, lives_in_workspace_id: elsewhere } : link);
+  }
+  return dead;
+}
+
+/**
+ * Pages a workspace's index.md does not link to. "The index is out of date" is a
+ * set difference, not a judgement call — the model only has to write the lines.
+ */
+export function findPagesMissingFromIndex(
+  workspaceId: string,
+  pages: InventoryRow[],
+  indexLinks: LinkRow[],
+): string[] {
+  const linked = new Set(
+    indexLinks
+      .filter((l) => l.workspace_id === workspaceId && l.from_slug === 'index.md')
+      .map((l) => canonicalWikiAlias(l.to_slug)),
+  );
+  return pages
+    .filter((p) => p.workspace_id === workspaceId && !SCAFFOLDING_SLUGS.has(p.slug))
+    .filter((p) => !linked.has(canonicalWikiAlias(p.slug)) && !linked.has(canonicalWikiAlias(p.title ?? '')))
+    .map((p) => p.slug);
+}
+
 export interface DuplicateCluster {
   label: string;
   pages: InventoryRow[];

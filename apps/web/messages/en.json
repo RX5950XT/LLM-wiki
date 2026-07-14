@@ -206,9 +206,15 @@
   "graph": {
     "loading": "Loading graph…",
     "empty": "No pages yet",
+    "emptyHint": "Import an article and the network grows itself.",
     "legendEntity": "Entity",
     "legendConcept": "Concept",
+    "legendSummary": "Summary",
     "legendSynthesis": "Synthesis",
-    "legendOther": "Other"
+    "legendOther": "Other",
+    "filterLabel": "Filter by kind",
+    "stats": "{pages} pages · {links} links",
+    "orphans": "{count} unlinked",
+    "zoomToFit": "Recenter"
   }
 }

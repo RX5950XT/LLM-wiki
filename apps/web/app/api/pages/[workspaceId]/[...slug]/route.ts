@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { readDriveFile, writeDriveFile } from '@/lib/drive/client';
 import { DriveReadError } from '@/lib/drive/errors';
 import { getRequestUser } from '@/lib/supabase/request';
-import { canonicalWikiAlias } from '@/lib/wiki/slug';
+import { pickAliasMatch } from '@/lib/wiki/resolve';
 import {
   createDriveClientForUser,
   GOOGLE_DRIVE_REAUTH_MESSAGE,
@@ -13,24 +13,69 @@ import {
 
 const PAGE_FIELDS = 'slug, title, kind, zone, drive_file_id, updated_by, locked_by_human, version';
 
+interface PageRow {
+  slug: string;
+  title: string | null;
+  kind: string;
+  zone: string;
+  drive_file_id: string;
+  updated_by: string;
+  locked_by_human: boolean;
+  version: number;
+}
+
 /**
- * Fallback for wiki links whose slug doesn't exactly match a page (wrong folder
- * prefix, casing, or `.md` suffix). Only resolves when a single page shares the
- * canonical alias — never guesses between colliding basenames.
+ * Fallback for wiki links whose slug doesn't exactly match a page: wrong folder
+ * prefix, casing, `.md` suffix — or the link names the page's TITLE rather than
+ * its slug, which is what the model writes most of the time. Only resolves on a
+ * unique match; colliding basenames are left dead rather than guessed at.
  */
 async function resolvePageByAlias(
   supabase: Awaited<ReturnType<typeof getRequestUser>>['supabase'],
   workspaceId: string,
   slugStr: string,
 ) {
-  const alias = canonicalWikiAlias(slugStr);
-  if (!alias) return null;
   const { data: candidates } = await supabase
     .from('pages')
     .select(PAGE_FIELDS)
     .eq('workspace_id', workspaceId);
-  const matches = (candidates ?? []).filter((p) => canonicalWikiAlias(p.slug as string) === alias);
-  return matches.length === 1 ? matches[0] : null;
+  return pickAliasMatch((candidates ?? []) as unknown as PageRow[], slugStr);
+}
+
+/**
+ * The link is dead in THIS workspace, but maintenance re-shelves pages across
+ * workspaces and every link left behind points at nothing. The page still exists —
+ * find it in the user's other workspaces so the reader can follow the link there
+ * instead of hitting a dead end in a library that does hold the page.
+ */
+async function resolvePageInOtherWorkspaces(
+  supabase: Awaited<ReturnType<typeof getRequestUser>>['supabase'],
+  userId: string,
+  currentWorkspaceId: string,
+  slugStr: string,
+): Promise<{ workspaceId: string; workspaceName: string; slug: string } | null> {
+  const { data: workspaces } = await supabase
+    .from('workspaces')
+    .select('id, name')
+    .eq('owner_id', userId)
+    .neq('id', currentWorkspaceId);
+  if (!workspaces?.length) return null;
+
+  const { data: candidates } = await supabase
+    .from('pages')
+    .select('workspace_id, slug, title')
+    .in('workspace_id', workspaces.map((w) => w.id))
+    .eq('zone', 'wiki');
+
+  const match = pickAliasMatch(
+    (candidates ?? []) as { workspace_id: string; slug: string; title: string | null }[],
+    slugStr,
+  );
+  if (!match) return null;
+
+  const workspace = workspaces.find((w) => w.id === match.workspace_id);
+  if (!workspace) return null;
+  return { workspaceId: workspace.id, workspaceName: workspace.name, slug: match.slug };
 }
 
 const LockSchema = z.object({ locked_by_human: z.boolean() });
@@ -69,6 +114,15 @@ export async function GET(
     const page = exact ?? (await resolvePageByAlias(supabase, workspaceId, slugStr));
 
     if (!page) {
+      // Not here — but maintenance may have re-shelved it into another workspace.
+      const moved = await resolvePageInOtherWorkspaces(supabase, user.id, workspaceId, slugStr);
+      if (moved) {
+        return jsonError(404, 'PAGE_MOVED_WORKSPACE', 'Page lives in another workspace', requestId, {
+          workspace_id: moved.workspaceId,
+          workspace_name: moved.workspaceName,
+          slug: moved.slug,
+        });
+      }
       return jsonError(404, 'PAGE_NOT_FOUND', 'Page not found', requestId);
     }
 

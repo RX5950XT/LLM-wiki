@@ -206,9 +206,15 @@
   "graph": {
     "loading": "載入關聯圖…",
     "empty": "尚無頁面",
+    "emptyHint": "匯入一篇文章，這裡就會長出知識網絡。",
     "legendEntity": "實體",
     "legendConcept": "概念",
+    "legendSummary": "摘要",
     "legendSynthesis": "整合",
-    "legendOther": "其他"
+    "legendOther": "其他",
+    "filterLabel": "依類型篩選",
+    "stats": "{pages} 頁 · {links} 條連結",
+    "orphans": "{count} 頁未連結",
+    "zoomToFit": "重新置中"
   }
 }

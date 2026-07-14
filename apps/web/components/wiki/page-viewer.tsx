@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback, useRef, type ReactNode } from 'react';
+import { useRouter } from 'next/navigation';
 import { Pencil, Lock, Unlock, RefreshCw, AlertTriangle, Check, X } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
@@ -168,6 +169,7 @@ export function PageViewer({
   refreshKey,
 }: PageViewerProps) {
   const t = useTranslations();
+  const router = useRouter();
   const [page, setPage] = useState<PageData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -236,11 +238,25 @@ export function PageViewer({
           const data = await response.json().catch(() => null) as
             | {
               content?: unknown;
-              error?: { code?: string; message?: string; requestId?: string };
+              error?: {
+                code?: string;
+                message?: string;
+                requestId?: string;
+                workspace_id?: string;
+                slug?: string;
+              };
             }
             | null;
           if (!response.ok) {
             const code = data?.error?.code ?? 'UNKNOWN';
+            // Maintenance re-shelved the page: follow it instead of calling the
+            // link dead. The workspace shell re-renders around the new workspace.
+            if (code === 'PAGE_MOVED_WORKSPACE' && data?.error?.workspace_id && data.error.slug) {
+              router.push(
+                `/w/${data.error.workspace_id}?page=${encodeURIComponent(data.error.slug)}`,
+              );
+              return null;
+            }
             const message = data?.error?.message ?? response.statusText;
             const requestId = data?.error?.requestId;
             throw new Error(`[${code}] ${message}${requestId ? ` (req: ${requestId})` : ''}`);
@@ -250,7 +266,8 @@ export function PageViewer({
           }
           return data as PageData;
         })
-        .then((data: PageData) => {
+        .then((data: PageData | null) => {
+          if (!data) return; // navigating to the workspace the page moved to
           setPage(data);
           setDraft(data.content);
           setEditing(false);
@@ -259,7 +276,7 @@ export function PageViewer({
         .catch((e) => setError(e instanceof Error ? e.message : String(e)))
         .finally(() => setLoading(false));
     },
-    [onPageLoaded, workspaceId, slug, t],
+    [onPageLoaded, workspaceId, slug, t, router],
   );
 
   // Fetch on slug change (asking first if unsaved editor changes would be lost)
