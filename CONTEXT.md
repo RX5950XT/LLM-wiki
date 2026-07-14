@@ -2,7 +2,31 @@
 
 > 給下一個 AI Agent 的接手指南。架構與規範細節以 `CLAUDE.md` / `AGENTS.md` 為準，這裡只記「最近做了什麼、為什麼、還缺什麼」。
 
-## 最近一次變更（2026-07-14，Phase 16g 失效連結／過時索引／知識圖譜視覺）
+## 最近一次變更（2026-07-14，Phase 16h 真人操作瀏覽器測完所有按鈕）
+
+使用者：「你自己操作瀏覽器測試按鈕看看所有功能，要導入的內容在 `D:\Workspace\其它\文章分類\整理後文章`，確認功能運作正常。」全程用 Chrome 操作 production UI（貼上／多檔佇列／維護／圖譜／搜尋／來源清單／對話），DB＋Vercel log 交叉驗證。
+
+### 四個真 bug（都是實際點下去才看得到的）
+
+1. **整份 index.md 的藍色連結全是死的**：LLM 幾乎都把連結寫成 `[[entities/donald-trump|Donald Trump]]`，而**兩個渲染器都沒有切 `|`**——href 變成 `?page=entities/donald-trump|Donald Trump.md`，那頁永遠不存在。後端 `extractWikiLinks` 一直有切，所以 `page_links` 表看起來很健康，**DB 指標與使用者體驗完全脫節**（上一輪我就是被這個騙過去）。修：`parseWikiLink()`（`lib/wiki/slug.ts`，有單元測試）供 Web／Android 渲染器共用，`GET /api/pages` 對含 `|` 的請求也切一次（救舊 client 與舊書籤）。
+2. **一次按鈕跑出兩條維護 pipeline**：兩個分頁各自輪詢同一個 job，都看到 `done && more_work` 就都送出下一輪。route 的「一次一個」是 check-then-insert，中間隔著好幾秒的 Drive 呼叫——**檢查擋不住併發**。修：migration `0019` 對 `agent_jobs (owner_id) where status='running'` 建 partial unique index（已套 production，實測第二個 POST 當場被擋），route 把 `23505` 轉成 409 + 現行 jobId。
+3. **知識圖譜的 zoom-to-fit 從來沒生效**：每次 Realtime 更新 → `setLoading(true)` → 容器換成 spinner → force graph 整個 unmount/remount → layout 重跑、鏡頭歸零。匯入或維護進行中時，圖就是一團在畫布中央跳動的毛球，連手動「重新置中」都會被下一次 remount 吃掉（我上一輪加的 `onEngineStop → zoomToFit` 因此看起來像壞的，其實是被 remount 抹掉）。修：只有第一次載入進 loading；之後 re-render 同一個 root、節點座標跨更新保留、`zoomToFit` 只在第一次 settle 做。實測 console `[graph] handle ok … zoom=1.23`，圖填滿面板、標籤出得來。
+4. **對話會回「空白答案」**：citation chips 有、`logs.answer_preview` 是空字串——`streamText` 一個字都沒吐（發生在 6 條維護 pipeline 同時打同一把 OpenRouter key 的時候）。修：串流沒有任何文字時回一句可讀訊息，並 `console.warn` 記下 `finishReason`／steps／工具呼叫。**空泡泡看起來像「wiki 沒有東西可講」，那是最糟的失敗形式。**
+
+### 實測結果（production，真實文章）
+
+- **導入**：4 檔佇列（貼上／多檔）全部成功，即時進度正常，來源清單顯示「已整合 N 個頁面」，沒有 0 頁的假成功。
+- **自動分類**：舊版部署下 4 篇只有 1 篇做出判斷（其餘靜默 fallback，但 UI 已不會謊稱分類過）；**新版部署後 2/2 正確**——楊立昆 → 「AI」、標普500 → 「個人理財與退休規劃」（都不是當前工作區）。路由失敗現在會進 log。
+- **維護（健康檢查＋整理）**：一次按鈕 6 輪、約 119 個操作。補寫了連結指向但不存在的頁（荷姆茲海峽、股票市場…）、把 UAP 那一叢拆成新工作區（9 頁）、把路由失敗落錯的三篇歸位（禮來→基本面投資、低軌道衛星→AI、標普500→個人理財）。
+- **連結健康度**：747 條連結 → 精確命中 545、alias 命中 63、可跨工作區跳轉 138、**真的死掉只剩 1 條**（維護前 33）。
+- **搜尋／來源清單／對話／圖譜**：都實際點過，正常。
+
+### 還沒做的
+
+- Android 這輪只跟著改渲染器（`MarkdownViewer` 切 `|`）並建置通過，**沒有在實機驗過**。
+- 127 篇文章只導入了 6 篇（測試用）。要整批灌進去請留意：一次匯入是序列跑的，每篇約 1.5–2 分鐘。
+
+## 上一次變更（2026-07-14，Phase 16g 失效連結／過時索引／知識圖譜視覺）
 
 使用者：「wiki 索引也要即時更新／依然有藍色連結失效／戳健康檢查似乎沒處理到／可以優化知識圖譜嗎」。
 

@@ -16,6 +16,12 @@ import { getDefaultPrompt } from '@llm-wiki/prompts';
 
 export const maxDuration = 120;
 
+/** Shown when the model streams no text at all — never leave an empty answer bubble. */
+const EMPTY_ANSWER_MESSAGE: Record<string, string> = {
+  'zh-TW': '模型這次沒有回覆任何內容（供應商暫時性問題）。請再問一次。',
+  en: 'The model returned no answer this time (a transient provider issue). Please ask again.',
+};
+
 const MessagesSchema = z
   .array(
     z.object({
@@ -266,8 +272,16 @@ export async function POST(request: NextRequest) {
 
   const stream = new ReadableStream({
     async start(controller) {
+      let wroteText = false;
       for await (const chunk of textStream) {
+        if (chunk) wroteText = true;
         controller.enqueue(encoder.encode(chunk));
+      }
+      // The provider does hand back an empty answer (seen under load: tools ran, then
+      // not one word). An empty bubble reads as "the wiki has nothing to say" — say
+      // what actually happened instead, so the user knows to ask again.
+      if (!wroteText) {
+        controller.enqueue(encoder.encode(EMPTY_ANSWER_MESSAGE[locale] ?? EMPTY_ANSWER_MESSAGE.en));
       }
       // Append citation + pending-action metadata after text ends
       const citations = Array.from(readSlugs).filter((s) => s !== 'index.md');

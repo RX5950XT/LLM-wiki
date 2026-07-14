@@ -449,13 +449,11 @@ export function GraphView({ workspaceId, activePage, onNodeClick, refreshKey = 0
         }
         rootRef.current.render(fg);
 
-        // The camera controls (fit, recenter) are the imperative handle. If it never
-        // arrives they fail silently and the base sits as an unreadable knot.
+        // The camera controls (fit, recenter) live on the imperative handle. Without
+        // it they fail silently and the base sits as an unreadable knot in the middle.
         setTimeout(() => {
           if (mounted && !fgRef.current) {
             console.warn('[graph] force-graph imperative handle missing — zoom controls are dead');
-          } else if (mounted) {
-            console.warn('[graph] handle ok', Object.keys(fgRef.current).slice(0, 8), 'zoom=', fgRef.current.zoom?.());
           }
         }, 1500);
       } catch (e) {
