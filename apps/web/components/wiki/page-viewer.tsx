@@ -8,6 +8,7 @@ import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { reconnectGoogleDrive } from '@/lib/google/drive-reconnect';
 import { createClient } from '@/lib/supabase/client';
+import { parseWikiLink } from '@/lib/wiki/slug';
 
 function stripFrontmatterAndWikilinks(content: string): string {
   let result = content;
@@ -15,12 +16,11 @@ function stripFrontmatterAndWikilinks(content: string): string {
     const end = result.indexOf('\n---', 3);
     if (end !== -1) result = result.slice(end + 4).trimStart();
   }
-  // Convert [[slug]] and [[slug#anchor]] to markdown links that our custom renderer intercepts.
+  // Convert [[slug]], [[slug#anchor]] and [[slug|label]] to markdown links our renderer intercepts.
   result = result.replace(/\[\[([^\]]+)\]\]/g, (_, target: string) => {
-    const [slug = '', anchor] = target.split('#');
-    const encodedSlug = encodeURIComponent(slug);
+    const { slug, label, anchor } = parseWikiLink(target);
     const encodedAnchor = anchor ? `#${encodeURIComponent(anchor)}` : '';
-    return `[${target}](wiki://${encodedSlug}${encodedAnchor})`;
+    return `[${label}](wiki://${encodeURIComponent(slug)}${encodedAnchor})`;
   });
   return result;
 }

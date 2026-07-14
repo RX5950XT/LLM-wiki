@@ -5,6 +5,7 @@ import { readDriveFile, writeDriveFile } from '@/lib/drive/client';
 import { DriveReadError } from '@/lib/drive/errors';
 import { getRequestUser } from '@/lib/supabase/request';
 import { pickAliasMatch } from '@/lib/wiki/resolve';
+import { normalizeWikiSlug, parseWikiLink } from '@/lib/wiki/slug';
 import {
   createDriveClientForUser,
   GOOGLE_DRIVE_REAUTH_MESSAGE,
@@ -96,7 +97,12 @@ export async function GET(
   try {
     const { workspaceId: rawWorkspaceId, slug } = await params;
     workspaceId = rawWorkspaceId;
-    slugStr = slug.join('/');
+    // Older clients (and any [[slug|label]] link they rendered) ask for
+    // "entities/foo|Foo.md" — the display text is not part of the slug.
+    const rawSlug = slug.join('/');
+    slugStr = rawSlug.includes('|')
+      ? normalizeWikiSlug(parseWikiLink(rawSlug).slug)
+      : rawSlug;
 
     const { supabase, user } = await getRequestUser(request);
     if (!user) {

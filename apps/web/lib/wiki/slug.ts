@@ -25,3 +25,15 @@ export function normalizeWikiSlug(slug: string): string {
   if (!trimmed) return trimmed;
   return trimmed.endsWith('.md') ? trimmed : `${trimmed}.md`;
 }
+
+/**
+ * Split the inside of a `[[…]]` into the parts a link needs: `[[slug|label#anchor]]`.
+ * The LLM writes the display form constantly; a renderer that keeps the pipe in the
+ * href asks the API for `entities/foo|Foo.md`, which exists nowhere.
+ */
+export function parseWikiLink(target: string): { slug: string; label: string; anchor: string } {
+  const [beforePipe = '', afterPipe] = target.split('|');
+  const [slug = '', anchor = ''] = beforePipe.split('#');
+  const label = (afterPipe ?? beforePipe).trim();
+  return { slug: slug.trim(), label, anchor: anchor.trim() };
+}

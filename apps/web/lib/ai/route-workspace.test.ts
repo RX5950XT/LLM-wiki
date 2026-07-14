@@ -53,6 +53,26 @@ describe('parseRoutingReply', () => {
     expect(parseRoutingReply('NEW: 咖啡烘焙', WORKSPACES, false)).toBeNull();
   });
 
+  it('accepts a name dressed in markdown', () => {
+    expect(parseRoutingReply('**地緣政治與全球貿易**', WORKSPACES, true)).toEqual({
+      kind: 'existing',
+      id: WORKSPACES[1].id,
+    });
+  });
+
+  it('accepts a name inside a sentence', () => {
+    expect(parseRoutingReply('這篇文章屬於「地緣政治與全球貿易」工作區。', WORKSPACES, true)).toEqual({
+      kind: 'existing',
+      id: WORKSPACES[1].id,
+    });
+  });
+
+  // Two names in one reply = the model was weighing them, not choosing. Guessing
+  // here would file the source on a coin flip and call it a decision.
+  it('refuses when the reply mentions more than one workspace', () => {
+    expect(parseRoutingReply('AI 或 地緣政治與全球貿易 都有可能。', WORKSPACES, true)).toBeNull();
+  });
+
   it('returns null on an unusable reply so the caller retries', () => {
     expect(parseRoutingReply('I am not sure about this one.', WORKSPACES, true)).toBeNull();
   });

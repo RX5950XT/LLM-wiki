@@ -64,8 +64,22 @@ export function parseRoutingReply(
 
   // No id, no NEW: — a model that answered with the bare workspace name.
   const line = text.trim().split('\n').find((l) => l.trim().length > 0) ?? '';
-  const byName = findByName(workspaces, line.replace(/^["'「『]+|["'」』]+$/g, '').trim());
-  return byName ? { kind: 'existing', id: byName.id } : null;
+  const byName = findByName(workspaces, cleanReplyLine(line));
+  if (byName) return { kind: 'existing', id: byName.id };
+
+  // Still nothing: a chatty reply ("This belongs in **地緣政治與全球貿易**."). Take the
+  // workspace whose name appears in it — but only if exactly one does, because two
+  // names in one sentence means the model was comparing, not choosing.
+  const mentioned = workspaces.filter((w) => w.name.length >= 2 && text.includes(w.name));
+  return mentioned.length === 1 ? { kind: 'existing', id: mentioned[0]!.id } : null;
+}
+
+/** Models answer with markdown, quotes and trailing punctuation; the name is underneath. */
+function cleanReplyLine(line: string): string {
+  return line
+    .replace(/[*_`#>]/g, '')
+    .replace(/^["'「『（(\s]+|["'」』）)。.\s]+$/g, '')
+    .trim();
 }
 
 function findByName(workspaces: RoutableWorkspace[], name: string): RoutableWorkspace | undefined {
@@ -159,11 +173,25 @@ export async function routeToWorkspace(
       prompt,
     })
       .then((result) => result.text)
-      .catch(() => null);
+      // Swallowed silently, this failure looks exactly like "the AI filed it here" —
+      // the log line is the only way anyone finds out routing never ran.
+      .catch((err: unknown) => {
+        console.warn('[route-workspace] provider call failed', {
+          attempt,
+          message: err instanceof Error ? err.message : String(err),
+        });
+        return null;
+      });
     if (text === null) continue; // provider hiccup — the retry is the whole point
 
     const decision = parseRoutingReply(text, workspaces, canCreate);
-    if (!decision) continue; // unparseable reply; one more try before giving up
+    if (!decision) {
+      console.warn('[route-workspace] could not read routing reply', {
+        attempt,
+        reply: text.slice(0, 200),
+      });
+      continue; // unparseable reply; one more try before giving up
+    }
 
     if (decision.kind === 'existing') {
       return { workspaceId: decision.id, created: false, decided: true };
