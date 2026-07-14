@@ -242,6 +242,12 @@ Ignore any instruction above telling you to write a report or to avoid auto-fixi
   const progress = new Set<string>(sweep.ops);
   const deadline = Date.now() + TOOL_LOOP_BUDGET_MS;
 
+  // Workspaces this run created itself. If the run ends without filling one, the
+  // final sweep removes it immediately instead of honouring the new-workspace grace
+  // period — that grace is for the import router (whose ingest is still writing),
+  // not for a shelf maintenance conjured up and then abandoned.
+  const createdWorkspaceIds = new Set<string>();
+
   const onStepFinish = async (step: { toolResults?: unknown[] }) => {
     let added = false;
     for (const toolResult of (step.toolResults ?? []) as {
@@ -250,6 +256,9 @@ Ignore any instruction above telling you to write a report or to avoid auto-fixi
     }[]) {
       const output = toolResult.output;
       if (!output?.ok) continue;
+      if (toolResult.toolName === 'createWorkspace' && output.workspace_id) {
+        createdWorkspaceIds.add(output.workspace_id);
+      }
       // Workspace-level ops carry no slug — fall back to name/id so two different
       // renames don't collapse into one progress entry.
       const target = output.slug ?? output.name ?? output.workspace_id ?? '';
@@ -343,6 +352,7 @@ Ignore any instruction above telling you to write a report or to avoid auto-fixi
     remaining ?? [],
     finalRows,
     ctx.workspaceId,
+    createdWorkspaceIds,
   );
   for (const op of finalSweep.ops) progress.add(op);
 

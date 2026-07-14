@@ -36,12 +36,20 @@ export interface InventoryRow {
   search_text?: string | null;
 }
 
-/** Workspaces holding nothing but scaffolding, old enough to be a real leftover. */
+/**
+ * Workspaces holding nothing but scaffolding, old enough to be a real leftover.
+ *
+ * `graceExemptIds` are workspaces THIS maintenance run created itself: the grace
+ * period exists to protect a workspace the import router just made (its ingest is
+ * still writing into it), and a workspace the run created but never filled is not
+ * that — leaving it costs the user an empty shelf in their switcher for an hour.
+ */
 export function pickDeletableWorkspaces(
   workspaces: WorkspaceRow[],
   pages: InventoryRow[],
   currentWorkspaceId: string,
   now: number,
+  graceExemptIds: ReadonlySet<string> = new Set(),
 ): WorkspaceRow[] {
   const holdsKnowledge = new Set(
     pages.filter((p) => !SCAFFOLDING_SLUGS.has(p.slug)).map((p) => p.workspace_id),
@@ -50,6 +58,7 @@ export function pickDeletableWorkspaces(
     if (holdsKnowledge.has(w.id)) return false;
     // The user is looking at it — deleting it leaves them staring at a dead page.
     if (w.id === currentWorkspaceId) return false;
+    if (graceExemptIds.has(w.id)) return true;
     const age = now - Date.parse(w.created_at ?? '');
     // Unparseable created_at → NaN → false → keep it. Never delete on a bad date.
     return age >= NEW_WORKSPACE_GRACE_MS;
@@ -69,11 +78,18 @@ export async function sweepEmptyWorkspaces(
   workspaces: WorkspaceRow[],
   pages: InventoryRow[],
   currentWorkspaceId: string,
+  graceExemptIds: ReadonlySet<string> = new Set(),
 ): Promise<{ ops: string[]; deletedIds: Set<string> }> {
   const ops: string[] = [];
   const deletedIds = new Set<string>();
 
-  for (const ws of pickDeletableWorkspaces(workspaces, pages, currentWorkspaceId, Date.now())) {
+  for (const ws of pickDeletableWorkspaces(
+    workspaces,
+    pages,
+    currentWorkspaceId,
+    Date.now(),
+    graceExemptIds,
+  )) {
     const result = await deleteWorkspaceForUser(drive, userId, ws.id).catch((error: unknown) => ({
       ok: false as const,
       error: error instanceof Error ? error.message : 'Unknown error',

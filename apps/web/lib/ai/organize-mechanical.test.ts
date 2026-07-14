@@ -44,6 +44,13 @@ describe('pickDeletableWorkspaces', () => {
     expect(picked).toEqual([]);
   });
 
+  // The maintenance run created it and then never filled it — the grace period is
+  // there for the import router's freshly created workspace, not for this.
+  it('deletes an empty workspace this run created itself', () => {
+    const picked = pickDeletableWorkspaces([fresh], [], 'current', NOW, new Set(['fresh']));
+    expect(picked.map((w) => w.id)).toEqual(['fresh']);
+  });
+
   it('never deletes on an unparseable created_at', () => {
     const picked = pickDeletableWorkspaces(
       [{ id: 'weird', name: 'No date', created_at: null }],
