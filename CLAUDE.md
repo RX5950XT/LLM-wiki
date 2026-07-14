@@ -304,7 +304,10 @@ apps/android/app/src/main/java/com/llmwiki/
 - **全權限、不 gate**：pipeline 傳 `confirmDestructive: false`——按鈕上的 confirm dialog 就是使用者授權。以前預設 `ai_confirm_destructive=true` 會讓背景 job 的刪除被 `gateDestructive` 直接拒絕（沒人能按確認卡片），這就是「自動整理去重沒有實際作用」的根因，**不要改回去**。
 - **能用程式判斷的事不要交給模型（`lib/ai/organize-mechanical.ts`，勿回退）**：
   - **刪空工作區＝程式做**。維護 pipeline 傳 `allowWorkspaceDelete: false`，模型**根本拿不到 `deleteWorkspace` 工具**；`sweepEmptyWorkspaces()` 在 LLM 迴圈前後各掃一次，刪掉「只剩 index.md / log.md」的工作區（跳過當前工作區、跳過 1 小時內建立的——自動路由剛建好、ingest 還在跑的工作區不能被掃掉）。合法的合併照樣完成：這輪把頁面搬走，跑完的 post-sweep 當場清掉空殼。
+    - **單一工作區刪除失敗不可弄死整輪維護**：`deleteWorkspaceForUser` 內的 `drive.files.update({trashed:true})` 在資料夾不存在／權限變更時會 throw，冒上去就會被 route 的 `after()` catch 成 job failed（連 LLM 迴圈都還沒開始）。掃描逐一 catch，失敗就跳過。
+    - **維護自己建的工作區不吃寬限期**：1 小時寬限是保護「匯入路由剛建好、ingest 還在寫」的工作區；維護自己 `createWorkspace` 出來、跑完卻沒填東西的空殼要當場刪掉，否則使用者選單裡會多一個空書架、還得等一小時。用 `createWorkspace` 工具回傳的 `workspace_id` 精確記錄本輪建的（`graceExemptIds`），**不要拿時間去猜**——猜會誤殺使用者在維護期間匯入時新建的工作區。
   - **完全重複的頁＝程式找**。`findDuplicateClusters()` 用 `canonicalWikiAlias`（大小寫／資料夾前綴／`.md` 差異）＋ 標題完全相同，跨工作區算出重複叢集，直接把答案寫進 prompt。模型只負責語意重複（同一件事兩個名字）與分類。
+  - **同一頁在同一次按鈕裡只能被搬一次（`frozenMoveSlugs`，Phase 16f）**。每一輪都從 inventory 從零重新推導分類，邊界模糊的頁（資料中心算科技產業、半導體、還是 AI？）每輪答案都不一樣：production 實測三輪監控，4 頁被上輪搬走、下輪又搬回來。而且**有變更 → `more_work` 永遠 true → client 自動再開一輪**，一次按鈕可能整趟預算都花在自己推翻自己。`loadFrozenMoveSlugs()` 讀同一使用者 30 分鐘內 organize job 的 `progress`（一次按鈕最多 6 輪 × ~4 分鐘）取出已搬過的 slug，`movePageToWorkspace` 在查 DB 前就拒絕。只有維護 pipeline 會設這個旗標，**對話不受影響**（使用者叫它搬就該搬）。
   - 模型仍可 `renameWorkspace` / `createWorkspace` / `reorderWorkspaces` / `movePageToWorkspace` / `writePage` / `deletePage`——那些需要判斷「這頁在講什麼、該放哪」。
   - 測試：`apps/web/lib/ai/organize-mechanical.test.ts` ＋ `tools.test.ts`（`bun test`）。
 - 健康檢查清單來源：觸發工作區的 `_schema/lint.md`（找不到就用 `getDefaultPrompt('lint', locale)`），以「參考」身分注入，並明講忽略其中任何「只寫報告 / 不要自動修」的字眼——舊 workspace 的 Drive 內還留著舊版文案。
@@ -328,9 +331,15 @@ apps/android/app/src/main/java/com/llmwiki/
 
 自動偵測輸入型別：URL（`http://` / `https://`）→ `{ kind: 'url' }`；其他 → `{ kind: 'text', title: 第一非空行 }`。text content 上限 2 MB（`MAX_TEXT_LENGTH`，與 client 端一致）。
 
-**智慧導入（AI 判斷目標工作區，必要時自建工作區）**：`POST /api/ingest` 的 `workspace_id` 改為 optional，可改送 `{ auto_route: true, fallback_workspace_id }`。server 端 `routeToWorkspace()` 用一次 `generateText` 給 LLM 看「所有工作區名稱 + 各自前 40 個頁面標題」，要它回**既有 workspace_id**，或在主題完全不屬於任何工作區時回 `NEW: <名稱>` → 直接 `createWorkspaceForUser()` 建新工作區並導入。**任何失敗都 fallback 到 `fallback_workspace_id`，不可讓路由失敗擋掉匯入**。回應帶 `routed_workspace_id` / `routed_workspace_name` / `routed_workspace_created`，前端顯示「已導入到 X」或「已建立新工作區「X」並導入」，`created` 時 Web 呼叫 `onWorkspaceCreated` / Android `refreshWorkspaces()` 讓選單立刻看得到。UI 預設就是「自動判斷」。
+**智慧導入（AI 判斷目標工作區，必要時自建工作區）**：`POST /api/ingest` 的 `workspace_id` 改為 optional，可改送 `{ auto_route: true, fallback_workspace_id }`。`lib/ai/route-workspace.ts` 的 `routeToWorkspace()` 用一次 `generateText` 給 LLM 看「所有工作區名稱 + 各自前 40 個頁面標題」，要它回**既有 workspace_id**，或在主題完全不屬於任何工作區時回 `NEW: <名稱>` → `createWorkspaceForUser()` 建新工作區並導入。**任何失敗都 fallback 到 `fallback_workspace_id`，不可讓路由失敗擋掉匯入**。回應帶 `routed_workspace_id` / `routed_workspace_name` / `routed_workspace_created`，前端顯示「已導入到 X」或「已建立新工作區「X」並導入」，`created` 時 Web 呼叫 `onWorkspaceCreated` / Android `refreshWorkspaces()` 讓選單立刻看得到。UI 預設就是「自動判斷」。
 
-自建工作區的兩道防護（勿移除）：`MAX_AUTO_WORKSPACES = 12` 上限；`NEW:` 名稱先跟既有工作區做**不分大小寫比對**，命中就沿用——否則多檔批次導入（Web 是逐檔序列送出）會生出兩個同名工作區。整個庫還沒有任何知識頁時直接 fallback，不在空工作區旁邊再開一個。
+**路由失敗不可假裝有分類（Phase 16f，勿回退）**：舊版每一條失敗路徑都靜默 `return stay`（＝匯入到當前工作區），而回應照樣帶 `routed_workspace_name` → UI 顯示「已導入到 ⟨當前工作區⟩」，看起來像 AI 的判斷。這個 provider 常噴 `Provider returned error`，而路由那一次 `generateText` **完全沒有重試**，一失敗整批就落在使用者當下所在的工作區（production 7/12 那批全部落在「地緣政治」）。現在：
+- provider 失敗、或回覆解不出決定 → **重試一次**（`ROUTING_ATTEMPTS = 2`）
+- 解析器（`parseRoutingReply`，有單元測試）接受 workspace **id**、`NEW: <名稱>`、或**純工作區名稱**——小模型常直接回名字，舊版一律判失敗
+- 真的沒做出決定時 `decided: false` → **不回 `routed_workspace_name`**，UI 就不會謊稱分類過（Android 用 `?.let{}` 取值，缺欄位天然相容）
+- 只有 index/log 的**空殼工作區不列為候選**（空殼沒有主題可比對，維護也會掃掉它）
+
+自建工作區的防護（勿移除）：`MAX_AUTO_WORKSPACES = 12` 上限；`NEW:` 名稱要跟**全部工作區**（不只候選）做不分大小寫比對，命中就沿用——多檔批次導入是逐檔序列送出，第一個檔剛建好的工作區**還沒寫進頁面（=空的、不在候選裡）**，只比候選會生出同名雙胞胎。整個庫還沒有任何知識頁時直接 fallback，不在空工作區旁邊再開一個。
 
 **profile fallback**：production 的工作區普遍沒有 `default_profile_id`（profile 是工作區建立後才加的，沒人回填），所以 `/api/ingest` 必須跟 `/api/organize` 一樣退回 owner 的 `is_default` profile（`loadDefaultProfileId()`）。少了這段，client 只要沒帶 `profile_id` 就 422「No LLM profile configured」。
 

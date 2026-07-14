@@ -148,10 +148,19 @@ GOOGLE_OAUTH_CLIENT_SECRET=
 - **不產生報告頁**；`progress` 記錄每次工具呼叫，UI 顯示「已變更 N 項」
 - 維護 job 用 `confirmDestructive: false`（按鈕上的 confirm 就是授權）——這是它真的能刪重複頁、改動工作區的前提
 - **機械判斷歸程式，語意判斷才歸模型**（`lib/ai/organize-mechanical.ts`）：空工作區由 `sweepEmptyWorkspaces()` 在 LLM 迴圈前後掃掉（模型傳 `allowWorkspaceDelete: false`，**連工具都拿不到**——它曾把「合併」做成「掃進當前工作區再刪掉整個書架」）；完全重複的頁由 `findDuplicateClusters()`（alias + 同標題）算好餵給模型。模型只留 rename/create/reorder/move/write/deletePage
+- 掃描逐一 catch：單一工作區刪除失敗（Drive 資料夾不存在）不可 throw 上去，否則整輪維護在 LLM 開跑前就被標 failed
+- 維護自己 `createWorkspace` 出來、跑完卻沒填東西的空殼**不吃 1 小時寬限期**（寬限是給「匯入路由剛建好、ingest 還在寫」的工作區）；用工具回傳的 id 記錄，不拿時間猜
+- **同一頁在同一次按鈕裡只能搬一次**（`frozenMoveSlugs`）：每輪都從零重新推導分類，邊界模糊的頁會被搬來搬去；有變更 → `more_work` 永遠 true → 自動再開一輪，一次按鈕會把預算花在自己推翻自己。`loadFrozenMoveSlugs()` 讀 30 分鐘內 organize job 的 progress，`movePageToWorkspace` 直接拒絕。**只有維護會設，對話不受影響**
 - 入口：Web 頂列 `Wrench`、Android drawer `Build`（各一顆）
 
 ### Ingest 驗證
 - `runIngestPipeline` 跑完若 `touched_pages` 為空 → 追加硬性指令重跑一輪 → 仍為空就 **throw**（job 標 `failed`）。舊版無條件標 `done`，production 22 次匯入有 7 次「done 但 0 頁」，使用者以為匯入成功、內容其實沒進 wiki
+
+### 自動分類（auto_route）
+- `lib/ai/route-workspace.ts`：一次小 LLM 呼叫選目標工作區，或回 `NEW: <名稱>` 自建
+- **失敗不可假裝有分類**：舊版任何失敗都靜默退回當前工作區、卻照樣回 `routed_workspace_name`（UI 顯示「已導入到 X」）。現在失敗會重試一次，且 `decided: false` 時**不回** `routed_workspace_name`
+- 解析器接受 workspace id／`NEW: 名稱`／**純工作區名稱**（小模型常直接回名字）
+- 空殼工作區不列候選；但 `NEW:` 的同名重用要比對**全部**工作區（否則批次匯入會生同名雙胞胎——第一個檔剛建好的工作區還沒寫頁，不在候選裡）
 
 ### 全文搜尋
 - **DB**：`pages.search_text TEXT` + `pages_fts_idx` GIN index + `search_pages` RPC
