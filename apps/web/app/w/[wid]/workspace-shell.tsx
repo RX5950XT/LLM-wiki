@@ -135,6 +135,43 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
       });
   }, [locale, workspaceId]);
 
+  // Imports run server-side and outlive the tab. The bar below is therefore derived
+  // from the jobs table itself, not from anything this tab remembers: close the page
+  // mid-import, come back on another device, and the progress is still there.
+  const [ingest, setIngest] = useState<{ files: number; pages: number } | null>(null);
+  useEffect(() => {
+    const supabase = createClient();
+    let cancelled = false;
+    let previous = 0;
+
+    const poll = async () => {
+      const { data } = await supabase
+        .from('ingest_jobs')
+        .select('id, touched_pages')
+        .eq('status', 'running'); // RLS scopes this to the user's own workspaces
+      if (cancelled) return;
+      const files = data?.length ?? 0;
+      const pages = (data ?? []).reduce(
+        (sum, job) => sum + ((job.touched_pages as string[] | null)?.length ?? 0),
+        0,
+      );
+      setIngest(files > 0 ? { files, pages } : null);
+      // The last import just landed — pull in what it wrote.
+      if (previous > 0 && files === 0) {
+        refreshPageList();
+        refreshWorkspaceListRef.current?.();
+      }
+      previous = files;
+    };
+
+    poll();
+    const timer = setInterval(poll, 4000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [refreshPageList]);
+
   // The chat AI can create/rename/delete workspaces — re-sync the switcher list
   const refreshWorkspaceList = useCallback(() => {
     fetch('/api/workspaces')
@@ -155,6 +192,11 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
         /* non-fatal: the switcher just keeps the stale list */
       });
   }, [workspaceId]);
+
+  // The import poller above is mounted before this callback exists; a ref keeps it
+  // reachable without making the poll effect depend on (and restart with) it.
+  const refreshWorkspaceListRef = useRef<(() => void) | null>(null);
+  refreshWorkspaceListRef.current = refreshWorkspaceList;
 
   const resolvePageSlug = useCallback((rawSlug: string) => {
     const normalized = normalizeWikiTarget(rawSlug);
@@ -976,6 +1018,25 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
           </button>
         </div>
       </header>
+
+      {/* Import status strip — read from the jobs table, so it survives a reload */}
+      {ingest && (
+        <div
+          className="flex items-center gap-3 border-b px-4 py-2 text-xs"
+          style={{
+            borderColor: 'var(--border)',
+            background: 'var(--color-accent-glow)',
+            color: 'var(--color-accent)',
+          }}
+          role="status"
+          aria-live="polite"
+        >
+          <Loader2 size={14} className="shrink-0 animate-spin" />
+          <span className="min-w-0 flex-1 truncate">
+            {`${t('workspace.ingestRunning', { files: ingest.files, pages: ingest.pages })} · ${t('workspace.maintenanceBackgroundHint')}`}
+          </span>
+        </div>
+      )}
 
       {/* Maintenance status strip: running (background-safe) / done / failed */}
       {maintenance && (

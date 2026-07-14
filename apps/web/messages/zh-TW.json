@@ -50,7 +50,8 @@
     "maintenanceDone": "整理完成，共變更 {count} 項",
     "maintenanceFailed": "整理任務失敗",
     "dismiss": "關閉",
-    "initFailed": "自動初始化失敗，請手動建立工作區。"
+    "initFailed": "自動初始化失敗，請手動建立工作區。",
+    "ingestRunning": "匯入中…{files} 篇處理中，已更新 {pages} 個頁面"
   },
   "wiki": {
     "index": "Wiki 索引",

@@ -50,7 +50,8 @@
     "maintenanceDone": "Done — {count} changes applied",
     "maintenanceFailed": "Maintenance job failed",
     "dismiss": "Dismiss",
-    "initFailed": "Auto-setup failed. Please try creating your workspace manually."
+    "initFailed": "Auto-setup failed. Please try creating your workspace manually.",
+    "ingestRunning": "Importing… {files} in progress, {pages} pages updated"
   },
   "wiki": {
     "index": "Index",

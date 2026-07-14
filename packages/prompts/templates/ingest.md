@@ -15,17 +15,11 @@ You are the **sole maintainer** of a personal knowledge wiki. A new source has j
 
 1. Read `/wiki/index.md` first to understand the current structure.
 2. Search for existing entity / concept pages that might be related.
-3. Produce an **update plan** as JSON:
-   ```json
-   {
-     "summary": "One-line summary of what this source is about.",
-     "new_pages": ["entities/name.md", "concepts/idea.md"],
-     "updated_pages": ["entities/existing-person.md", "concepts/existing-idea.md", "synthesis/xxx.md"],
-     "contradictions": [
-       {"page": "concepts/rag.md", "note": "New source disputes X claim."}
-     ]
-   }
-   ```
+3. Decide which pages to create and which to update. **This plan is a thought, not a
+   page.** Never write it into the wiki: no `plans/…`, no `update-plan.json`, no todo
+   lists. The only pages that may exist are knowledge pages under `entities/`,
+   `concepts/`, `summary/`, `synthesis/`, plus `index.md` and `log.md`. A page about
+   your own process is a bug, and `writePage` will refuse it.
 4. Execute the plan using `writePage` tool calls.
 5. Update `/wiki/index.md` to list any new pages under their correct category.
 6. Append a single entry to `/wiki/log.md` in the format:

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { drive_v3 } from 'googleapis';
-import { buildWikiTools } from './tools';
+import { buildWikiTools, writePageForWorkspace } from './tools';
 
 const WORKSPACE = '11111111-1111-4111-8111-111111111111';
 const OTHER_WORKSPACE = '22222222-2222-4222-8222-222222222222';
@@ -48,5 +48,30 @@ describe('buildWikiTools', () => {
     )) as { error?: string };
 
     expect(result.error).toContain('already re-shelved');
+  });
+});
+
+describe('wiki zone guard — the model must not shelve its own working notes', () => {
+  const scope = { workspaceId: 'w1', wikiFolderId: 'folder-1' };
+  const deps = { supabase: {} as never, drive: {} as never };
+
+  it('refuses a plans/ page', async () => {
+    const result = await writePageForWorkspace(deps, scope, {
+      slug: 'plans/ingest-manus-ai-acquisition.md',
+      content_md: '# Plan\n1. read source\n2. write pages',
+      kind: 'synthesis',
+      title: 'Plan: Ingest Manus AI',
+    });
+    expect((result as { error?: string }).error).toContain('not a knowledge page');
+  });
+
+  it('refuses a root scratch file', async () => {
+    const result = await writePageForWorkspace(deps, scope, {
+      slug: 'update-plan.json',
+      content_md: '{}',
+      kind: 'lint',
+      title: 'Update Plan JSON',
+    });
+    expect((result as { error?: string }).error).toContain('not a knowledge page');
   });
 });

@@ -62,6 +62,15 @@ const PROTECTED_SLUGS = new Set(['index.md', 'log.md']);
  * conceptually, but these tools must not write it), _schema/ holds user rules.
  * Returns an error string, or null if the slug is acceptable.
  */
+/**
+ * The wiki holds knowledge, not the model's working notes. Left unconstrained,
+ * gemini-3.5-flash wrote `plans/ingest-manus-ai-acquisition.md` and
+ * `update-plan.json.md` (kind: "lint") into the user's base — its own todo list,
+ * shelved next to the pages it was supposed to be writing.
+ */
+const WIKI_FOLDERS = new Set(['entities', 'concepts', 'summary', 'summaries', 'synthesis']);
+const ROOT_PAGES = new Set(['index.md', 'log.md']);
+
 function guardWikiSlug(slug: string): string | null {
   const s = slug.trim();
   if (!s || s.startsWith('/') || s.includes('..') || s.includes('\\')) {
@@ -69,6 +78,16 @@ function guardWikiSlug(slug: string): string | null {
   }
   if (s.startsWith('notes/') || s.startsWith('_schema/') || s.startsWith('sources/')) {
     return `Slug "${slug}" is outside the wiki zone. LLM tools may only modify wiki pages.`;
+  }
+  const normalized = normalizeSlug(s);
+  if (ROOT_PAGES.has(normalized)) return null;
+  const folder = normalized.split('/')[0]!;
+  if (!normalized.includes('/') || !WIKI_FOLDERS.has(folder)) {
+    return (
+      `Slug "${slug}" is not a knowledge page. Wiki pages live in ` +
+      `entities/, concepts/, summary/ or synthesis/ (plus index.md and log.md). ` +
+      `Do not write plans, todo lists or working notes into the wiki.`
+    );
   }
   return null;
 }
