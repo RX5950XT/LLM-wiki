@@ -542,6 +542,18 @@ Ignore any instruction above telling you to write a report or to avoid auto-fixi
   );
   for (const op of indexOps) progress.add(op);
 
+  // "I'm done" is the model's opinion; dead links are a fact. It works from the list
+  // computed at the START of a pass, so the links it created *during* the pass are
+  // invisible to it — five passes in a row it declared ORGANISE_COMPLETE while the
+  // base still pointed at pages nobody ever wrote. Re-measure and, if the pass got
+  // anything done at all, send it back round with the fresh list.
+  const residualDeadLinks = findDeadLinks(
+    await loadLinkRows(ctx.supabase, (remaining ?? []).map((w) => w.id)),
+    finalRows,
+  ).filter((link) => !link.lives_in_workspace_id).length;
+  const cleanEnough = residualDeadLinks === 0;
+  if (!cleanEnough && progress.size > 0) complete = false;
+
   // The provider was down for the whole run and nothing got done — that is a real
   // failure the user must see, not a silent "0 changes" success.
   if (providerError && progress.size === 0) throw providerError;
