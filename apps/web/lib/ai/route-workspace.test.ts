@@ -40,7 +40,8 @@ describe('parseRoutingReply', () => {
   });
 
   // A batch of files on one new subject must not spawn a second workspace once the
-  // first file has already created it.
+  // first file has already created it. (routeToWorkspace repeats this check against
+  // every workspace, including ones still empty and thus not offered as candidates.)
   it('reuses an existing workspace when NEW names it', () => {
     expect(parseRoutingReply('NEW: ai', WORKSPACES, true)).toEqual({
       kind: 'existing',

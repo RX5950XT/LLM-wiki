@@ -169,6 +169,13 @@ export async function routeToWorkspace(
       return { workspaceId: decision.id, created: false, decided: true };
     }
 
+    // Name collision against EVERY workspace, not just the ones offered above: a
+    // workspace this batch created moments ago still has no pages, so it is not in
+    // `workspaces` — and creating "咖啡烘焙" twice because the first one has not
+    // been written to yet is exactly the twin the same-name guard exists to stop.
+    const twin = findByName(allWorkspaces, decision.name);
+    if (twin) return { workspaceId: twin.id, created: false, decided: true };
+
     const created = await createWorkspaceForUser(drive, userId, decision.name, locale);
     return created.ok
       ? { workspaceId: created.id, created: true, decided: true }
