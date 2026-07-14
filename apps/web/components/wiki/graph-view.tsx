@@ -93,6 +93,17 @@ export function GraphView({ workspaceId, activePage, onNodeClick, refreshKey = 0
   const [hiddenKinds, setHiddenKinds] = useState<Set<KindGroup>>(new Set());
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const fgRef = useRef<any>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rootRef = useRef<{ render: (el: any) => void; unmount: () => void } | null>(null);
+  // Every wiki write arrives over Realtime, so graphData changes mid-view during an
+  // import or a maintenance run. Re-creating the force graph each time restarts the
+  // layout from random positions and throws the camera back to its default — the
+  // base reads as a jittering knot. Carry the settled coordinates across, and fit
+  // the view only the first time it settles.
+  const positionsRef = useRef(new Map<string, { x: number; y: number }>());
+  const didFitRef = useRef(false);
+  const hasLoadedRef = useRef(false);
+  const rootContainerRef = useRef<HTMLDivElement | null>(null);
   // Read inside the canvas painter, which is created once — a ref keeps filtering
   // instant instead of tearing the force simulation down and re-settling it.
   const hiddenRef = useRef(hiddenKinds);
@@ -104,7 +115,10 @@ export function GraphView({ workspaceId, activePage, onNodeClick, refreshKey = 0
     let cancelled = false;
 
     async function load() {
-      setLoading(true);
+      // Only the first load blanks the panel. A refresh (a page written while the
+      // graph is open) must not swap the canvas for a spinner and back — that
+      // unmounts the force graph and loses both the layout and the camera.
+      if (!hasLoadedRef.current) setLoading(true);
       try {
         const [pagesRes, linksRes] = await Promise.all([
           supabase
@@ -159,13 +173,23 @@ export function GraphView({ workspaceId, activePage, onNodeClick, refreshKey = 0
 
         setGraphData({ nodes, links });
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          hasLoadedRef.current = true;
+          setLoading(false);
+        }
       }
     }
 
     load();
     return () => { cancelled = true; };
   }, [workspaceId, refreshKey]);
+
+  // A different workspace is a different map: keep neither its coordinates nor its camera.
+  useEffect(() => {
+    hasLoadedRef.current = false;
+    positionsRef.current.clear();
+    didFitRef.current = false;
+  }, [workspaceId]);
 
   // Track container size so panel drags / window resizes reflow the canvas
   useEffect(() => {
@@ -217,8 +241,6 @@ export function GraphView({ workspaceId, activePage, onNodeClick, refreshKey = 0
     let mounted = true;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let ForceGraph: React.ComponentType<any> | null = null;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let root: { render: (el: any) => void; unmount: () => void } | null = null;
 
     (async () => {
       try {
@@ -229,6 +251,13 @@ export function GraphView({ workspaceId, activePage, onNodeClick, refreshKey = 0
 
         const { createRoot } = await import('react-dom/client');
         const { createElement } = await import('react');
+
+        // Resume each node where the simulation last left it, so a Realtime update
+        // nudges the layout instead of scattering it.
+        for (const node of graphData.nodes) {
+          const previous = positionsRef.current.get(node.id);
+          if (previous) Object.assign(node, previous);
+        }
 
         const width = size?.width ?? containerRef.current.clientWidth ?? 600;
         const height = size?.height ?? containerRef.current.clientHeight ?? 400;
@@ -296,8 +325,18 @@ export function GraphView({ workspaceId, activePage, onNodeClick, refreshKey = 0
           warmupTicks: reduceMotion ? 200 : 0,
           cooldownTicks: reduceMotion ? 0 : undefined,
           // Fill the panel once the layout settles, instead of leaving the whole base
-          // as a knot in the middle of an empty canvas.
-          onEngineStop: () => fgRef.current?.zoomToFit?.(reduceMotion ? 0 : 400, 56),
+          // as a knot in the middle of an empty canvas. Only the first settle: yanking
+          // the camera every time a page is written would fight whoever is reading.
+          onEngineStop: () => {
+            for (const node of graphData.nodes as (GraphNode & { x?: number; y?: number })[]) {
+              if (typeof node.x === 'number' && typeof node.y === 'number') {
+                positionsRef.current.set(node.id, { x: node.x, y: node.y });
+              }
+            }
+            if (didFitRef.current) return;
+            didFitRef.current = true;
+            fgRef.current?.zoomToFit?.(reduceMotion ? 0 : 400, 56);
+          },
           nodeCanvasObjectMode: () => 'replace' as const,
           nodeCanvasObject: (
             node: GraphNode & { x?: number; y?: number },
@@ -396,8 +435,19 @@ export function GraphView({ workspaceId, activePage, onNodeClick, refreshKey = 0
           },
         });
 
-        root = createRoot(containerRef.current!);
-        root.render(fg);
+        // Re-render the same root instead of unmounting it: a fresh root means a
+        // fresh force-graph instance, which resets the camera — the reason the base
+        // kept snapping back to a tiny knot while an import was writing pages.
+        // (A root bound to a container React has since replaced is dead: rebuild it.)
+        if (rootRef.current && rootContainerRef.current !== containerRef.current) {
+          rootRef.current.unmount();
+          rootRef.current = null;
+        }
+        if (!rootRef.current) {
+          rootRef.current = createRoot(containerRef.current!);
+          rootContainerRef.current = containerRef.current;
+        }
+        rootRef.current.render(fg);
       } catch (e) {
         console.error('Graph load failed', e);
       }
@@ -405,10 +455,19 @@ export function GraphView({ workspaceId, activePage, onNodeClick, refreshKey = 0
 
     return () => {
       mounted = false;
-      root?.unmount();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, graphData, activePage, size]);
+
+  // Tear the force graph down only when the panel itself goes away.
+  useEffect(
+    () => () => {
+      rootRef.current?.unmount();
+      rootRef.current = null;
+      fgRef.current = null;
+    },
+    [],
+  );
 
   if (loading) {
     return (

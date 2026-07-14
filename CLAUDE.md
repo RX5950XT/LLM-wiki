@@ -264,6 +264,7 @@ apps/android/app/src/main/java/com/llmwiki/
   - **用「頁面標題」當連結**（37 條）：`[[DRAM 市場 2026 年供需危機]]`，實際 slug 是 `summaries/dram-market-2026-crisis.md`。alias 比對從只比 slug 擴充到**也比 title**（slug 優先；仍是唯一匹配才 resolve）。
   - **頁被維護搬到別的工作區**（69 條）：`movePageToWorkspace` 只「回報」來源端反向連結會斷，沒有真的修。咽喉點在同工作區找不到時，會用同一套 alias 去**該使用者的其他工作區**找唯一匹配 → 回 `404 PAGE_MOVED_WORKSPACE` + `workspace_id`/`slug`；Web `PageViewer` 直接 `router.push` 過去，Android `selectPageBySlug` 查其他工作區並 `refreshWorkspaces(preferredWorkspaceId, preferredPageSlug)` 切過去（舊版連錯誤訊息都沒有，直接 `return`）。
   - **真的沒有那頁**（51 條）：交給健康檢查（見下）。
+- **`[[slug|顯示名]]` 的顯示名不是 slug 的一部分（Phase 16h，勿回退）**：後端 `extractWikiLinks` 一直有 `split('|')`，但**兩個渲染器都沒有**——`page-viewer.tsx` 與 Android `MarkdownViewer` 把整串 `entities/donald-trump|Donald Trump` 當 slug，href 變成 `?page=entities/donald-trump|Donald Trump.md`（那頁永遠不存在）。LLM 寫索引時幾乎每條都用這個形式，所以**整份 index.md 的藍色連結全是死的**，而 `page_links` 表看起來很健康（它有切）——這就是「連結還是失效但資料庫說沒事」的落差。解法：`lib/wiki/slug.ts` 的 `parseWikiLink()`（slug / label / anchor 三段，有單元測試）供 Web 渲染器使用，Android 同樣切；`GET /api/pages/[...slug]` 對含 `|` 的請求也切一次（舊 client、舊書籤一併救回）。
 - `ingestUrl()` / `ingestText()` 呼叫 Web app 的 `/api/ingest`，使用 Supabase session accessToken
 - Web API 端點位址由 `BuildConfig.WEB_API_BASE_URL` 決定（從 `local.properties` 的 `WEB_API_BASE_URL` 或 `NEXT_PUBLIC_SITE_URL` 注入）
 - Chat 串流協定：POST `/api/query` → `text/plain` stream，結尾附 `\x00CITATIONS\x00[...]`（可再接 `\x00ACTIONS\x00[...]`）；Android 用 Ktor `bodyAsChannel()` + `readUTF8Line()` 消費，`parseStreamMeta()` 解析（未知 block 忽略）
@@ -343,8 +344,9 @@ apps/android/app/src/main/java/com/llmwiki/
 
 **路由失敗不可假裝有分類（Phase 16f，勿回退）**：舊版每一條失敗路徑都靜默 `return stay`（＝匯入到當前工作區），而回應照樣帶 `routed_workspace_name` → UI 顯示「已導入到 ⟨當前工作區⟩」，看起來像 AI 的判斷。這個 provider 常噴 `Provider returned error`，而路由那一次 `generateText` **完全沒有重試**，一失敗整批就落在使用者當下所在的工作區（production 7/12 那批全部落在「地緣政治」）。現在：
 - provider 失敗、或回覆解不出決定 → **重試一次**（`ROUTING_ATTEMPTS = 2`）
-- 解析器（`parseRoutingReply`，有單元測試）接受 workspace **id**、`NEW: <名稱>`、或**純工作區名稱**——小模型常直接回名字，舊版一律判失敗
+- 解析器（`parseRoutingReply`，有單元測試）接受 workspace **id**、`NEW: <名稱>`、或**純工作區名稱**——小模型常直接回名字，舊版一律判失敗。名稱比對要能吃 markdown 粗體與整句回覆（`**地緣政治與全球貿易**`、「這篇屬於「AI」工作區。」）；**整句只在唯一一個工作區名稱出現時才算數**——兩個名字同時出現是模型在比較，不是在選。
 - 真的沒做出決定時 `decided: false` → **不回 `routed_workspace_name`**，UI 就不會謊稱分類過（Android 用 `?.let{}` 取值，缺欄位天然相容）
+- **失敗要留下 log（Phase 16h）**：provider 失敗與無法解讀的回覆都 `console.warn('[route-workspace] …')`。這條路徑一旦靜默 `.catch(() => null)`，「路由沒跑」與「AI 判斷就是放這」在外面長得**一模一樣**，只能靠猜。
 - 只有 index/log 的**空殼工作區不列為候選**（空殼沒有主題可比對，維護也會掃掉它）
 
 自建工作區的防護（勿移除）：`MAX_AUTO_WORKSPACES = 12` 上限；`NEW:` 名稱要跟**全部工作區**（不只候選）做不分大小寫比對，命中就沿用——多檔批次導入是逐檔序列送出，第一個檔剛建好的工作區**還沒寫進頁面（=空的、不在候選裡）**，只比候選會生出同名雙胞胎。整個庫還沒有任何知識頁時直接 fallback，不在空工作區旁邊再開一個。

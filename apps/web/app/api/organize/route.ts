@@ -130,7 +130,11 @@ export async function POST(request: NextRequest) {
     if (lintFileId) healthChecklist = await readDriveFile(drive, lintFileId);
   }
 
-  const { data: job } = await supabase
+  // The check above cannot serialise two requests that arrive together (Drive calls
+  // sit between it and this insert). `agent_jobs_one_running_per_owner` — a partial
+  // unique index on running rows — is what actually stops two pipelines from
+  // rewriting the same wiki at once; a duplicate insert here IS the lock firing.
+  const { data: job, error: jobError } = await supabase
     .from('agent_jobs')
     .insert({
       owner_id: user.id,
@@ -140,6 +144,19 @@ export async function POST(request: NextRequest) {
     })
     .select('id')
     .single();
+  if (jobError?.code === '23505') {
+    const { data: winner } = await supabase
+      .from('agent_jobs')
+      .select('id')
+      .eq('owner_id', user.id)
+      .eq('status', 'running')
+      .limit(1)
+      .maybeSingle();
+    return NextResponse.json(
+      { error: 'An organize job is already running', jobId: winner?.id },
+      { status: 409 },
+    );
+  }
   if (!job) return NextResponse.json({ error: 'Failed to create maintenance job' }, { status: 500 });
 
   after(async () => {
