@@ -2,7 +2,28 @@
 
 > 給下一個 AI Agent 的接手指南。架構與規範細節以 `CLAUDE.md` / `AGENTS.md` 為準，這裡只記「最近做了什麼、為什麼、還缺什麼」。
 
-## 最近一次變更（2026-07-14，Phase 16f 三條路徑實測：導入／自動分類／健康檢查）
+## 最近一次變更（2026-07-14，Phase 16g 失效連結／過時索引／知識圖譜視覺）
+
+使用者：「wiki 索引也要即時更新／依然有藍色連結失效／戳健康檢查似乎沒處理到／可以優化知識圖譜嗎」。
+
+**先量再修**：production 581 條 wiki 連結，157 條是斷的。拆成三類，各有各的修法：
+
+| 類別 | 數量 | 修法 |
+|---|---|---|
+| 連結是用**頁面標題**寫的（`[[DRAM 市場 2026 年供需危機]]` vs slug `summaries/dram-market-2026-crisis.md`） | 37 | 咽喉點 alias 比對加上 title（`lib/wiki/resolve.ts` 的 `pickAliasMatch`，唯一命中才 resolve） |
+| 頁被維護**搬到別的工作區**了 | 69 | 咽喉點回 `404 PAGE_MOVED_WORKSPACE` + 目標 workspace_id/slug；Web `router.push` 過去、Android `selectPageBySlug` 切工作區（舊版直接 `return`，連錯誤都不給） |
+| 真的**沒有那頁** | 51 | `findDeadLinks()` 算好清單餵給健康檢查 |
+
+**健康檢查為什麼一條連結都沒修過**：prompt 從 Phase 16 就寫著「修復失效的 [[wikilink]]」，但要找出它們得把 580 條連結對 140 個頁做交叉比對——這是 set operation，模型讀 inventory 根本做不到。改由程式算好兩份清單（失效連結、index.md 沒列到的頁）塞進 prompt。實測一按下去它就開始補寫那些指向不存在頁面的目標（`entities/lora-ho`、`entities/nasa`、`entities/fbi`、`entities/odni`、`concepts/uap`…）。
+
+**知識圖譜**（先調用 frontend-design skill）：
+- **degree 全部算錯的 bug**：`d3-force` 會**就地**把 `link.source`/`target` 從 id 字串換成節點物件，degree/neighbors 拿它當 key，任何 re-mount 後全部失效 → 所有節點 degree=0 → 整張圖畫成孤兒。先正規化端點 id。
+- 視覺：顏色＝kind（冷色家族繞著 app 的 cyan，**只有 synthesis 是暖色**）；大小／光暈／標籤優先級由連結度驅動；孤兒頁畫**空心圓**＋readout 直接報「N 頁未連結」（舊版淡到 0.18＝藏起來，那是最該處理的頁）；標籤依 zoom 漸入；`onEngineStop` → `zoomToFit`；圖例與篩選合併成同一個控制項；`_schema` 規則頁不再是節點。實測 140 fps。
+- **`PageViewer` 首幀就畫「找不到頁面」**：`loading` 初始 false 而 fetch 在 effect 才開始，Drive 冷讀那幾秒使用者看到的是「這頁不存在」。改成有 slug 就從 loading 開始。
+
+**注意**：「科技產業動態」是**使用者自己在 01:42 從介面刪掉的**（runtime log 有 `DELETE /api/workspaces/89726d57` → 200），不是維護掃的。
+
+## 上一次變更（2026-07-14，Phase 16f 三條路徑實測：導入／自動分類／健康檢查）
 
 使用者：「檢查並修復健康檢查、自動分類、統一導入⋯⋯能不能自動送進對應的工作區，或是建立一個工作區？修好它，自己測試。」全部在 production 用真實資料實測過。
 

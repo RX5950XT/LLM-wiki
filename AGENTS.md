@@ -156,6 +156,12 @@ GOOGLE_OAUTH_CLIENT_SECRET=
 ### Ingest 驗證
 - `runIngestPipeline` 跑完若 `touched_pages` 為空 → 追加硬性指令重跑一輪 → 仍為空就 **throw**（job 標 `failed`）。舊版無條件標 `done`，production 22 次匯入有 7 次「done 但 0 頁」，使用者以為匯入成功、內容其實沒進 wiki
 
+### 失效連結（三層解析，`lib/wiki/resolve.ts`）
+- 咽喉點 `GET /api/pages/[wid]/[...slug]`：exact → slug alias → **title alias** → **其他工作區**（回 `404 PAGE_MOVED_WORKSPACE` + workspace_id/slug，Web `router.push`、Android 切工作區）
+- 全部是**唯一匹配**才 resolve：撞名就當死連結，寧可說找不到，也不要把讀者送到錯的頁
+- 真的沒有那頁 → `findDeadLinks()` 算好清單餵給健康檢查（它自己找不出來：580 條連結 × 140 頁的交叉比對是 set operation，不是判斷）
+- `findPagesMissingFromIndex()`：index.md 沒列到的頁，同樣由程式算好交給模型補
+
 ### 自動分類（auto_route）
 - `lib/ai/route-workspace.ts`：一次小 LLM 呼叫選目標工作區，或回 `NEW: <名稱>` 自建
 - **失敗不可假裝有分類**：舊版任何失敗都靜默退回當前工作區、卻照樣回 `routed_workspace_name`（UI 顯示「已導入到 X」）。現在失敗會重試一次，且 `decided: false` 時**不回** `routed_workspace_name`

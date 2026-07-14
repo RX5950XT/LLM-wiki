@@ -260,6 +260,10 @@ apps/android/app/src/main/java/com/llmwiki/
 - Android `refreshAfterForeground()` 回到前景時需同步目前 workspace，否則 Web 端剛匯入完成的 `index.md` / `log.md` 容易被本機舊快取蓋住，看起來像手機沒更新
 - Android / Web 的內部 wiki 連結解析都要接受不帶副檔名的 slug（例如 `entities/foo`），並自動補成 `.md`，否則索引頁連結會顯示但不能跳
 - **Wiki 連結 alias fallback（Phase 15，勿移除）**：LLM 常把連結寫成 `[[Agentic AI Transformation]]`（缺 `concepts/` 前綴、大小寫、`.md` 不一致），與實際 slug `concepts/agentic_ai_transformation.md` 對不上。解法在**伺服器咽喉點** `GET /api/pages/[...slug]`：exact miss 時用 `canonicalWikiAlias`（`apps/web/lib/wiki/slug.ts`：取 basename + 小寫 + 去 `[\s_\-()]` + `&→and`）做**唯一匹配**才 resolve（0 或 2+ 匹配則不猜，回 404）。一次修所有 client（Web/Android/直接 URL），且 survives writePage 重寫，不需清資料。Graph（`graph-view.tsx`）同樣把邊端點經 alias 解析成真實節點 id、解不到就濾掉，避免 force-graph 生幽靈節點。真失連時 `page-viewer.tsx` 顯示 `wiki.linkedPageMissing`（友善訊息），不噴原始 `[PAGE_NOT_FOUND]`。
+- **連結解析的第二、三層（Phase 16g，`lib/wiki/resolve.ts` 的 `pickAliasMatch`）**：production 581 條連結量到 157 條是斷的，拆成三類——
+  - **用「頁面標題」當連結**（37 條）：`[[DRAM 市場 2026 年供需危機]]`，實際 slug 是 `summaries/dram-market-2026-crisis.md`。alias 比對從只比 slug 擴充到**也比 title**（slug 優先；仍是唯一匹配才 resolve）。
+  - **頁被維護搬到別的工作區**（69 條）：`movePageToWorkspace` 只「回報」來源端反向連結會斷，沒有真的修。咽喉點在同工作區找不到時，會用同一套 alias 去**該使用者的其他工作區**找唯一匹配 → 回 `404 PAGE_MOVED_WORKSPACE` + `workspace_id`/`slug`；Web `PageViewer` 直接 `router.push` 過去，Android `selectPageBySlug` 查其他工作區並 `refreshWorkspaces(preferredWorkspaceId, preferredPageSlug)` 切過去（舊版連錯誤訊息都沒有，直接 `return`）。
+  - **真的沒有那頁**（51 條）：交給健康檢查（見下）。
 - `ingestUrl()` / `ingestText()` 呼叫 Web app 的 `/api/ingest`，使用 Supabase session accessToken
 - Web API 端點位址由 `BuildConfig.WEB_API_BASE_URL` 決定（從 `local.properties` 的 `WEB_API_BASE_URL` 或 `NEXT_PUBLIC_SITE_URL` 注入）
 - Chat 串流協定：POST `/api/query` → `text/plain` stream，結尾附 `\x00CITATIONS\x00[...]`（可再接 `\x00ACTIONS\x00[...]`）；Android 用 Ktor `bodyAsChannel()` + `readUTF8Line()` 消費，`parseStreamMeta()` 解析（未知 block 忽略）
@@ -289,6 +293,9 @@ apps/android/app/src/main/java/com/llmwiki/
 
 ## Graph View 注意事項
 
+- **`d3-force` 會就地改寫 `link.source` / `link.target`**：從 id 字串換成節點物件。任何拿它當 Map key 的統計（degree、neighbors）在 re-mount 後會全部失效——實測所有節點 degree 都變 0，全部畫成孤兒。一律先 `endpointId()` 正規化（Phase 16g）。
+- 視覺語言（Phase 16g）：顏色＝kind（冷色家族繞著 app 的 cyan accent，**只有 synthesis 是暖色**——那是 wiki 自己推理出來的頁）；大小／光暈亮度／標籤優先級全部由**連結度**驅動；孤兒頁畫**空心圓**（沒有連結的頁是待處理的發現，不是雜訊，舊版淡到 0.18 等於藏起來），頂列 readout 直接報「N 頁未連結」；標籤依 zoom 漸入（globalScale > 1.5 才浮現，否則整張圖是毛球）；`onEngineStop` → `zoomToFit`；圖例與篩選是**同一個控制項**；`prefers-reduced-motion` 時用 `warmupTicks` 離線跑完 layout 再畫。
+- 圖只讀 `zone='wiki'` 的頁：`_schema` 規則頁不是知識，不該是節點。
 - `GraphView` (`components/wiki/graph-view.tsx`) 動態 import `react-force-graph-2d`（ESM + window）避免 SSR 問題
 - 從 Supabase `page_links` 表讀邊，`pages` 表讀節點（需 `createClient` from `@/lib/supabase/client`）
 - `page_links` 由 `writePage` 工具在每次寫頁面時自動同步（解析 `[[wikilink]]` → upsert）
@@ -307,6 +314,7 @@ apps/android/app/src/main/java/com/llmwiki/
     - **單一工作區刪除失敗不可弄死整輪維護**：`deleteWorkspaceForUser` 內的 `drive.files.update({trashed:true})` 在資料夾不存在／權限變更時會 throw，冒上去就會被 route 的 `after()` catch 成 job failed（連 LLM 迴圈都還沒開始）。掃描逐一 catch，失敗就跳過。
     - **維護自己建的工作區不吃寬限期**：1 小時寬限是保護「匯入路由剛建好、ingest 還在寫」的工作區；維護自己 `createWorkspace` 出來、跑完卻沒填東西的空殼要當場刪掉，否則使用者選單裡會多一個空書架、還得等一小時。用 `createWorkspace` 工具回傳的 `workspace_id` 精確記錄本輪建的（`graceExemptIds`），**不要拿時間去猜**——猜會誤殺使用者在維護期間匯入時新建的工作區。
   - **完全重複的頁＝程式找**。`findDuplicateClusters()` 用 `canonicalWikiAlias`（大小寫／資料夾前綴／`.md` 差異）＋ 標題完全相同，跨工作區算出重複叢集，直接把答案寫進 prompt。模型只負責語意重複（同一件事兩個名字）與分類。
+  - **失效連結與過時 index＝程式找（Phase 16g，`findDeadLinks` / `findPagesMissingFromIndex`）**。prompt 從 Phase 16 就叫它「修復失效的 [[wikilink]]」，它一條都沒修過——要找出來得把 580 條連結對 140 個頁做交叉比對，這是 set operation，模型讀 inventory 根本做不到。現在程式算好兩份清單塞進 prompt（失效連結分「頁在別的工作區」與「根本沒這頁」兩類；index.md 沒列到的頁逐工作區列出），任務書第 5、6 步直接指向這兩份清單。
   - **同一頁在同一次按鈕裡只能被搬一次（`frozenMoveSlugs`，Phase 16f）**。每一輪都從 inventory 從零重新推導分類，邊界模糊的頁（資料中心算科技產業、半導體、還是 AI？）每輪答案都不一樣：production 實測三輪監控，4 頁被上輪搬走、下輪又搬回來。而且**有變更 → `more_work` 永遠 true → client 自動再開一輪**，一次按鈕可能整趟預算都花在自己推翻自己。`loadFrozenMoveSlugs()` 讀同一使用者 30 分鐘內 organize job 的 `progress`（一次按鈕最多 6 輪 × ~4 分鐘）取出已搬過的 slug，`movePageToWorkspace` 在查 DB 前就拒絕。只有維護 pipeline 會設這個旗標，**對話不受影響**（使用者叫它搬就該搬）。
   - 模型仍可 `renameWorkspace` / `createWorkspace` / `reorderWorkspaces` / `movePageToWorkspace` / `writePage` / `deletePage`——那些需要判斷「這頁在講什麼、該放哪」。
   - 測試：`apps/web/lib/ai/organize-mechanical.test.ts` ＋ `tools.test.ts`（`bun test`）。
