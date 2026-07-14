@@ -235,7 +235,17 @@ export async function POST(request: NextRequest) {
     messages: augmentedMessages,
     tools,
     stopWhen: stepCountIs(20),
-    onFinish: async ({ text }) => {
+    onFinish: async ({ text, finishReason, steps, reasoningText }) => {
+      // An answer that arrives with citations but no words looks like the wiki has
+      // nothing to say. Name the shape of the failure so it is diagnosable at all.
+      if (!text.trim()) {
+        console.warn('[query] model produced no answer text', {
+          finishReason,
+          steps: steps.length,
+          reasoningChars: reasoningText?.length ?? 0,
+          toolCalls: steps.flatMap((s) => s.toolCalls).map((c) => c.toolName),
+        });
+      }
       const citations = Array.from(readSlugs).filter((s) => s !== 'index.md');
       await supabase.from('logs').insert({
         workspace_id,

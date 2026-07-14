@@ -152,6 +152,7 @@ GOOGLE_OAUTH_CLIENT_SECRET=
 - 維護自己 `createWorkspace` 出來、跑完卻沒填東西的空殼**不吃 1 小時寬限期**（寬限是給「匯入路由剛建好、ingest 還在寫」的工作區）；用工具回傳的 id 記錄，不拿時間猜
 - **同一頁在同一次按鈕裡只能搬一次**（`frozenMoveSlugs`）：每輪都從零重新推導分類，邊界模糊的頁會被搬來搬去；有變更 → `more_work` 永遠 true → 自動再開一輪，一次按鈕會把預算花在自己推翻自己。`loadFrozenMoveSlugs()` 讀 30 分鐘內 organize job 的 progress，`movePageToWorkspace` 直接拒絕。**只有維護會設，對話不受影響**
 - 入口：Web 頂列 `Wrench`、Android drawer `Build`（各一顆）
+- **「一次一個」靠 DB 約束，不靠檢查**（migration `0019`）：route 的 SELECT 檢查與 INSERT 之間隔著好幾秒的 Drive 呼叫，兩個分頁同時續跑（都看到 `done && more_work`）會雙雙通過檢查 → 兩條 pipeline 同時改同一個 wiki、燒兩倍額度（實測發生過）。`agent_jobs (owner_id) where status='running'` 的 partial unique index 才擋得住；route 把 `23505` 轉成 `409 + 現行 jobId`，client 採用它繼續輪詢
 
 ### Ingest 驗證
 - `runIngestPipeline` 跑完若 `touched_pages` 為空 → 追加硬性指令重跑一輪 → 仍為空就 **throw**（job 標 `failed`）。舊版無條件標 `done`，production 22 次匯入有 7 次「done 但 0 頁」，使用者以為匯入成功、內容其實沒進 wiki
@@ -161,6 +162,7 @@ GOOGLE_OAUTH_CLIENT_SECRET=
 - 全部是**唯一匹配**才 resolve：撞名就當死連結，寧可說找不到，也不要把讀者送到錯的頁
 - 真的沒有那頁 → `findDeadLinks()` 算好清單餵給健康檢查（它自己找不出來：580 條連結 × 140 頁的交叉比對是 set operation，不是判斷）
 - `findPagesMissingFromIndex()`：index.md 沒列到的頁，同樣由程式算好交給模型補
+- **`[[slug|顯示名]]` 的顯示名不是 slug**：`parseWikiLink()`（`lib/wiki/slug.ts`）切成 slug / label / anchor，Web `page-viewer` 與 Android `MarkdownViewer` 都必須用它。渲染器忘了切 `|`，href 就是 `entities/foo|Foo.md`——那頁永遠不存在，而 `page_links`（後端有切）看起來完全健康。整份 index.md 的連結都是這個形式
 
 ### 自動分類（auto_route）
 - `lib/ai/route-workspace.ts`：一次小 LLM 呼叫選目標工作區，或回 `NEW: <名稱>` 自建
