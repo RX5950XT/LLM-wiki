@@ -110,7 +110,10 @@ export function GraphView({ workspaceId, activePage, onNodeClick, refreshKey = 0
           supabase
             .from('pages')
             .select('slug, title, kind')
-            .eq('workspace_id', workspaceId),
+            .eq('workspace_id', workspaceId)
+            // The graph is the knowledge base, not the machinery: the _schema rule
+            // pages are not part of what the wiki knows and were showing up as nodes.
+            .eq('zone', 'wiki'),
           supabase
             .from('page_links')
             .select('from_slug, to_slug')
@@ -236,15 +239,25 @@ export function GraphView({ workspaceId, activePage, onNodeClick, refreshKey = 0
 
         // Connectivity is the graph's only real quantity, so it drives everything
         // that reads at a glance: size, glow, and how loud the label is.
+        //
+        // d3-force REWRITES link.source/target in place from an id into the node
+        // object, so on any re-mount (a panel drag is enough) these are no longer
+        // strings. Keying the degree map off them raw made every node come out with
+        // degree 0 — the whole graph rendered as unconnected husks.
+        const endpointId = (end: unknown): string =>
+          typeof end === 'object' && end !== null ? (end as { id: string }).id : (end as string);
+
         const degree = new Map<string, number>();
         const neighbors = new Map<string, Set<string>>();
         for (const link of graphData.links) {
-          degree.set(link.source, (degree.get(link.source) ?? 0) + 1);
-          degree.set(link.target, (degree.get(link.target) ?? 0) + 1);
-          if (!neighbors.has(link.source)) neighbors.set(link.source, new Set());
-          if (!neighbors.has(link.target)) neighbors.set(link.target, new Set());
-          neighbors.get(link.source)!.add(link.target);
-          neighbors.get(link.target)!.add(link.source);
+          const source = endpointId(link.source);
+          const target = endpointId(link.target);
+          degree.set(source, (degree.get(source) ?? 0) + 1);
+          degree.set(target, (degree.get(target) ?? 0) + 1);
+          if (!neighbors.has(source)) neighbors.set(source, new Set());
+          if (!neighbors.has(target)) neighbors.set(target, new Set());
+          neighbors.get(source)!.add(target);
+          neighbors.get(target)!.add(source);
         }
         const maxDegree = Math.max(1, ...degree.values());
         const hover: { id: string | null } = { id: null };
@@ -282,6 +295,9 @@ export function GraphView({ workspaceId, activePage, onNodeClick, refreshKey = 0
           // of animating a swarm of nodes into place in front of them.
           warmupTicks: reduceMotion ? 200 : 0,
           cooldownTicks: reduceMotion ? 0 : undefined,
+          // Fill the panel once the layout settles, instead of leaving the whole base
+          // as a knot in the middle of an empty canvas.
+          onEngineStop: () => fgRef.current?.zoomToFit?.(reduceMotion ? 0 : 400, 56),
           nodeCanvasObjectMode: () => 'replace' as const,
           nodeCanvasObject: (
             node: GraphNode & { x?: number; y?: number },
@@ -333,8 +349,10 @@ export function GraphView({ workspaceId, activePage, onNodeClick, refreshKey = 0
             }
 
             // Labels ramp in with zoom instead of snapping on at a threshold; the
-            // focused neighbourhood and the active page are always named.
-            const zoomAlpha = Math.min(1, Math.max(0, (globalScale - 0.9) / 0.7));
+            // focused neighbourhood and the active page are always named. They stay
+            // out until you lean in — at the zoom that fits the whole base, every
+            // label on screen at once is a hairball, not a map.
+            const zoomAlpha = Math.min(1, Math.max(0, (globalScale - 1.5) / 0.8));
             const named = focused || isActive || (hover.id != null && alpha > 0.5);
             const labelAlpha = named ? alpha : zoomAlpha * alpha;
             if (labelAlpha > 0.05) {

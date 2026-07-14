@@ -171,7 +171,10 @@ export function PageViewer({
   const t = useTranslations();
   const router = useRouter();
   const [page, setPage] = useState<PageData | null>(null);
-  const [loading, setLoading] = useState(false);
+  // Start loading whenever there is a page to load: the fetch only begins in an
+  // effect, so a `false` here paints "page not found" on the very first frame —
+  // for the seconds a cold Drive read takes, the wiki looks broken on arrival.
+  const [loading, setLoading] = useState(Boolean(slug));
   const [error, setError] = useState<string | null>(null);
   // Non-fatal action failures (lock toggle, save) — shown inline, must NOT
   // trip the full-page error screen or the open editor would be unmounted
