@@ -71,6 +71,12 @@ const PROTECTED_SLUGS = new Set(['index.md', 'log.md']);
 const WIKI_FOLDERS = new Set(['entities', 'concepts', 'summary', 'summaries', 'synthesis']);
 const ROOT_PAGES = new Set(['index.md', 'log.md']);
 
+/**
+ * Zone guard — applies to EVERY operation, including deletes. Keep it that way: a
+ * guard that also blocks deletion would make the junk it is meant to prevent
+ * permanent (the first version of the folder rule below did exactly that, and the
+ * five `plans/…` pages already in the base could not be removed by any tool).
+ */
 function guardWikiSlug(slug: string): string | null {
   const s = slug.trim();
   if (!s || s.startsWith('/') || s.includes('..') || s.includes('\\')) {
@@ -79,7 +85,14 @@ function guardWikiSlug(slug: string): string | null {
   if (s.startsWith('notes/') || s.startsWith('_schema/') || s.startsWith('sources/')) {
     return `Slug "${slug}" is outside the wiki zone. LLM tools may only modify wiki pages.`;
   }
-  const normalized = normalizeSlug(s);
+  return null;
+}
+
+/** Write guard: where a *new* page may land. Never used for delete or read. */
+function guardKnowledgeSlug(slug: string): string | null {
+  const zoneError = guardWikiSlug(slug);
+  if (zoneError) return zoneError;
+  const normalized = normalizeSlug(slug.trim());
   if (ROOT_PAGES.has(normalized)) return null;
   const folder = normalized.split('/')[0]!;
   if (!normalized.includes('/') || !WIKI_FOLDERS.has(folder)) {
@@ -367,7 +380,7 @@ export function buildWikiTools(ctx: ToolContext) {
       }) => {
         const scope = await resolveScope(workspace_id);
         if ('error' in scope) return scope;
-        const guardError = guardWikiSlug(rawOldSlug) ?? guardWikiSlug(rawNewSlug);
+        const guardError = guardWikiSlug(rawOldSlug) ?? guardKnowledgeSlug(rawNewSlug);
         if (guardError) return { error: guardError };
         const newSlug = normalizeSlug(rawNewSlug);
         if (PROTECTED_SLUGS.has(normalizeSlug(rawOldSlug))) {
@@ -599,7 +612,7 @@ export function buildWikiTools(ctx: ToolContext) {
           return { error: 'Source and target workspaces are the same. Use movePage instead.' };
         }
 
-        const guardError = guardWikiSlug(rawSlug) ?? (new_slug ? guardWikiSlug(new_slug) : null);
+        const guardError = guardWikiSlug(rawSlug) ?? (new_slug ? guardKnowledgeSlug(new_slug) : null);
         if (guardError) return { error: guardError };
         const targetSlug = normalizeSlug(new_slug ?? rawSlug);
         if (PROTECTED_SLUGS.has(normalizeSlug(rawSlug)) || PROTECTED_SLUGS.has(targetSlug)) {
@@ -721,7 +734,7 @@ export async function writePageForWorkspace(
   { slug: rawSlug, content_md, kind, title }: WritePageArgs,
   folderCache?: Map<string, string>,
 ) {
-  const guardError = guardWikiSlug(rawSlug);
+  const guardError = guardKnowledgeSlug(rawSlug);
   if (guardError) return { error: guardError };
   const slug = normalizeSlug(rawSlug);
 

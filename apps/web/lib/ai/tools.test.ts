@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { drive_v3 } from 'googleapis';
-import { buildWikiTools, writePageForWorkspace } from './tools';
+import { buildWikiTools, deletePageForWorkspace, writePageForWorkspace } from './tools';
 
 const WORKSPACE = '11111111-1111-4111-8111-111111111111';
 const OTHER_WORKSPACE = '22222222-2222-4222-8222-222222222222';
@@ -73,5 +73,24 @@ describe('wiki zone guard — the model must not shelve its own working notes', 
       title: 'Update Plan JSON',
     });
     expect((result as { error?: string }).error).toContain('not a knowledge page');
+  });
+});
+
+// The guard must never make existing junk permanent: it blocks *writing* a page
+// outside the knowledge folders, not deleting one that is already there.
+describe('deleting a non-knowledge page stays possible', () => {
+  it('does not reject plans/… on the delete path', async () => {
+    const deps = {
+      supabase: {
+        from: () => ({
+          select: () => ({ eq: () => ({ in: async () => ({ data: [] }) }) }),
+        }),
+      } as never,
+      drive: {} as never,
+    };
+    const result = await deletePageForWorkspace(deps, { workspaceId: 'w1', wikiFolderId: 'f1' }, 'plans/plan-2026-11-24.md');
+    // No page row exists in this stub, so it reports "not found" — crucially NOT
+    // "not a knowledge page", which is what the over-broad guard used to say.
+    expect(JSON.stringify(result)).not.toContain('not a knowledge page');
   });
 });
