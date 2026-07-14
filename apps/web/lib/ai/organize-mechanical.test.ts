@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import {
+  buildSeedIndexMarkdown,
   findDeadLinks,
   findPagesMissingFromIndex,
   findDuplicateClusters,
@@ -137,5 +138,29 @@ describe('findPagesMissingFromIndex', () => {
     ];
     const links = [{ workspace_id: 'ai', from_slug: 'index.md', to_slug: 'concepts/listed' }];
     expect(findPagesMissingFromIndex('ai', pages, links)).toEqual(['concepts/orphan.md']);
+  });
+});
+
+describe('buildSeedIndexMarkdown', () => {
+  const pages: InventoryRow[] = [
+    { workspace_id: 'w1', slug: 'index.md', title: 'Wiki 索引', kind: 'index' },
+    { workspace_id: 'w1', slug: 'log.md', title: '更新日誌', kind: 'log' },
+    { workspace_id: 'w1', slug: 'entities/nasa.md', title: '國家航空暨太空總署 (NASA)', kind: 'entity' },
+    { workspace_id: 'w1', slug: 'concepts/uap.md', title: '不明異常現象 (UAP)', kind: 'concept' },
+  ];
+
+  it('lists the workspace pages as wikilinks, grouped by kind', () => {
+    const md = buildSeedIndexMarkdown('UAP 與國家安全', pages, 'zh-TW');
+    expect(md).toContain('# UAP 與國家安全');
+    expect(md).toContain('## 實體');
+    expect(md).toContain('[[entities/nasa.md|國家航空暨太空總署 (NASA)]]');
+    expect(md).toContain('[[concepts/uap.md|不明異常現象 (UAP)]]');
+  });
+
+  // index.md/log.md are scaffolding — an index that links to itself is noise.
+  it('leaves the scaffolding pages out', () => {
+    const md = buildSeedIndexMarkdown('UAP 與國家安全', pages, 'zh-TW');
+    expect(md).not.toContain('[[index.md');
+    expect(md).not.toContain('[[log.md');
   });
 });

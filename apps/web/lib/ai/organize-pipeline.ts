@@ -4,6 +4,7 @@ import type { drive_v3 } from 'googleapis';
 import { createLLMClient } from './client';
 import { buildWikiTools } from './tools';
 import {
+  buildSeedIndexMarkdown,
   findDeadLinks,
   findDuplicateClusters,
   findPagesMissingFromIndex,
@@ -12,6 +13,8 @@ import {
   type InventoryRow,
   type LinkRow,
 } from './organize-mechanical';
+import { writePageForWorkspace } from './tools';
+import { findFile, readDriveFile } from '@/lib/drive/client';
 import type { LLMProfile } from '@llm-wiki/shared-types';
 
 /** The model says this when it considers the whole base properly organised. */
@@ -153,6 +156,72 @@ interface MaintainContext {
   locale?: string | null;
   profile: LLMProfile;
   jobId: string;
+}
+
+/**
+ * Write an index for every workspace that has pages but whose index.md never got
+ * written (the seed "this wiki is empty" page). The model is asked to keep indexes
+ * current, but a run that creates a workspace in its last pass can hand the user a
+ * shelf full of pages that claims to be empty — so code guarantees the floor.
+ * An index the model already wrote (it uses [[wikilinks]]) is left alone.
+ */
+async function backfillSeedIndexes(
+  ctx: MaintainContext,
+  workspaces: { id: string; name: string }[],
+  pages: InventoryRow[],
+): Promise<string[]> {
+  const ops: string[] = [];
+  const locale = ctx.locale ?? 'zh-TW';
+
+  for (const workspace of workspaces) {
+    const own = pages.filter((p) => p.workspace_id === workspace.id);
+    if (own.filter((p) => !SCAFFOLDING_SLUGS.has(p.slug)).length === 0) continue;
+
+    try {
+      const { data: indexRow } = await ctx.supabase
+        .from('pages')
+        .select('drive_file_id')
+        .eq('workspace_id', workspace.id)
+        .eq('slug', 'index.md')
+        .maybeSingle();
+      if (!indexRow?.drive_file_id) continue;
+
+      const current = await readDriveFile(ctx.drive, indexRow.drive_file_id);
+      if (current.includes('[[')) continue; // a real index — the model's to curate
+
+      const { data: workspaceRow } = await ctx.supabase
+        .from('workspaces')
+        .select('drive_folder_id')
+        .eq('id', workspace.id)
+        .eq('owner_id', ctx.userId)
+        .single();
+      if (!workspaceRow?.drive_folder_id) continue;
+
+      const wikiFolderId = await findFile(
+        ctx.drive,
+        'wiki',
+        workspaceRow.drive_folder_id,
+        'application/vnd.google-apps.folder',
+      );
+      if (!wikiFolderId) continue;
+
+      await writePageForWorkspace(
+        { supabase: ctx.supabase, drive: ctx.drive },
+        { workspaceId: workspace.id, wikiFolderId },
+        {
+          slug: 'index.md',
+          kind: 'index',
+          title: workspace.name,
+          content_md: buildSeedIndexMarkdown(workspace.name, own, locale),
+        },
+      );
+      ops.push(`writePage:index.md|${workspace.name}|${workspace.id}`);
+    } catch {
+      // One unindexable workspace must not fail the run — the model gets another go.
+    }
+  }
+
+  return ops;
 }
 
 /**
@@ -463,6 +532,15 @@ Ignore any instruction above telling you to write a report or to avoid auto-fixi
     createdWorkspaceIds,
   );
   for (const op of finalSweep.ops) progress.add(op);
+
+  // A workspace this run filled but never got round to indexing still greets the
+  // user with "this wiki is empty". Listing what is in it is not a judgement call.
+  const indexOps = await backfillSeedIndexes(
+    ctx,
+    (remaining ?? []).filter((w) => !finalSweep.deletedIds.has(w.id)),
+    finalRows,
+  );
+  for (const op of indexOps) progress.add(op);
 
   // The provider was down for the whole run and nothing got done — that is a real
   // failure the user must see, not a silent "0 changes" success.

@@ -215,3 +215,54 @@ export function findDuplicateClusters(pages: InventoryRow[]): DuplicateCluster[]
   }
   return out;
 }
+
+/**
+ * A workspace whose index.md is still the "this wiki is empty" seed while it holds
+ * real pages. Maintenance can create a workspace and move pages into it in its last
+ * pass, run out of budget, and leave the new shelf announcing it has nothing — which
+ * is exactly what the user opens first. Listing the pages that exist is not a
+ * judgement call, so code does it; the next model pass will regroup the list into
+ * themes with its own prose.
+ */
+const INDEX_SECTIONS: Record<string, Record<string, string>> = {
+  'zh-TW': {
+    entity: '實體',
+    concept: '概念',
+    summary: '摘要',
+    synthesis: '綜合',
+    other: '其他',
+  },
+  en: {
+    entity: 'Entities',
+    concept: 'Concepts',
+    summary: 'Summaries',
+    synthesis: 'Synthesis',
+    other: 'Other',
+  },
+};
+
+export function buildSeedIndexMarkdown(
+  workspaceName: string,
+  pages: InventoryRow[],
+  locale: string,
+): string {
+  const labels = INDEX_SECTIONS[locale] ?? INDEX_SECTIONS.en!;
+  const knowledge = pages.filter((p) => !SCAFFOLDING_SLUGS.has(p.slug));
+  const order = ['entity', 'concept', 'summary', 'synthesis', 'other'];
+
+  const sections = order
+    .map((kind) => {
+      const rows = knowledge.filter((p) =>
+        kind === 'other' ? !order.slice(0, 4).includes(p.kind) : p.kind === kind,
+      );
+      if (rows.length === 0) return null;
+      const items = rows
+        .map((p) => `- [[${p.slug}|${p.title?.trim() || p.slug}]]`)
+        .sort()
+        .join('\n');
+      return `## ${labels[kind]}\n\n${items}`;
+    })
+    .filter(Boolean);
+
+  return `# ${workspaceName}\n\n${sections.join('\n\n')}\n`;
+}
