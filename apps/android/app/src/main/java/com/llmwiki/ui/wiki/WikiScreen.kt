@@ -700,7 +700,9 @@ fun WikiScreen(
                     }
                 }
 
-                if (uiState.ingestLoading) {
+                // Server-derived: an import started on the phone (or on the web) is still
+                // shown after the app is killed and reopened.
+                if (uiState.ingestLoading || uiState.activeIngestCount > 0) {
                     Surface(color = MaterialTheme.colorScheme.secondaryContainer) {
                         Row(
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
@@ -713,10 +715,15 @@ fun WikiScreen(
                                 color = MaterialTheme.colorScheme.onSecondaryContainer,
                             )
                             Text(
-                                text = if (uiState.ingestProgress > 0) {
-                                    stringResource(R.string.ingest_running_progress, uiState.ingestProgress)
-                                } else {
-                                    stringResource(R.string.ingest_running)
+                                text = when {
+                                    uiState.activeIngestCount > 0 -> stringResource(
+                                        R.string.ingest_running_batch,
+                                        uiState.activeIngestCount,
+                                        uiState.activeIngestPages,
+                                    )
+                                    uiState.ingestProgress > 0 ->
+                                        stringResource(R.string.ingest_running_progress, uiState.ingestProgress)
+                                    else -> stringResource(R.string.ingest_running)
                                 },
                                 color = MaterialTheme.colorScheme.onSecondaryContainer,
                                 style = MaterialTheme.typography.bodySmall,

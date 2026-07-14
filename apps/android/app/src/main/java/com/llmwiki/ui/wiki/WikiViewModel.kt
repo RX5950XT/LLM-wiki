@@ -51,6 +51,7 @@ import io.ktor.utils.io.readUTF8Line
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -119,6 +120,9 @@ data class WikiUiState(
     val workspaceActionLoading: Boolean = false,
     val ingestLoading: Boolean = false,
     val ingestProgress: Int = 0,
+    /** Imports running server-side right now (survives closing the app). */
+    val activeIngestCount: Int = 0,
+    val activeIngestPages: Int = 0,
     val pageSaveLoading: Boolean = false,
     val syncLoading: Boolean = false,
     val backlinks: List<String> = emptyList(),
@@ -178,6 +182,46 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
             syncSelected = true,
         )
         loadProfiles()
+        watchRunningIngests()
+    }
+
+    /**
+     * Imports keep running server-side after the app is closed, so the banner is
+     * derived from the jobs table rather than from anything this process remembers:
+     * kill the app mid-import, come back, and the progress is still on screen.
+     * (Web reads the same rows — see workspace-shell.tsx.)
+     */
+    private var ingestWatchJob: Job? = null
+
+    private fun watchRunningIngests() {
+        if (ingestWatchJob?.isActive == true) return
+        ingestWatchJob = viewModelScope.launch {
+            var hadRunning = false
+            while (isActive) {
+                val snapshot = runCatching {
+                    supabase.requireAccessToken(forceRefresh = false)
+                    supabase.from("ingest_jobs")
+                        .select(columns = Columns.raw("source_id,status,error,touched_pages,started_at")) {
+                            filter { eq("status", "running") } // RLS scopes this to the user
+                        }
+                        .decodeList<IngestJobRow>()
+                }.getOrNull()
+
+                if (snapshot != null) {
+                    val running = snapshot.size
+                    _uiState.update {
+                        it.copy(
+                            activeIngestCount = running,
+                            activeIngestPages = snapshot.sumOf { job -> job.touchedPages.size },
+                        )
+                    }
+                    // The last import just landed — pull in what it wrote.
+                    if (hadRunning && running == 0) workspaceId.value?.let { syncPagesInternal(it) }
+                    hadRunning = running > 0
+                }
+                delay(if (hadRunning) 5_000L else 20_000L)
+            }
+        }
     }
 
     private var lastForegroundSyncAt = 0L

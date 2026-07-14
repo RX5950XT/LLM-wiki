@@ -51,7 +51,9 @@
     "maintenanceFailed": "Maintenance job failed",
     "dismiss": "Dismiss",
     "initFailed": "Auto-setup failed. Please try creating your workspace manually.",
-    "ingestRunning": "Importing… {files} in progress, {pages} pages updated"
+    "ingestRunning": "Importing… {files} in progress, {pages} pages updated",
+    "ingestBatchDone": "{count} done in this batch",
+    "ingestBatchFailed": "{count} failed (re-ingest from Sources)"
   },
   "wiki": {
     "index": "Index",

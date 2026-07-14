@@ -54,6 +54,13 @@ const MAINTENANCE_STORAGE_KEY = 'llmwiki:maintenance';
  */
 const MAX_MAINTENANCE_PASSES = 6;
 
+/**
+ * How far back to look for the imports that belong to the batch still in flight.
+ * A single import takes ~2 minutes; anything finished within half an hour of the
+ * oldest running one is part of the same push, not last week's session.
+ */
+const BATCH_LOOKBACK_MS = 30 * 60 * 1000;
+
 interface WorkspaceShellProps {
   workspaceId: string;
   workspaceName: string;
@@ -138,30 +145,67 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
   // Imports run server-side and outlive the tab. The bar below is therefore derived
   // from the jobs table itself, not from anything this tab remembers: close the page
   // mid-import, come back on another device, and the progress is still there.
-  const [ingest, setIngest] = useState<{ files: number; pages: number } | null>(null);
+  const [ingest, setIngest] = useState<{
+    running: number;
+    done: number;
+    failed: number;
+    pages: number;
+  } | null>(null);
   useEffect(() => {
     const supabase = createClient();
     let cancelled = false;
     let previous = 0;
 
     const poll = async () => {
-      const { data } = await supabase
+      // RLS scopes both queries to the user's own workspaces.
+      const { data: running } = await supabase
         .from('ingest_jobs')
-        .select('id, touched_pages')
-        .eq('status', 'running'); // RLS scopes this to the user's own workspaces
+        .select('id, touched_pages, started_at')
+        .eq('status', 'running');
       if (cancelled) return;
-      const files = data?.length ?? 0;
-      const pages = (data ?? []).reduce(
-        (sum, job) => sum + ((job.touched_pages as string[] | null)?.length ?? 0),
-        0,
-      );
-      setIngest(files > 0 ? { files, pages } : null);
-      // The last import just landed — pull in what it wrote.
-      if (previous > 0 && files === 0) {
-        refreshPageList();
-        refreshWorkspaceListRef.current?.();
+
+      const inFlight = running ?? [];
+      if (inFlight.length === 0) {
+        setIngest(null);
+        if (previous > 0) {
+          refreshPageList();
+          refreshWorkspaceListRef.current?.();
+        }
+        previous = 0;
+        return;
       }
-      previous = files;
+
+      // How far along the *batch* is. The server cannot know how many files the user
+      // still intends to send — only what has already been handed to it — so the bar
+      // reports what it can stand behind: finished, failed, and still running.
+      const earliest = inFlight
+        .map((job) => new Date(job.started_at as string).getTime())
+        .reduce((a, b) => Math.min(a, b), Date.now());
+      const since = new Date(earliest - BATCH_LOOKBACK_MS).toISOString();
+      const [{ count: doneCount }, { count: failedCount }] = await Promise.all([
+        supabase
+          .from('ingest_jobs')
+          .select('id', { count: 'exact', head: true })
+          .eq('status', 'done')
+          .gte('started_at', since),
+        supabase
+          .from('ingest_jobs')
+          .select('id', { count: 'exact', head: true })
+          .eq('status', 'failed')
+          .gte('started_at', since),
+      ]);
+      if (cancelled) return;
+
+      setIngest({
+        running: inFlight.length,
+        done: doneCount ?? 0,
+        failed: failedCount ?? 0,
+        pages: inFlight.reduce(
+          (sum, job) => sum + ((job.touched_pages as string[] | null)?.length ?? 0),
+          0,
+        ),
+      });
+      previous = inFlight.length;
     };
 
     poll();
@@ -1033,7 +1077,14 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
         >
           <Loader2 size={14} className="shrink-0 animate-spin" />
           <span className="min-w-0 flex-1 truncate">
-            {`${t('workspace.ingestRunning', { files: ingest.files, pages: ingest.pages })} · ${t('workspace.maintenanceBackgroundHint')}`}
+            {[
+              t('workspace.ingestRunning', { files: ingest.running, pages: ingest.pages }),
+              t('workspace.ingestBatchDone', { count: ingest.done }),
+              ingest.failed > 0 ? t('workspace.ingestBatchFailed', { count: ingest.failed }) : null,
+              t('workspace.maintenanceBackgroundHint'),
+            ]
+              .filter(Boolean)
+              .join(' · ')}
           </span>
         </div>
       )}
