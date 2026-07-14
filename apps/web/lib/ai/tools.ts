@@ -41,6 +41,12 @@ interface ToolContext {
    * workspaces are removed by code instead (lib/ai/organize-mechanical.ts).
    */
   allowWorkspaceDelete?: boolean;
+  /**
+   * Pages an earlier pass of the same maintenance run already moved. They are
+   * frozen: without this the model re-litigates every borderline page on each pass
+   * and the same page ping-pongs between two workspaces run after run.
+   */
+  frozenMoveSlugs?: ReadonlySet<string>;
 }
 
 export interface Scope {
@@ -552,6 +558,20 @@ export function buildWikiTools(ctx: ToolContext) {
         from_workspace_id?: string;
         new_slug?: string;
       }) => {
+        // Each maintenance pass re-derives the taxonomy from scratch, so a page whose
+        // home is genuinely arguable (a datacenter concept: tech industry?
+        // semiconductors? AI?) gets moved out by one pass and straight back by the
+        // next — churn that also keeps `more_work` true, so the button spends its
+        // passes undoing itself. One move per page per run; the earlier pass decided.
+        if (
+          ctx.frozenMoveSlugs?.has(normalizeSlug(rawSlug)) ||
+          ctx.frozenMoveSlugs?.has(rawSlug.trim())
+        ) {
+          return {
+            error: `"${rawSlug}" was already re-shelved earlier in this maintenance run. Leave it where it is and move on.`,
+          };
+        }
+
         const fromScope = await resolveScope(from_workspace_id);
         if ('error' in fromScope) return fromScope;
         const toScope = await resolveScope(to_workspace_id);

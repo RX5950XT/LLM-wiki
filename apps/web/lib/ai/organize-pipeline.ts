@@ -74,6 +74,46 @@ async function loadInventoryRows(
 }
 
 /**
+ * How far back to look for the passes that belong to the same button press. One
+ * press chains up to MAX_MAINTENANCE_PASSES passes of ~4 minutes, so 30 minutes
+ * covers a chain and nothing older.
+ */
+const CHAIN_LOOKBACK_MS = 30 * 60 * 1000;
+
+/**
+ * Slugs an earlier pass of this same run already moved between workspaces.
+ *
+ * Every pass re-derives the taxonomy from the inventory, so a page whose home is
+ * genuinely arguable (a datacenter concept: tech industry? semiconductors? AI?)
+ * gets moved out by one pass and moved straight back by the next. Measured on a
+ * production run: 4 pages ping-ponged across three passes. Churn also means the
+ * pass reports changes, so `more_work` stays true and the client burns another
+ * pass — a button press can spend its whole budget undoing itself.
+ */
+async function loadFrozenMoveSlugs(
+  supabase: SupabaseClient,
+  userId: string,
+  currentJobId: string,
+): Promise<Set<string>> {
+  const { data } = await supabase
+    .from('agent_jobs')
+    .select('id, progress')
+    .eq('owner_id', userId)
+    .eq('kind', 'organize')
+    .gte('started_at', new Date(Date.now() - CHAIN_LOOKBACK_MS).toISOString());
+
+  const frozen = new Set<string>();
+  for (const job of data ?? []) {
+    if (job.id === currentJobId) continue;
+    for (const op of (job.progress ?? []) as string[]) {
+      const [toolName, ...rest] = op.split(':');
+      if (toolName === 'movePageToWorkspace' && rest.length) frozen.add(rest.join(':'));
+    }
+  }
+  return frozen;
+}
+
+/**
  * Wall-clock budget for the tool loop. The route's maxDuration is 300s and the
  * whole run (including after()) is killed at that mark — a killed run never gets
  * to mark its job row, which is what surfaced to users as "Organize timed out"
@@ -144,6 +184,8 @@ export async function runOrganizePipeline(
     pagesByWorkspace.set(row.workspace_id, list);
   }
 
+  const frozenMoveSlugs = await loadFrozenMoveSlugs(ctx.supabase, ctx.userId, ctx.jobId);
+
   const tools = buildWikiTools({
     supabase: ctx.supabase,
     drive: ctx.drive,
@@ -151,6 +193,8 @@ export async function runOrganizePipeline(
     wikiFolderId: ctx.wikiFolderId,
     userId: ctx.userId,
     crossWorkspace: true,
+    // One move per page per button press — see loadFrozenMoveSlugs.
+    frozenMoveSlugs,
     // The maintenance button IS the confirmation. Gating deletes here would leave
     // duplicates in place forever (nobody can confirm a background job's cards).
     confirmDestructive: false,
@@ -210,6 +254,16 @@ ${inventory}
 
 # Exact duplicates the system already found for you (same page written twice)
 ${duplicateReport}
+${
+  frozenMoveSlugs.size
+    ? `\n# Already re-shelved by an earlier pass of THIS run — the decision is made, do not move them again\n${Array.from(
+        frozenMoveSlugs,
+      )
+        .slice(0, 60)
+        .map((s) => `- ${s}`)
+        .join('\n')}\n`
+    : ''
+}
 
 # The work, in order
 1. **Understand the shape.** From the snippets above, work out what each workspace is actually ABOUT (its real subject), not what its name claims. Note which workspaces overlap and which are dumping grounds.
