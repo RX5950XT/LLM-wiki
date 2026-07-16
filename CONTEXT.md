@@ -2,7 +2,16 @@
 
 > 給下一個 AI Agent 的接手指南。架構與規範細節以 `CLAUDE.md` / `AGENTS.md` 為準，這裡只記「最近做了什麼、為什麼、還缺什麼」。
 
-## 最近一次變更（2026-07-16，接續 Phase 16i：死連結收工驗證 + extractWikiLinks 切 anchor）
+## 最近一次變更（2026-07-16，Android v0.6.0 發行版）
+
+對齊網頁後重編並發布 **v0.6.0**（versionCode **6**；上一版 v0.5.0 / code 5，不重複）。
+
+- 匯入進度橫幅：與 Web 一樣報「處理中 / 本批完成 / 失敗」+ 已更新頁數（`ingest_jobs` RLS 輪詢，關 App 不中斷）
+- `[[slug#anchor|label]]`：MarkdownViewer 切掉 anchor 再組 href
+- 維護 `more_work` 接力、來源 re-ingest、Bot 導入／模型選單等已在先前對齊，本版一併打進 signed release
+- GitHub Release：`v0.6.0` asset `llm-wiki-0.6.0.apk`
+
+## 上一次變更（2026-07-16，接續 Phase 16i：死連結收工驗證 + extractWikiLinks 切 anchor）
 
 Claude 停在「修了 residual 收工、部署後再按一次把 8 條收掉」。本輪接續完成。
 

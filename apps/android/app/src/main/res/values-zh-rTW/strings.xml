@@ -192,5 +192,5 @@
     <string name="error_op_sync">同步失敗</string>
     <string name="error_op_lock">更新頁面鎖定失敗</string>
     <string name="error_op_synthesis">儲存整合頁失敗</string>
-    <string name="ingest_running_batch">匯入中…%1$d 篇處理中，已更新 %2$d 個頁面 · 可關閉 App，任務會在背景繼續</string>
+    <string name="ingest_running_batch">匯入中…%1$d 篇處理中，已更新 %2$d 個頁面 · 本批已完成 %3$d 篇 · 失敗 %4$d 篇 · 可關閉 App，任務會在背景繼續</string>
 </resources>

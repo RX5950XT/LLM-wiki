@@ -720,6 +720,8 @@ fun WikiScreen(
                                         R.string.ingest_running_batch,
                                         uiState.activeIngestCount,
                                         uiState.activeIngestPages,
+                                        uiState.activeIngestDone,
+                                        uiState.activeIngestFailed,
                                     )
                                     uiState.ingestProgress > 0 ->
                                         stringResource(R.string.ingest_running_progress, uiState.ingestProgress)

@@ -192,5 +192,5 @@
     <string name="error_op_sync">Sync failed</string>
     <string name="error_op_lock">Failed to update page lock</string>
     <string name="error_op_synthesis">Failed to save synthesis</string>
-    <string name="ingest_running_batch">Importing… %1$d in progress, %2$d pages updated · runs in the background</string>
+    <string name="ingest_running_batch">Importing… %1$d in progress, %2$d pages updated · %3$d done · %4$d failed · runs in the background</string>
 </resources>

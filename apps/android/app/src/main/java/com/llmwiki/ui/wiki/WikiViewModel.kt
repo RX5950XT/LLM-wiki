@@ -72,6 +72,7 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import java.time.Instant
 
 /**
  * A deep reorganisation is cut off by the server's 300s invocation limit, so a
@@ -79,6 +80,9 @@ import kotlinx.serialization.json.put
  * the Web client's MAX_MAINTENANCE_PASSES.
  */
 private const val MAX_MAINTENANCE_PASSES = 6
+
+/** Same batch window as Web workspace-shell (30 minutes before earliest running job). */
+private const val BATCH_LOOKBACK_MS = 30L * 60L * 1000L
 
 data class ChatMessage(
     val role: String,
@@ -123,6 +127,9 @@ data class WikiUiState(
     /** Imports running server-side right now (survives closing the app). */
     val activeIngestCount: Int = 0,
     val activeIngestPages: Int = 0,
+    /** Finished / failed jobs in the same batch window as the running ones (Web parity). */
+    val activeIngestDone: Int = 0,
+    val activeIngestFailed: Int = 0,
     val pageSaveLoading: Boolean = false,
     val syncLoading: Boolean = false,
     val backlinks: List<String> = emptyList(),
@@ -200,29 +207,75 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
             while (isActive) {
                 val snapshot = runCatching {
                     supabase.requireAccessToken(forceRefresh = false)
-                    supabase.from("ingest_jobs")
+                    val running = supabase.from("ingest_jobs")
                         .select(columns = Columns.raw("source_id,status,error,touched_pages,started_at")) {
                             filter { eq("status", "running") } // RLS scopes this to the user
                         }
                         .decodeList<IngestJobRow>()
+
+                    // Match Web: report finished/failed in the same batch window.
+                    // The server only knows what was already handed to it — not how many
+                    // files the user still intends to send.
+                    var done = 0
+                    var failed = 0
+                    if (running.isNotEmpty()) {
+                        val earliestMs = running.mapNotNull { row ->
+                            row.startedAt?.let { runCatching { Instant.parse(it).toEpochMilli() }.getOrNull() }
+                        }.minOrNull() ?: System.currentTimeMillis()
+                        val since = Instant.ofEpochMilli(earliestMs - BATCH_LOOKBACK_MS).toString()
+                        done = supabase.from("ingest_jobs")
+                            .select(columns = Columns.raw("source_id,status,error,touched_pages,started_at")) {
+                                filter {
+                                    eq("status", "done")
+                                    gte("started_at", since)
+                                }
+                            }
+                            .decodeList<IngestJobRow>()
+                            .size
+                        failed = supabase.from("ingest_jobs")
+                            .select(columns = Columns.raw("source_id,status,error,touched_pages,started_at")) {
+                                filter {
+                                    eq("status", "failed")
+                                    gte("started_at", since)
+                                }
+                            }
+                            .decodeList<IngestJobRow>()
+                            .size
+                    }
+                    IngestWatchSnapshot(
+                        running = running,
+                        done = done,
+                        failed = failed,
+                    )
                 }.getOrNull()
 
                 if (snapshot != null) {
-                    val running = snapshot.size
+                    val running = snapshot.running.size
                     _uiState.update {
                         it.copy(
                             activeIngestCount = running,
-                            activeIngestPages = snapshot.sumOf { job -> job.touchedPages.size },
+                            activeIngestPages = snapshot.running.sumOf { job -> job.touchedPages.size },
+                            activeIngestDone = snapshot.done,
+                            activeIngestFailed = snapshot.failed,
                         )
                     }
                     // The last import just landed — pull in what it wrote.
-                    if (hadRunning && running == 0) workspaceId.value?.let { syncPagesInternal(it) }
+                    if (hadRunning && running == 0) {
+                        workspaceId.value?.let { syncPagesInternal(it) }
+                        refreshWorkspaces(syncSelected = false)
+                    }
                     hadRunning = running > 0
                 }
                 delay(if (hadRunning) 5_000L else 20_000L)
             }
         }
     }
+
+    private data class IngestWatchSnapshot(
+        val running: List<IngestJobRow>,
+        val done: Int,
+        val failed: Int,
+    )
 
     private var lastForegroundSyncAt = 0L
 

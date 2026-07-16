@@ -24,12 +24,14 @@ private fun stripFrontmatterAndWikilinks(content: String): String {
             result = result.substring(end + 4).trimStart()
         }
     }
-    // [[slug]], [[slug#anchor]] and [[slug|label]] — the display text after "|" is
-    // not part of the slug; keeping it in the href asks for a page that never exists.
+    // [[slug]], [[slug#anchor]] and [[slug|label]] — strip display name and anchor
+    // before the href, or the page API is asked for a slug that never exists.
     return result.replace(Regex("""\[\[([^\]]+)]]""")) { match ->
         val target = match.groupValues[1]
-        val slug = target.substringBefore('|').trim()
-        val label = target.substringAfter('|', target).trim()
+        val beforePipe = target.substringBefore('|').trim()
+        val slug = beforePipe.substringBefore('#').trim()
+        val label = target.substringAfter('|', beforePipe.substringBefore('#')).trim()
+            .ifBlank { slug }
         "[$label](wiki://$slug)"
     }
 }
