@@ -2,7 +2,33 @@
 
 > 給下一個 AI Agent 的接手指南。架構與規範細節以 `CLAUDE.md` / `AGENTS.md` 為準，這裡只記「最近做了什麼、為什麼、還缺什麼」。
 
-## 最近一次變更（2026-07-14，Phase 16h 真人操作瀏覽器測完所有按鈕）
+## 最近一次變更（2026-07-16，接續 Phase 16i：死連結收工驗證 + extractWikiLinks 切 anchor）
+
+Claude 停在「修了 residual 收工、部署後再按一次把 8 條收掉」。本輪接續完成。
+
+### production 再跑維護（f06485f 已上線）
+
+- 觸發 `POST /api/organize`，4 輪接力（`more_work`：T→T→T→F），ops 7+5+6+4
+- 修法生效：模型喊 `ORGANISE_COMPLETE` 後程式重算死連結，仍有殘留就不准 complete
+
+| | 維護前（本輪） | 維護後 |
+|---|---|---|
+| 知識頁 | 318→320（跑中已寫） | **323** |
+| 連結 | 1741→1774 | **1795**（同區存活 1654、跨區 141） |
+| **指不到任何頁** | **6**（CoreWeave / 李飛飛 / Jeff Dean / Unitree / materials-science…） | **0** |
+| 流程垃圾頁 | 0 | 0 |
+| 工作區 | 7 | 7 |
+
+### 小修（程式）
+
+- `extractWikiLinks` 以前只切 `|`、**不切 `#anchor`**，會把 `concepts/foo#bar` 存成 `concepts/foo#bar.md` 進 `page_links`。`canonicalWikiAlias` 讀時有切所以「量起來」不一定死，但表髒、圖譜邊也怪。改走 `parseWikiLink` + `normalizeWikiSlug`。
+
+### 還沒做的
+
+- Android 仍未實機驗 `[[slug|label]]` 渲染。
+- 舊 `page_links` 裡帶 `#` 的髒列會在下次 `writePage` 該頁時被重寫清掉；沒有另跑 migration。
+
+## 上一次變更（2026-07-14，Phase 16h 真人操作瀏覽器測完所有按鈕）
 
 使用者：「你自己操作瀏覽器測試按鈕看看所有功能，要導入的內容在 `D:\Workspace\其它\文章分類\整理後文章`，確認功能運作正常。」全程用 Chrome 操作 production UI（貼上／多檔佇列／維護／圖譜／搜尋／來源清單／對話），DB＋Vercel log 交叉驗證。
 

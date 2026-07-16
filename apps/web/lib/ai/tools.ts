@@ -8,6 +8,7 @@ import {
   deleteWorkspaceForUser,
   renameWorkspaceForUser,
 } from '@/lib/workspaces/manage';
+import { normalizeWikiSlug, parseWikiLink } from '@/lib/wiki/slug';
 
 /** Destructive action the model proposed but that awaits user confirmation. */
 export interface ActionProposal {
@@ -894,15 +895,16 @@ async function hashContent(content: string): Promise<string> {
 }
 
 /**
- * Parse [[wikilink]] and [[wikilink|display]] patterns from markdown content.
- * Normalises targets to include .md extension.
+ * Parse [[wikilink]] / [[wikilink|display]] / [[wikilink#anchor]] from markdown.
+ * Strip display name and anchor before storing in page_links — otherwise
+ * `concepts/foo#bar` becomes a permanently dead edge (no such page).
  */
 function extractWikiLinks(content: string): string[] {
   const links = new Set<string>();
   for (const match of content.matchAll(/\[\[([^\]]+)\]\]/g)) {
-    let slug = (match[1] ?? '').split('|')[0]!.trim();
-    if (slug && !slug.endsWith('.md')) slug += '.md';
-    if (slug) links.add(slug);
+    const { slug } = parseWikiLink(match[1] ?? '');
+    if (!slug) continue;
+    links.add(normalizeWikiSlug(slug));
   }
   return Array.from(links);
 }
