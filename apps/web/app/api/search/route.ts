@@ -30,12 +30,16 @@ export async function GET(request: NextRequest) {
     });
 
   if (error) {
-    // Fallback if search_pages function doesn't exist yet
+    // Fallback if search_pages function doesn't exist yet.
+    // Strip characters with meaning in PostgREST or-filter / like patterns
+    // (same rule as searchPages in lib/ai/tools.ts).
+    const safeQuery = query.replace(/[,()|%\\]/g, ' ').trim();
+    if (!safeQuery) return NextResponse.json({ pages: [] });
     const { data: fallbackPages } = await supabase
       .from('pages')
       .select('slug, title, kind, updated_at')
       .eq('workspace_id', workspaceId)
-      .or(`slug.ilike.%${query}%,title.ilike.%${query}%`)
+      .or(`slug.ilike.%${safeQuery}%,title.ilike.%${safeQuery}%`)
       .order('updated_at', { ascending: false })
       .limit(20);
 

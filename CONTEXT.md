@@ -2,7 +2,36 @@
 
 > 給下一個 AI Agent 的接手指南。架構與規範細節以 `CLAUDE.md` / `AGENTS.md` 為準，這裡只記「最近做了什麼、為什麼、還缺什麼」。
 
-## 最近一次變更（2026-07-16，Android v0.6.0 發行版）
+## 最近一次變更（2026-07-16，全專案漏洞掃描收尾）
+
+Claude 掃完、驗證全過後 session limit 斷線；本輪接手文件 + APK + commit/push。
+
+### 程式修復
+
+| 嚴重度 | 改動 | 說明 |
+|--------|------|------|
+| P2 | `ingest-pipeline.ts` → `confirmDestructive: true` | 來源是任意網頁；無 onProposal 時 `deletePage` 直接拒絕。匯入是加法，去重交給 organize。**勿回退** |
+| P3 | `api/search/route.ts` ilike fallback | 清洗 `,()|%\`（對齊 tools `safeQuery`），擋 PostgREST or-filter 注入 |
+| 依賴 | next 16.2.4→16.2.10、root `overrides` form-data/ws | runtime high 清掉；剩 3 high 全在 eslint / @vercel/config 工具鏈 |
+
+### 驗證（本輪重跑）
+
+- `bun test`（apps/web）：39 pass
+- `bun run typecheck`、`bun audit`：見 commit 訊息／終端輸出
+
+### 文件
+
+- `CLAUDE.md` 新增「安全注意事項（2026-07 全專案掃描）」
+- `AGENTS.md` 安全表同步
+- `gateDestructive` 敘述改為：ingest 固定 true 拒絕刪頁；organize 仍 false
+
+### 還沒做的
+
+- next-intl 升 v4（大遷移，接受現狀）
+- build 工具鏈 3 個 high（不進 runtime）
+- Android 實機驗 `[[slug|label]]` 渲染（與本輪無關）
+
+## 上一次變更（2026-07-16，Android v0.6.0 發行版）
 
 對齊網頁後重編並發布 **v0.6.0**（versionCode **6**；上一版 v0.5.0 / code 5，不重複）。
 

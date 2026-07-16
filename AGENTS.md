@@ -224,6 +224,12 @@ Query API 文字串流結尾依序附加 `\x00CITATIONS\x00[...]`、`\x00ACTIONS
 | P1 | `WikiViewModel.signOut()` | 登出後未清空 Room cache / 未取消 WorkManager job | 已加入 `deleteAll()` + `SyncWorker.cancel()` |
 | P1 | `.env.example` | `ENCRYPTION_KEY` 說明寫 `openssl rand -hex 32`（hex），程式碼用 `base64` | 已改為 `-base64 32` |
 | P1 | `0003_profile_ownership_guards.sql` | FK 未保證 profile owner = workspace owner | 已加入 composite FK + trigger guard |
+| P2 | `lib/ai/ingest-pipeline.ts` | ingest LLM 未 gate `deletePage`，prompt injection 可永久刪 wiki 頁 | `confirmDestructive: true`（無 onProposal → 直接拒絕）；匯入是加法，去重交給 organize |
+| P3 | `api/search/route.ts` | ilike fallback 未清洗 PostgREST 特殊字元 | 對齊 `tools.ts` 的 `safeQuery` |
+| 依賴 | next 等 | `bun audit` 12 high（含 next RSC） | next→16.2.10 + root overrides（form-data、ws）；剩 3 high 僅 build 工具鏈，接受 |
+| 接受 | next-intl 3.x | open redirect / prototype pollution | 本專案未用 middleware 模式與 precompile；升 v4 大遷移不做 |
+
+細節見 CLAUDE.md「安全注意事項（2026-07 全專案掃描）」。
 
 ## Android 注意事項
 

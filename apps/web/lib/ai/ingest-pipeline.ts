@@ -43,6 +43,10 @@ export async function runIngestPipeline(ctx: IngestContext): Promise<string[]> {
     drive: ctx.drive,
     workspaceId: ctx.workspaceId,
     wikiFolderId: ctx.wikiFolderId,
+    // Source content is untrusted (arbitrary web pages). With no onProposal handler
+    // this refuses deletePage outright — a prompt-injected source must never be able
+    // to permanently delete wiki pages. Ingest is additive; dedup belongs to organize.
+    confirmDestructive: true,
   });
 
   const model = createLLMClient(ctx.profile);
