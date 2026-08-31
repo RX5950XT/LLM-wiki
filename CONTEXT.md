@@ -2,6 +2,13 @@
 
 > 給下一個 AI Agent 的接手指南。架構與規範細節以 `CLAUDE.md` / `AGENTS.md` 為準，這裡只記「最近做了什麼、為什麼、還缺什麼」。
 
+## 本輪研究與決策（2026-08-31，nashsu/llm_wiki v0.6.11 / e808211）
+
+- 採用統一 synthesis commit path：synthesis route 改走 `writePageForWorkspace`，補齊 `search_text`、`page_links`、content `hash`、`version` 的一致性。
+- 暫不做完整兩階段 ingest、durable SHA queue、多格式 ingest、graph insights、faithful research；這些都需要獨立的產品、成本與資料契約設計，不是本輪小改。
+- 最終驗證：`bun test` 41 pass/0 fail、`bun run typecheck` 5/5、`bun run build` 1/1、Android `assembleDebug` `BUILD SUCCESSFUL`、`git diff --check` 通過。
+- 安全複核無 CRITICAL/HIGH；中文／emoji slug collision 已由 query fallback + 12 hex UUID 關閉。既有 MEDIUM：shared writer 的 Drive→DB→page_links 非原子，本輪未做跨核心交易／補償重構。
+
 ## 最近一次變更（2026-07-16，全專案漏洞掃描收尾）
 
 Claude 掃完、驗證全過後 session limit 斷線；本輪接手文件 + APK + commit/push。

@@ -1,5 +1,12 @@
 # LLM Wiki — AGENTS.md
 
+## Codex 子代理編排
+
+- 子代理全域預設使用 `gpt-5.6-luna` 與 `model_reasoning_effort = "max"`。
+- 主代理只處理最困難且不可安全分割的研究整合、架構決策、衝突裁決與最終驗收。
+- 探索、資料蒐集、一般實作、測試、文件與可獨立審查一律委派；互不依賴的任務積極平行執行，每個 subagent 只負責一件事與明確範圍。
+- 主代理不得重做 subagent 已完成的工作，只依證據整合與驗收。
+
 ## 專案概覽
 
 Karpathy-principle 知識庫工具。LLM 持續維護結構化 markdown wiki，內容本體存於使用者的 Google Drive，Supabase 存 metadata + Realtime 推送，BYO API key。

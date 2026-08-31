@@ -1,10 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import {
-  writeDriveFile,
-  findFile,
-  ensureFolder,
-} from '@/lib/drive/client';
+import { findFile } from '@/lib/drive/client';
+import { writePageForWorkspace } from '@/lib/ai/tools';
 import { getRequestUser } from '@/lib/supabase/request';
 import {
   createDriveClientForUser,
@@ -20,13 +18,20 @@ const SynthesisSchema = z.object({
 });
 
 function toSlug(text: string): string {
-  return text
+  const slug = text
     .toLowerCase()
     .replace(/[^a-z0-9\s-]/g, '')
     .trim()
     .replace(/\s+/g, '-')
     .slice(0, 40)
     .replace(/-+$/, '');
+  return slug || 'query';
+}
+
+export function buildSynthesisSlug(question: string, now: Date): string {
+  const datePart = now.toISOString().slice(0, 16).replace('T', '-').replace(':', '');
+  const uniqueSuffix = randomUUID().replace(/-/g, '').slice(0, 12);
+  return `synthesis/${datePart}-${toSlug(question)}-${uniqueSuffix}.md`;
 }
 
 export async function POST(
@@ -76,14 +81,9 @@ export async function POST(
     return NextResponse.json({ error: 'Wiki folder not found' }, { status: 500 });
   }
 
-  // Ensure synthesis/ subfolder exists
-  const synthesisFolderId = await ensureFolder(drive, 'synthesis', wikiFolderId);
-
-  // Build slug: synthesis/YYYYMMDD-HHmm-{question-slug}.md
+  // Build slug: synthesis/YYYY-MM-DD-HHmm-{question-slug-or-query}-{unique-suffix}.md
   const now = new Date();
-  const datePart = now.toISOString().slice(0, 16).replace('T', '-').replace(':', '');
-  const questionSlug = toSlug(question);
-  const slug = `synthesis/${datePart}-${questionSlug}.md`;
+  const slug = buildSynthesisSlug(question, now);
   const title = question.length > 80 ? `${question.slice(0, 77)}…` : question;
 
   // Build page content
@@ -111,24 +111,14 @@ export async function POST(
     .filter((l) => l !== null)
     .join('\n');
 
-  const { createHash } = await import('crypto');
-  const contentHash = createHash('sha256').update(content, 'utf8').digest('hex').slice(0, 16);
-
-  const fileId = await writeDriveFile(drive, content, {
-    name: `${datePart}-${questionSlug}.md`,
-    parentId: synthesisFolderId,
-  });
-
-  await supabase.from('pages').insert({
-    workspace_id: workspaceId,
-    slug,
-    kind: 'synthesis',
-    zone: 'wiki',
-    drive_file_id: fileId,
-    content_hash: contentHash,
-    title,
-    updated_by: 'llm',
-  });
+  const written = await writePageForWorkspace(
+    { supabase, drive },
+    { workspaceId, wikiFolderId },
+    { slug, content_md: content, kind: 'synthesis', title },
+  );
+  if ('error' in written) {
+    return NextResponse.json({ error: written.error }, { status: 500 });
+  }
 
   return NextResponse.json({ slug, title });
 }

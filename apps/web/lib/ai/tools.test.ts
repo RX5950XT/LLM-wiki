@@ -76,6 +76,81 @@ describe('wiki zone guard — the model must not shelve its own working notes', 
   });
 });
 
+it('keeps synthesis writes in sync through the shared page writer', async () => {
+  const content = '# Synthesis\n\nSee [[entities/source|Source]].';
+  let insertedPage: Record<string, unknown> | undefined;
+  let insertedLinks: Array<Record<string, string>> | undefined;
+
+  const supabase = {
+    from(table: string) {
+      if (table === 'pages') {
+        return {
+          select: () => ({ eq: () => ({ in: async () => ({ data: [] }) }) }),
+          insert: async (values: Record<string, unknown>) => {
+            insertedPage = values;
+            return { error: null };
+          },
+        };
+      }
+      return {
+        delete: () => ({ eq: () => ({ in: async () => ({ error: null }) }) }),
+        insert: async (values: Array<Record<string, string>>) => {
+          insertedLinks = values;
+          return { error: null };
+        },
+      };
+    },
+  } as never;
+  const drive = {
+    files: {
+      list: async () => ({ data: { files: [] } }),
+      create: async ({ requestBody }: { requestBody?: { mimeType?: string } }) => ({
+        data: {
+          id:
+            requestBody?.mimeType === 'application/vnd.google-apps.folder'
+              ? 'synthesis-folder'
+              : 'synthesis-page',
+        },
+      }),
+    },
+  } as never;
+
+  const result = await writePageForWorkspace(
+    { supabase, drive },
+    { workspaceId: WORKSPACE, wikiFolderId: 'wiki-folder' },
+    {
+      slug: 'synthesis/20260831-1200-topic.md',
+      content_md: content,
+      kind: 'synthesis',
+      title: 'Topic',
+    },
+  );
+
+  expect(result).toEqual({
+    ok: true,
+    slug: 'synthesis/20260831-1200-topic.md',
+    fileId: 'synthesis-page',
+  });
+  expect(insertedPage).toMatchObject({
+    workspace_id: WORKSPACE,
+    slug: 'synthesis/20260831-1200-topic.md',
+    kind: 'synthesis',
+    zone: 'wiki',
+    drive_file_id: 'synthesis-page',
+    title: 'Topic',
+    updated_by: 'llm',
+    search_text: content,
+  });
+  expect(insertedPage?.content_hash).toMatch(/^[0-9a-f]{16}$/);
+  expect(insertedLinks).toEqual([
+    {
+      workspace_id: WORKSPACE,
+      from_slug: 'synthesis/20260831-1200-topic.md',
+      to_slug: 'entities/source.md',
+    },
+  ]);
+});
+
 // The guard must never make existing junk permanent: it blocks *writing* a page
 // outside the knowledge folders, not deleting one that is already there.
 describe('deleting a non-knowledge page stays possible', () => {

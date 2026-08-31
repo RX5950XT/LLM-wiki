@@ -1,5 +1,9 @@
 # Lessons
 
+## 2026-08-31 Codex 子代理設定相容性
+
+- **`codex --strict-config --version` 不足以驗證 agent schema**：目前桌面 runtime 會把 `[agents]` 解析成舊版角色表，加入新版 `default_subagent_*` 後出現 `expected struct AgentRoleToml`。修改全域設定後，必須啟動會完整載入 agent registry 的實際 Codex 命令；若 runtime 不支援全域預設欄位，改在 `~/.codex/agents/*.toml` 逐角色設定模型與 reasoning。
+
 ## 2026-07-13 Phase 15 連結修復 + 維護整合 + 來源重跑
 
 - **髒資料的正解常常是讀取時 resolve，不是改資料**：225/600 dangling wiki link，直覺是寫 migration 清 `page_links`。但 `writePage` 會從內容重新 parse `[[...]]` 覆寫 `page_links`，清了又髒。真正的 root fix 是在**讀取咽喉點**（`GET /api/pages`）做 alias fallback——一次修所有 client、survives 重寫、零資料風險。動手清資料前先問「這份資料下次被誰重寫」。

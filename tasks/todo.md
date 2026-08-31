@@ -1,3 +1,17 @@
+# 參考 nashsu/llm_wiki 改善本專案（2026-08-31）
+
+- [x] 查證 Codex 全域子代理設定欄位
+- [x] 將一般 Codex 與 Orca runtime 子代理預設設為 `gpt-5.6-luna` / `max`
+- [x] 在全域與專案 `AGENTS.md` 寫入積極委派規則
+- [x] 研究並比較上游 `nashsu/llm_wiki` v0.6.11（`e808211`），整理產品、資料流、prompts、工具與 UI 差異
+- [x] 選出不重複且能直接提升本專案的改善：統一 synthesis commit path
+- [x] 完成 synthesis route 實作；Android 無需變更
+- [x] 完成最終驗證：`bun test` 41 pass/0 fail、`bun run typecheck` 5/5、`bun run build` 1/1、Android `assembleDebug` `BUILD SUCCESSFUL`
+- [x] Review：安全複核無 CRITICAL/HIGH；中文／emoji slug collision 已由 query fallback + 12 hex UUID 關閉；既有 MEDIUM 是 shared writer 的 Drive→DB→page_links 非原子，本輪未做跨核心交易／補償重構
+- [x] Commit 並 push 目前分支
+
+---
+
 # 修復批次：連結 / 圖譜 / 來源 / 維護按鈕（2026-07-13）
 
 使用者連續回報 5 項。診斷完成，依 root cause 分組。
