@@ -732,6 +732,32 @@ async function updateStaleJob(supabase: SupabaseClient, job: JobRow, ownerId: st
   return (await loadJobForUser(supabase, job.id, ownerId)) ?? job;
 }
 
+export function findStaleRunningJobs<T extends Pick<JobRow, 'status' | 'updated_at'>>(
+  jobs: readonly T[],
+  now = Date.now(),
+): T[] {
+  return jobs.filter((job) => isStaleRunning(job.status, job.updated_at, now, STALE_JOB_MS));
+}
+
+async function sweepStaleJobs(
+  supabase: SupabaseClient,
+  workspaceIds: readonly string[],
+  ownerId: string,
+): Promise<void> {
+  if (workspaceIds.length === 0) return;
+  const cutoff = new Date(Date.now() - STALE_JOB_MS).toISOString();
+  const { data, error } = await supabase
+    .from('ingest_jobs')
+    .select(JOB_FIELDS)
+    .in('workspace_id', workspaceIds)
+    .eq('status', 'running')
+    .lt('updated_at', cutoff);
+  if (error) throw new Error(`stale ingest jobs lookup failed: ${error.message}`);
+  for (const job of findStaleRunningJobs((data ?? []) as JobRow[])) {
+    await updateStaleJob(supabase, job, ownerId);
+  }
+}
+
 export async function GET(request: NextRequest) {
   const locale = resolveUiLocaleFromRequest(request);
   const { supabase, user } = await getRequestUser(request);
@@ -757,10 +783,21 @@ export async function GET(request: NextRequest) {
     if (!parsedWorkspaceId.success) return errorResponse(400, 'INVALID_WORKSPACE_ID', 'Invalid workspace_id');
     const workspace = await loadWorkspace(supabase, parsedWorkspaceId.data, user.id);
     if (!workspace) return errorResponse(404, 'WORKSPACE_NOT_FOUND', 'Workspace not found');
+    const ownerScope = request.nextUrl.searchParams.get('scope') === 'owner';
+    let workspaceIds = [workspace.id];
+    if (ownerScope) {
+      const { data, error } = await supabase
+        .from('workspaces')
+        .select('id')
+        .eq('owner_id', user.id);
+      if (error) throw new Error(`owned workspaces lookup failed: ${error.message}`);
+      workspaceIds = (data ?? []).map((row) => row.id);
+    }
+    await sweepStaleJobs(supabase, workspaceIds, user.id);
     const { data: rows, error: jobsError } = await supabase
       .from('ingest_jobs')
       .select(JOB_FIELDS)
-      .eq('workspace_id', workspace.id)
+      .in('workspace_id', workspaceIds)
       .order('updated_at', { ascending: false })
       .limit(50);
     if (jobsError) throw new Error(`workspace ingest jobs lookup failed: ${jobsError.message}`);
@@ -772,7 +809,7 @@ export async function GET(request: NextRequest) {
         .from('sources')
         .select('id, title, mime_type')
         .in('id', sourceIds)
-        .eq('workspace_id', workspace.id);
+        .in('workspace_id', workspaceIds);
       if (sourcesError) throw new Error(`workspace source lookup failed: ${sourcesError.message}`);
       for (const source of sources ?? []) {
         sourceMap.set(source.id, source as { id: string; title: string | null; mime_type: string | null });

@@ -5,6 +5,7 @@
 - **可恢復 job 必須 fencing，不只存 status**：pause/retry 會讓舊執行緒與新 attempt 重疊；每次 claim 產生 `attemptToken`，所有 checkpoint/status 寫入都要帶 token，才能避免舊 run 覆蓋新結果。
 - **可信查詢的 citation 不可相信模型輸出**：Faithful mode 只掛 raw-source read tool，citation 由實際成功讀取的 source 統計；串流先清掉模型產生的 NUL，再由 server 附加 metadata，避免偽造 citation/action block。
 - **檔案大小要在兩道門都限制**：HTTP `Content-Length` 只能擋第一層，實際 URL/Drive/上傳串流仍要在讀取時超限即中止，parser/ZIP/PDF 另外限制展開資源，才能防止繞過與記憶體爆量。
+- **active job UI 必須走 server stale sweep，不能直接把 DB `running` 當真**：列表 route 先清理過期 job 再回傳 queue；Web／Android 只依該清單判斷匯入是否進行中，否則中斷後留下的 stale row 會讓畫面永遠卡在「匯入中」。
 
 ## 2026-08-31 上游功能借鑑範圍
 

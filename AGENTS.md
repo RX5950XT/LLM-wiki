@@ -147,6 +147,7 @@ GOOGLE_OAUTH_CLIENT_SECRET=
 
 ### 六項知識編譯能力（Phase 17）
 - Ingest 先分析再寫入並自我審查；job 以 checkpoint、attempt fencing、pause/resume/retry 可恢復，來源 SHA unchanged 直接跳過。
+- **Queue stale-list invariant（勿回退）**：active job UI 必須以 server `GET /api/ingest?workspace_id=...` 先 stale sweep 後回傳的清單為準；Web／Android 不可直接查 `ingest_jobs`，也不可把 DB 的 `running` row 直接當成仍在執行。
 - ingest LLM 只拿 plan allowlist 工具；共用 writer 用 version/lock CAS 防止覆寫，跨 Drive/DB 失敗走補償。
 - parser 支援 PDF、DOCX、PPTX、EPUB、text/Markdown 與 PNG/JPEG/WebP/GIF，輸入與解壓資源受 2 MiB/資源上限約束。
 - Faithful 只讀 raw sources，citation 僅來自實際讀取；Graph Insights 提供孤立頁、群組、橋接頁、未解析連結，超限回錯而非空圖。

@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, ChevronUp, Crosshair } from 'lucide-react';
 import { useTranslations } from 'next-intl';
+import { useTheme } from 'next-themes';
 import { createClient } from '@/lib/supabase/client';
 import { canonicalWikiAlias } from '@/lib/wiki/slug';
 import type { GraphInsights } from '@/lib/graph/insights';
@@ -65,6 +66,14 @@ const KIND_COLOR: Record<KindGroup, string> = {
   other: '#8b9095',
 };
 
+const KIND_COLOR_DARK: Record<KindGroup, string> = {
+  entity: '#8fc9f5',
+  concept: '#75e4d8',
+  summary: '#b1b9ff',
+  synthesis: '#ffd18a',
+  other: '#c4ccd5',
+};
+
 function kindGroup(kind: string): KindGroup {
   const k = kind.toLowerCase();
   if (k.startsWith('entit')) return 'entity';
@@ -78,14 +87,6 @@ function cssVar(name: string, fallback: string): string {
   if (typeof window === 'undefined') return fallback;
   const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   return value || fallback;
-}
-
-function isDarkTheme(): boolean {
-  if (typeof window === 'undefined') return true;
-  const attr = document.documentElement.dataset.theme;
-  if (attr === 'dark') return true;
-  if (attr === 'light') return false;
-  return window.matchMedia('(prefers-color-scheme: dark)').matches;
 }
 
 function prefersReducedMotion(): boolean {
@@ -106,6 +107,9 @@ function withAlpha(hex: string, alpha: number): string {
 // to avoid Next.js SSR issues.
 export function GraphView({ workspaceId, activePage, onNodeClick, refreshKey = 0 }: GraphViewProps) {
   const t = useTranslations('graph');
+  const { resolvedTheme } = useTheme();
+  const darkTheme = resolvedTheme !== 'light';
+  const kindColors = darkTheme ? KIND_COLOR_DARK : KIND_COLOR;
   const containerRef = useRef<HTMLDivElement>(null);
   const [graphData, setGraphData] = useState<GraphData>({ nodes: [], links: [] });
   const [loading, setLoading] = useState(true);
@@ -334,7 +338,7 @@ export function GraphView({ workspaceId, activePage, onNodeClick, refreshKey = 0
         const height = size?.height ?? containerRef.current.clientHeight ?? 400;
         const accent = cssVar('--color-accent', '#00bbcb');
         const labelColor = cssVar('--fg-muted', '#8b9095');
-        const dark = isDarkTheme();
+        const dark = darkTheme;
         const reduceMotion = prefersReducedMotion();
 
         // Connectivity is the graph's only real quantity, so it drives everything
@@ -363,7 +367,7 @@ export function GraphView({ workspaceId, activePage, onNodeClick, refreshKey = 0
         const hover: { id: string | null } = { id: null };
 
         const visible = (node: GraphNode) => !hiddenRef.current.has(kindGroup(node.kind));
-        const nodeColor = (node: GraphNode) => KIND_COLOR[kindGroup(node.kind)];
+        const nodeColor = (node: GraphNode) => kindColors[kindGroup(node.kind)];
         const nodeRadius = (node: GraphNode) => {
           const d = degree.get(node.id) ?? 0;
           return Math.min(2.6 + Math.sqrt(d) * 1.7, 13);
@@ -482,11 +486,11 @@ export function GraphView({ workspaceId, activePage, onNodeClick, refreshKey = 0
             const target = typeof link.target === 'object' ? link.target.id : link.target;
             if (hover.id) {
               if (s !== hover.id && target !== hover.id) {
-                return dark ? 'rgba(139,144,149,0.05)' : 'rgba(79,86,94,0.05)';
+                return dark ? 'rgba(176,188,202,0.10)' : 'rgba(79,86,94,0.05)';
               }
               return withAlpha(accent.startsWith('#') ? accent : '#00bbcb', 0.85);
             }
-            return dark ? 'rgba(139,144,149,0.22)' : 'rgba(79,86,94,0.18)';
+            return dark ? 'rgba(176,188,202,0.50)' : 'rgba(79,86,94,0.18)';
           },
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           linkWidth: (link: any) => {
@@ -536,7 +540,7 @@ export function GraphView({ workspaceId, activePage, onNodeClick, refreshKey = 0
       mounted = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, graphData, activePage, size]);
+  }, [loading, graphData, activePage, size, darkTheme]);
 
   // Tear the force graph down only when the panel itself goes away.
   useEffect(
@@ -645,8 +649,8 @@ export function GraphView({ workspaceId, activePage, onNodeClick, refreshKey = 0
               <span
                 className="inline-block h-2 w-2 rounded-full"
                 style={{
-                  background: off ? 'transparent' : KIND_COLOR[kind],
-                  border: `1px solid ${KIND_COLOR[kind]}`,
+                  background: off ? 'transparent' : kindColors[kind],
+                  border: `1px solid ${kindColors[kind]}`,
                 }}
               />
               {label}

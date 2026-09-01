@@ -5,7 +5,12 @@ import { useLocale, useTranslations } from 'next-intl';
 import { Link2, FileText, Type, Loader2, RotateCw, X } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { isDriveReconnectError, reconnectGoogleDrive } from '@/lib/google/drive-reconnect';
-import { parseIngestQueueJob, parseIngestStartResponse } from './ingest-queue';
+import {
+  parseIngestJobsResponse,
+  parseIngestQueueJob,
+  parseIngestStartResponse,
+  type IngestQueueJob,
+} from './ingest-queue';
 import { isSafeHttpUrl, useDialogFocus } from './dialog-focus';
 
 interface SourceEntry {
@@ -104,31 +109,26 @@ export function SourcesDialog({
     setSourcesError(null);
     try {
       const supabase = createClient();
-      const [sourcesResult, jobsResult] = await Promise.all([
+      const [sourcesResult, jobsResponse] = await Promise.all([
         supabase
           .from('sources')
           .select('id, kind, title, url, created_at, ingested_at')
           .eq('workspace_id', workspaceId)
           .order('created_at', { ascending: false })
           .limit(200),
-        supabase
-          .from('ingest_jobs')
-          .select('source_id, status, phase, result, error, touched_pages, updated_at')
-          .eq('workspace_id', workspaceId)
-          .order('updated_at', { ascending: false }),
+        fetch(`/api/ingest?workspace_id=${encodeURIComponent(workspaceId)}`),
       ]);
-      if (sourcesResult.error || jobsResult.error) throw new Error(t('sources.loadFailed'));
+      const jobsValue = await readJsonBody(jobsResponse, t('sources.loadFailed'));
+      if (sourcesResult.error || !jobsResponse.ok) {
+        throw new Error(apiError(jobsValue) ?? t('sources.loadFailed'));
+      }
+      const jobs = parseIngestJobsResponse(jobsValue, workspaceId);
+      if (!jobs) throw new Error(t('sources.loadFailed'));
 
-      const latestJob = new Map<string, { status: string; phase: string; result: 'updated' | 'unchanged' | null; error: string | null; touched: number }>();
-      for (const job of jobsResult.data ?? []) {
+      const latestJob = new Map<string, IngestQueueJob>();
+      for (const job of jobs) {
         if (!latestJob.has(job.source_id)) {
-          latestJob.set(job.source_id, {
-            status: job.status,
-            phase: job.phase,
-            result: job.result === 'updated' || job.result === 'unchanged' ? job.result : null,
-            error: job.error,
-            touched: (job.touched_pages as string[] | null)?.length ?? 0,
-          });
+          latestJob.set(job.source_id, job);
         }
       }
       setSources(
@@ -140,7 +140,7 @@ export function SourcesDialog({
             jobPhase: job?.phase,
             jobResult: job?.result ?? null,
             jobError: job?.error ?? null,
-            touchedCount: job?.touched ?? 0,
+            touchedCount: job?.touched_pages.length ?? 0,
           } as SourceEntry;
         }),
       );

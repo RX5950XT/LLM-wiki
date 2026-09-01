@@ -11,6 +11,7 @@ import { ConversationPanel } from '@/components/wiki/conversation-panel';
 import { GraphView } from '@/components/wiki/graph-view';
 import { HelpDialog } from '@/components/wiki/help-dialog';
 import { SourcesDialog } from '@/components/wiki/sources-dialog';
+import { parseIngestJobsResponse } from '@/components/wiki/ingest-queue';
 import { useRealtimePages, type PageChangedEvent } from '@/lib/sync/realtime';
 import { createClient } from '@/lib/supabase/client';
 
@@ -152,60 +153,55 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
     pages: number;
   } | null>(null);
   useEffect(() => {
-    const supabase = createClient();
     let cancelled = false;
     let previous = 0;
 
     const poll = async () => {
-      // RLS scopes both queries to the user's own workspaces.
-      const { data: running } = await supabase
-        .from('ingest_jobs')
-        .select('id, touched_pages, started_at')
-        .eq('status', 'running');
-      if (cancelled) return;
+      try {
+        const response = await fetch(
+          `/api/ingest?workspace_id=${encodeURIComponent(workspaceId)}&scope=owner`,
+        );
+        if (!response.ok) return;
+        const jobs = parseIngestJobsResponse(await response.json().catch(() => null), workspaceId);
+        if (cancelled || !jobs) return;
 
-      const inFlight = running ?? [];
-      if (inFlight.length === 0) {
-        setIngest(null);
-        if (previous > 0) {
-          refreshPageList();
-          refreshWorkspaceListRef.current?.();
+        const inFlight = jobs.filter((job) => job.status === 'running');
+        if (inFlight.length === 0) {
+          setIngest(null);
+          if (previous > 0) {
+            refreshPageList();
+            refreshWorkspaceListRef.current?.();
+          }
+          previous = 0;
+          return;
         }
-        previous = 0;
-        return;
+
+        // How far along the *batch* is. The server cannot know how many files the user
+        // still intends to send — only what has already been handed to it — so the bar
+        // reports what it can stand behind: finished, failed, and still running.
+        const startedAt = inFlight
+          .map((job) => (job.started_at ? Date.parse(job.started_at) : Number.NaN))
+          .filter(Number.isFinite);
+        const earliest = startedAt.length > 0 ? Math.min(...startedAt) : Date.now();
+        const since = earliest - BATCH_LOOKBACK_MS;
+        const doneCount = jobs.filter(
+          (job) => job.status === 'done' && Date.parse(job.started_at ?? '') >= since,
+        ).length;
+        const failedCount = jobs.filter(
+          (job) => job.status === 'failed' && Date.parse(job.started_at ?? '') >= since,
+        ).length;
+        if (cancelled) return;
+
+        setIngest({
+          running: inFlight.length,
+          done: doneCount,
+          failed: failedCount,
+          pages: inFlight.reduce((sum, job) => sum + job.touched_pages.length, 0),
+        });
+        previous = inFlight.length;
+      } catch {
+        // Keep the last known banner while the server is temporarily unreachable.
       }
-
-      // How far along the *batch* is. The server cannot know how many files the user
-      // still intends to send — only what has already been handed to it — so the bar
-      // reports what it can stand behind: finished, failed, and still running.
-      const earliest = inFlight
-        .map((job) => new Date(job.started_at as string).getTime())
-        .reduce((a, b) => Math.min(a, b), Date.now());
-      const since = new Date(earliest - BATCH_LOOKBACK_MS).toISOString();
-      const [{ count: doneCount }, { count: failedCount }] = await Promise.all([
-        supabase
-          .from('ingest_jobs')
-          .select('id', { count: 'exact', head: true })
-          .eq('status', 'done')
-          .gte('started_at', since),
-        supabase
-          .from('ingest_jobs')
-          .select('id', { count: 'exact', head: true })
-          .eq('status', 'failed')
-          .gte('started_at', since),
-      ]);
-      if (cancelled) return;
-
-      setIngest({
-        running: inFlight.length,
-        done: doneCount ?? 0,
-        failed: failedCount ?? 0,
-        pages: inFlight.reduce(
-          (sum, job) => sum + ((job.touched_pages as string[] | null)?.length ?? 0),
-          0,
-        ),
-      });
-      previous = inFlight.length;
     };
 
     poll();
@@ -214,7 +210,7 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
       cancelled = true;
       clearInterval(timer);
     };
-  }, [refreshPageList]);
+  }, [refreshPageList, workspaceId]);
 
   // The chat AI can create/rename/delete workspaces — re-sync the switcher list
   const refreshWorkspaceList = useCallback(() => {
@@ -1404,4 +1400,3 @@ function WorkspaceDeleteDialog({
     </ModalShell>
   );
 }
-

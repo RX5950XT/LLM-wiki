@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'bun:test';
-import { checkIngestContentLength, parseIngestJobAction, parseMultipartIngestFields } from './route';
+import {
+  checkIngestContentLength,
+  findStaleRunningJobs,
+  parseIngestJobAction,
+  parseMultipartIngestFields,
+} from './route';
 
 describe('ingest content-length guard', () => {
   it('requires a numeric content length before parsing either body format', () => {
@@ -78,5 +83,38 @@ describe('ingest job action request helper', () => {
       code: 'INVALID_JOB_ID',
       message: 'Invalid job_id',
     });
+  });
+});
+
+describe('ingest list stale sweep helper', () => {
+  const now = Date.parse('2026-09-01T12:00:00.000Z');
+
+  it('marks only old running rows for the server-side sweep', () => {
+    const jobs = [
+      {
+        status: 'running' as const,
+        updated_at: '2026-09-01T11:40:00.000Z',
+        id: 'stale',
+        workspace_id: 'other',
+      },
+      {
+        status: 'running' as const,
+        updated_at: '2026-09-01T11:59:00.000Z',
+        id: 'active',
+        workspace_id: 'other',
+      },
+      {
+        status: 'failed' as const,
+        updated_at: '2026-09-01T11:00:00.000Z',
+        id: 'already-failed',
+        workspace_id: 'current',
+      },
+    ];
+
+    const staleIds = new Set(findStaleRunningJobs(jobs, now).map((job) => job.id));
+    expect([...staleIds]).toEqual(['stale']);
+    expect(
+      jobs.filter((job) => job.status === 'running' && !staleIds.has(job.id)).map((job) => job.id),
+    ).toEqual(['active']);
   });
 });

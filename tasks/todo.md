@@ -95,3 +95,19 @@
 - 圖譜的「亂」= force-graph 對 dangling 邊生幽靈節點；client 端解析邊端點 + 濾掉解不到的，比清資料更穩。
 - lint 從同步改 job 化後，Android 舊的「2xx 即完成」邏輯會假完成——協定改動一定要回頭掃所有 client caller。
 - 兩顆按鈕合一 + 背景續跑：organize 早就是 job，只要把 lint 也放進 agent_jobs（共用 one-at-a-time 鎖）就自然變「一次一個維護任務」。前端 localStorage 記 jobId → 重載/關頁面回來續 poll。
+
+# 深色圖譜與匯入卡住修復（2026-09-01）
+
+- [x] 查 production logs、`ingest_jobs` 與前端輪詢資料流，確認卡住根因
+- [x] 修 Web 知識圖譜深色模式，沿用既有主題 token
+- [x] 修匯入狀態不會自動結束的根因並補回歸檢查
+- [x] 驗證 Web 深色／淺色、匯入狀態、typecheck、build 與 Android APK
+- [ ] 更新 Review、commit、push 並確認 production 部署
+
+## Review
+
+- 根因是 Web 直接查 `ingest_jobs.status=running`；Vercel 中斷留下 stale row 時，畫面會永遠顯示「匯入中」。改由 `/api/ingest` 先做 server stale sweep，再回傳 queue 清單給 UI。
+- GraphView 改用 `next-themes` 的 `resolvedTheme` 與深色專用節點／連線色，切換深色模式後重繪仍保持可讀。
+- `findStaleRunningJobs` 回歸測試確認只清理過期 running job，不影響仍活著的 job。
+
+---

@@ -385,6 +385,7 @@ Web（`pollIngestJob`，3s 間隔）與 Android（`WikiViewModel.pollIngestJob`�
 ## 六項知識編譯能力（Phase 17）
 
 - **兩階段與可恢復 queue**：`analysis → writing → review` 記錄 `checkpoint`；job 支援 `pending/running/paused/done/failed`、pause/resume/retry 與 `attemptToken` fencing。來源以 SHA256 去重，未變更回報 `unchanged`。
+- **Queue stale-list invariant（勿回退）**：active job UI 必須以 server `GET /api/ingest?workspace_id=...` 先 stale sweep 後回傳的清單為準；Web／Android 不可直接查 `ingest_jobs`，也不可把 DB 的 `running` row 直接當成仍在執行。
 - **安全寫入**：ingest LLM 只拿 plan allowlist 內的 `read/list/search/write`；`writePageForWorkspace` 用 DB version + `locked_by_human` CAS 保護，衝突回傳結構化錯誤並做 Drive 補償。
 - **多格式解析**：`document-parser.ts` 支援 PDF、DOCX、PPTX、EPUB、純文字/Markdown 與 PNG/JPEG/WebP/GIF；輸入、解壓與 PDF 資源皆有 2 MiB/資源上限，圖片可由 profile 產生描述。
 - **Faithful Query**：`query_mode=faithful` 只讀 raw source，不注入 wiki/context、不提供 actions/file-back；citation 由實際讀取產生，模型輸出的 NUL 不會變成 metadata。
