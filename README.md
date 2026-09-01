@@ -43,6 +43,7 @@
 | 8 — 安全強化 | ✅ | P0/P1 安全漏洞修復、Android 帳號 Room cache 隔離 |
 | 9 — 批次攝取 + 搜尋 | ✅ | 多檔上傳/拖曳、PostgreSQL tsvector 全文搜尋、模型選擇器 |
 | 10 — AI 檔案操控 | ✅ | deletePage / movePage 工具（自動重寫 backlink）、工作區排序 |
+| 11–17 — 知識編譯能力 | ✅ | 可恢復 Ingest queue、多格式匯入、Faithful raw-source query、Graph Insights，以及 Web/Android 對齊 |
 
 ## 快速開始
 
@@ -79,6 +80,10 @@ bun run dev
    - `GOOGLE_CLIENT_ID` 在 Google Cloud Console → APIs & Services → Credentials → **Web client**（`requestIdToken` 需要）
    - `WEB_API_BASE_URL` 是 Vercel 部署後的 URL，本機測試時改為 `http://10.0.2.2:3000`（模擬器）
 3. 在裝置或模擬器上執行（API 26+）
+
+目前 Android 正式版：**v0.7.0**（versionCode **7**）。[下載 APK](https://github.com/RX5950XT/LLM-wiki/releases/download/v0.7.0/llm-wiki-0.7.0.apk)；[查看 Release](https://github.com/RX5950XT/LLM-wiki/releases/tag/v0.7.0)。
+
+SHA-256：`97FF398DC4AA6B106925EEF7AAB277608C6BFE148C781A094D3ABE5A2C5389D7`
 
 ## 如何使用
 

@@ -112,3 +112,20 @@
 - commit `67a1522` 已部署至 production；正式網址 redirect 正常，新 ingest list 未登入回 JSON `401`，近 10 分鐘無 error log。
 
 ---
+
+# Android 最新 APK 發行（2026-09-01）
+
+- [x] 盤點現有 GitHub Release、tag、Android 版本與發行流程，決定未使用版本
+- [x] 確認 Android `versionName` / `versionCode`，更新 README／CONTEXT 文件
+- [x] 執行 Android 測試與 APK 建置，核對 APK 內版本、大小與 SHA-256
+- [x] 提交並推送，建立 GitHub Release 並上傳版本化 APK
+- [x] 驗證遠端 branch、tag、Release 與下載資產
+
+## Review
+
+- `v0.7.0` / versionCode `7` 發行前確認未與遠端 tag／Release 重複。
+- `bun test`：108 pass / 0 fail；`bun run typecheck`：5/5；`bun run build`：1/1。
+- Android `testDebugUnitTest`：NO-SOURCE；`assembleDebug`、`assembleRelease`：BUILD SUCCESSFUL。
+- 正式 APK：4,854,680 bytes；SHA-256 `97FF398DC4AA6B106925EEF7AAB277608C6BFE148C781A094D3ABE5A2C5389D7`；簽章與 `v0.6.0` 相同。
+
+---

@@ -2,6 +2,13 @@
 
 > 給下一個 AI Agent 的接手指南。架構與規範細節以 `CLAUDE.md` / `AGENTS.md` 為準，這裡只記「最近做了什麼、為什麼、還缺什麼」。
 
+## Android v0.7.0 正式發行（2026-09-01）
+
+- Android 版本為 `versionName 0.7.0`、`versionCode 7`；發行前已確認 tag 與 GitHub Release 未使用 `v0.7.0`。
+- 內容摘要：可恢復 Ingest queue、多格式匯入、Faithful raw-source query、Graph Insights，Web/Android 功能對齊。
+- GitHub Release：`v0.7.0`；資產：`llm-wiki-0.7.0.apk`。
+- APK 內版本讀回為 `0.7.0` / code `7`，release signer 與 `v0.6.0` 相同；SHA-256：`97FF398DC4AA6B106925EEF7AAB277608C6BFE148C781A094D3ABE5A2C5389D7`。
+
 ## 本輪完成（2026-09-01，六項知識編譯能力）
 
 - 完成兩階段 `analysis → writing → review` Ingest、可恢復 queue（checkpoint、pause/resume/retry、attempt fencing）與 source SHA unchanged skip。
@@ -9,7 +16,7 @@
 - 完成 Faithful raw-source query（只讀 raw source，citation 來自實際讀取）與 Graph Insights（孤立頁、群組、橋接頁、未解析連結）。Web/Android 已對齊，Android 為 `0.7.0`（versionCode `7`）。
 - production 已套用 `recoverable_ingest`，並驗證 `sources` 的 hash/mime/size、`ingest_jobs` 的 phase/checkpoint/attempt/result/updated_at、source hash unique 與 workspace running-job index。
 - 本輪修復（2026-09-01）：GraphView 依 `resolvedTheme` 使用可讀的深色節點／連線色；Web queue 改走 `/api/ingest`，由 server 先 stale sweep 再提供 job 清單，避免殭屍 `running` row 讓畫面卡在「匯入中」。
-- 驗證：`bun test` 108 pass / 0 fail、`bun run typecheck` 5/5、`bun run build` 1/1、Android APK build 成功；本輪 security review 無 CRITICAL/HIGH/MEDIUM。
+- 驗證：`bun test` 108 pass / 0 fail、`bun run typecheck` 5/5、`bun run build` 1/1、Android debug／signed release APK build 成功；本輪 security review 無 CRITICAL/HIGH/MEDIUM。
 - 已知限制：Drive → DB → `page_links` 仍非單一交易；目前靠 CAS 與補償降低衝突／孤兒風險。
 
 ## 前一輪研究與決策（2026-08-31，nashsu/llm_wiki v0.6.11 / e808211）
