@@ -158,6 +158,7 @@ Android 呼叫與 Web 相同的後端 API（`/api/ingest`、`/api/query`、`/api
 - **Phase 14** ✅：對話中心化 + 跨工作區 AI — 移除筆記 UI（資料保留）、跨工作區 AI 工具（建立/改名/刪除工作區、跨工作區搬頁）、破壞性操作確認卡片（`\x00ACTIONS\x00` 協定 + `/api/agent/execute`）、對話預設帶當前頁 context + `@` 工作區標記、統一導入入口（ImportDialog，AI 自動判斷目標工作區）、自動分類＋去重複 job（`/api/organize` + `agent_jobs` migration 0015）、LLM profile 編輯（PATCH）、切換工作區/設定頁效能修復（Drive 呼叫移出請求路徑）、工作區拖曳 FLIP 動畫、Graph Obsidian 化（degree sizing / canvas 標籤 / hover 高亮 / 孤兒淡化）
 - **Phase 16** ✅：維護合一 + AI 真權限 — 健康檢查與整理去重合併成單一按鈕／單一 pipeline（`/api/organize`），不再產生報告頁；維護 job 改 `confirmDestructive: false` 且保留 workspace 生命週期工具（真的能合併、刪除、改名、重排），新增 `reorderWorkspaces` AI 工具；刪除 `/api/lint` route、`vercel.json` cron 與 `CRON_SECRET`；`_schema/lint.md` 改為「檢查並直接修正」的清單並注入維護 pipeline
 - **Phase 15** ✅：連結修復 + 維護整合 + 來源重跑 — wiki 連結伺服器咽喉點 alias fallback（`lib/wiki/slug.ts` + `/api/pages` GET，修 `[PAGE_NOT_FOUND]`）、圖譜邊 alias 解析去幽靈節點、lint job 化（migration `0016`，與 organize 共用 agent_jobs 鎖）、維護按鈕整合（Web `Wrench` 選單 + 進度 pill + localStorage 背景續跑；Android `Build` 選單）、來源重新整合（`/api/sources/[id]/reingest`）
+- **Phase 17** ✅（2026-09-01）：六項知識編譯能力——兩階段可恢復 Ingest queue（SHA unchanged、pause/resume/retry、checkpoint）、安全 allowlist/fencing/CAS 寫入、多格式檔案解析（PDF/DOCX/PPTX/EPUB/text/image，2 MiB）、Faithful raw-source query、Graph Insights；Web/Android 對齊，Android APK `0.7.0`（versionCode `7`）。production 已套用並驗證 `recoverable_ingest` migration 的欄位與索引。
 
 ## 安全注意事項（Phase 10）
 
@@ -381,6 +382,15 @@ Web（`pollIngestJob`，3s 間隔）與 Android（`WikiViewModel.pollIngestJob`�
 
 **0 頁 = 失敗，不是成功（Phase 16e，勿回退）**：`runIngestPipeline` 舊版跑完一次 `generateText` 就無條件把 job 標 `done`。模型只要回一段話、沒呼叫任何工具（provider 抽風、prompt 沒踩到、內容太長），就會出現 **status=done / touched_pages=[] / 只花 10 秒** 的 job——UI 顯示「匯入完成」，wiki 卻完全沒變。production 22 次匯入中有 7 次是這樣（使用者以為存進去了，其實整篇不見）。現在：`touchedSlugs` 為空時在同一段對話追加 `NUDGE_PROMPT` 再跑一輪（provider 錯誤則等 5s 重試），兩輪都沒寫入就 **throw** → route 的 `after()` catch 把 job 標 `failed` 並寫入錯誤訊息，使用者看得到、可用「重新整合」按鈕重跑。**「有沒有真的寫進去」是程式該驗的事，不能靠模型自述。**
 
+## 六項知識編譯能力（Phase 17）
+
+- **兩階段與可恢復 queue**：`analysis → writing → review` 記錄 `checkpoint`；job 支援 `pending/running/paused/done/failed`、pause/resume/retry 與 `attemptToken` fencing。來源以 SHA256 去重，未變更回報 `unchanged`。
+- **安全寫入**：ingest LLM 只拿 plan allowlist 內的 `read/list/search/write`；`writePageForWorkspace` 用 DB version + `locked_by_human` CAS 保護，衝突回傳結構化錯誤並做 Drive 補償。
+- **多格式解析**：`document-parser.ts` 支援 PDF、DOCX、PPTX、EPUB、純文字/Markdown 與 PNG/JPEG/WebP/GIF；輸入、解壓與 PDF 資源皆有 2 MiB/資源上限，圖片可由 profile 產生描述。
+- **Faithful Query**：`query_mode=faithful` 只讀 raw source，不注入 wiki/context、不提供 actions/file-back；citation 由實際讀取產生，模型輸出的 NUL 不會變成 metadata。
+- **Graph Insights**：`/api/graph/insights` 以 owner scope 計算孤立頁、群組、橋接頁與未解析連結；頁數/邊數超限明確回錯，不假裝空圖。
+- **DB**：`20260831192026_recoverable_ingest.sql` 已套用 production；已驗證 `sources` hash/mime/size、`ingest_jobs` phase/checkpoint/attempt/result/updated_at 與 source hash、workspace running job 索引。
+
 ## 側邊欄拖移
 
 `workspace-shell.tsx` 用 `dragging` ref + `document.addEventListener` 實作：
@@ -405,10 +415,10 @@ Conversation panel 輸入框左側的 `Bot` 按鈕是**多功能選單**：「�
 ## 批次檔案攝取
 
 `import-dialog.tsx` 支援多檔案上傳：
-- `<input type="file" multiple>` 選擇多個 `.md` / `.txt` / `text/*` 檔案
+- `<input type="file" multiple>` 選擇 PDF / DOCX / PPTX / EPUB / text / image 檔案
 - 拖曳檔案到 dialog textarea 觸發批次上傳
 - `queue` 狀態顯示每個檔案的進度（pending / uploading / done / error）
-- 每個檔案獨立呼叫 `/api/ingest`（`kind: 'text'`），支援 `profile_id` 覆寫與 `auto_route`
+- 每個檔案獨立呼叫 `/api/ingest`（multipart），支援 `profile_id` 覆寫、`auto_route`、pause/resume/retry 與 SHA unchanged
 
 ## 筆記（已於 Phase 14 移除 UI）／規則
 
@@ -516,6 +526,8 @@ Conversation panel 輸入框左側的 `Bot` 按鈕是**多功能選單**：「�
 - `CREATE OR REPLACE FUNCTION search_pages(p_workspace_id UUID, p_query TEXT)`
 
 `supabase/migrations/0015_agent_jobs.sql`（已套用 production）：跨工作區 AI job 表（`organize`）。`ingest_jobs` 綁 workspace + `source_id NOT NULL`，裝不下跨工作區任務，故另開 owner-scoped 表。GRANT 緊接 CREATE TABLE、再 enable RLS（`owner_id = auth.uid()`）。
+
+`supabase/migrations/20260831192026_recoverable_ingest.sql`（已套用 production）：`sources` 新增 `content_sha256/mime_type/byte_size`；`ingest_jobs` 新增 `phase/checkpoint/attempt_count/source_sha256/result/updated_at`，並驗證 source hash unique 與每 workspace 單一 running job index。
 
 ### Data API GRANT 規範（參考全域 CLAUDE.md Supabase 資料庫規範）
 

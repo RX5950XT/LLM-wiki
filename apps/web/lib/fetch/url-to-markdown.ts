@@ -97,6 +97,23 @@ const ssrfAgent = new Agent({ connect: { lookup: guardedLookup } });
 
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 const MAX_REDIRECTS = 5;
+export const MAX_URL_RESPONSE_BYTES = 5 * 1024 * 1024;
+
+export type PublicUrlFetchFailure = {
+  status: 413 | 422;
+  code: 'SOURCE_URL_BLOCKED' | 'SOURCE_URL_TOO_LARGE' | 'SOURCE_URL_UNREADABLE';
+  message: string;
+};
+
+interface ResponseBodyReader {
+  read(): Promise<{ done: boolean; value?: unknown }>;
+  cancel(reason?: unknown): Promise<void> | void;
+  releaseLock(): void;
+}
+
+interface ResponseBody {
+  getReader(): ResponseBodyReader;
+}
 
 /** Fetch with per-hop SSRF validation instead of trusting redirect: 'follow'. */
 async function fetchWithHostChecks(url: string): Promise<Awaited<ReturnType<typeof undiciFetch>>> {
@@ -128,6 +145,7 @@ async function fetchWithHostChecks(url: string): Promise<Awaited<ReturnType<type
     });
 
     if (REDIRECT_STATUSES.has(response.status)) {
+      await Promise.resolve(response.body?.cancel()).catch(() => undefined);
       if (hop >= MAX_REDIRECTS) throw new Error(`Too many redirects: ${url}`);
       const location = response.headers.get('location');
       if (!location) throw new Error(`Redirect without Location header: ${currentUrl}`);
@@ -149,10 +167,7 @@ export async function urlToMarkdown(url: string): Promise<FetchedArticle> {
     throw new Error(`Failed to fetch ${url}: HTTP ${response.status}`);
   }
 
-  const html = await response.text();
-  if (html.length > 5 * 1024 * 1024) {
-    throw new Error(`Page too large to ingest (> 5 MB): ${url}`);
-  }
+  const html = await readResponseBodyWithLimit(response, MAX_URL_RESPONSE_BYTES);
   const dom = new JSDOM(html, { url });
   const reader = new Readability(dom.window.document);
   const article = reader.parse();
@@ -169,4 +184,49 @@ export async function urlToMarkdown(url: string): Promise<FetchedArticle> {
     byline: article.byline,
     url,
   };
+}
+
+/** Read the decompressed response body without buffering beyond the limit. */
+export async function readResponseBodyWithLimit(
+  response: { body: unknown },
+  maxBytes = MAX_URL_RESPONSE_BYTES,
+): Promise<string> {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) {
+    throw new RangeError('maxBytes must be a positive safe integer');
+  }
+  const body = response.body as ResponseBody | null;
+  if (!body || typeof body.getReader !== 'function') throw new Error('URL response body is empty');
+
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = value instanceof Uint8Array ? value : new Uint8Array();
+      total += chunk.byteLength;
+      if (total > maxBytes) {
+        await Promise.resolve(reader.cancel('response body exceeds limit')).catch(() => undefined);
+        throw new Error('Page too large to ingest (> 5 MB)');
+      }
+      chunks.push(chunk);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  return Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)), total).toString('utf8');
+}
+
+/** Keep provider/network details out of the client-facing error response. */
+export function toPublicUrlFetchFailure(error: unknown): PublicUrlFetchFailure {
+  const message = error instanceof Error ? error.message : '';
+  if (/private address|protocol not allowed|localhost|\.local|\.internal/i.test(message)) {
+    return { status: 422, code: 'SOURCE_URL_BLOCKED', message: 'This URL cannot be imported.' };
+  }
+  if (/too large|exceeds limit/i.test(message)) {
+    return { status: 413, code: 'SOURCE_URL_TOO_LARGE', message: 'The URL content is too large to import.' };
+  }
+  return { status: 422, code: 'SOURCE_URL_UNREADABLE', message: 'Unable to read content from this URL.' };
 }

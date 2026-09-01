@@ -4,6 +4,9 @@ import { useCallback, useEffect, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { Link2, FileText, Type, Loader2, RotateCw, X } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
+import { isDriveReconnectError, reconnectGoogleDrive } from '@/lib/google/drive-reconnect';
+import { parseIngestQueueJob, parseIngestStartResponse } from './ingest-queue';
+import { isSafeHttpUrl, useDialogFocus } from './dialog-focus';
 
 interface SourceEntry {
   id: string;
@@ -13,8 +16,61 @@ interface SourceEntry {
   created_at: string;
   ingested_at: string | null;
   jobStatus?: string;
+  jobPhase?: string;
+  jobResult?: 'updated' | 'unchanged' | null;
   jobError?: string | null;
   touchedCount?: number;
+}
+
+class SourceApiError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+  }
+}
+
+async function readJsonBody(response: Response, fallback: string): Promise<unknown> {
+  const raw = await response.text();
+  if (!(response.headers.get('content-type')?.toLowerCase().includes('application/json') ?? false)) {
+    throw new SourceApiError(raw.trim() || fallback, response.status);
+  }
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch {
+    throw new SourceApiError(fallback, response.status);
+  }
+}
+
+function apiError(value: unknown): string | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const error = (value as Record<string, unknown>).error;
+  if (typeof error === 'string') return error;
+  if (error && typeof error === 'object' && !Array.isArray(error) && typeof (error as Record<string, unknown>).message === 'string') {
+    return (error as Record<string, unknown>).message as string;
+  }
+  return null;
+}
+
+function sourceJobStatusLabel(
+  t: ReturnType<typeof useTranslations>,
+  status: string | undefined,
+): string {
+  if (status === 'pending') return t('ingest.statusPending');
+  if (status === 'running') return t('ingest.statusRunning');
+  if (status === 'paused') return t('ingest.statusPaused');
+  if (status === 'done') return t('ingest.statusDone');
+  if (status === 'failed') return t('ingest.statusFailed');
+  return t('ingest.statusPending');
+}
+
+function sourceJobPhaseLabel(
+  t: ReturnType<typeof useTranslations>,
+  phase: string | undefined,
+): string | null {
+  if (phase === 'analysis') return t('ingest.phaseAnalysis');
+  if (phase === 'writing') return t('ingest.phaseWriting');
+  if (phase === 'review') return t('ingest.phaseReview');
+  if (phase === 'done') return t('ingest.phaseDone');
+  return null;
 }
 
 /**
@@ -33,6 +89,8 @@ export function SourcesDialog({
   const [sources, setSources] = useState<SourceEntry[] | null>(null);
   const [reingestingId, setReingestingId] = useState<string | null>(null);
   const [reingestError, setReingestError] = useState<string | null>(null);
+  const [sourcesError, setSourcesError] = useState<string | null>(null);
+  const dialogRef = useDialogFocus<HTMLDivElement>();
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -43,42 +101,53 @@ export function SourcesDialog({
   }, [onClose]);
 
   const loadSources = useCallback(async () => {
-    const supabase = createClient();
-    const [{ data: rows }, { data: jobs }] = await Promise.all([
-      supabase
-        .from('sources')
-        .select('id, kind, title, url, created_at, ingested_at')
-        .eq('workspace_id', workspaceId)
-        .order('created_at', { ascending: false })
-        .limit(200),
-      supabase
-        .from('ingest_jobs')
-        .select('source_id, status, error, touched_pages, started_at')
-        .eq('workspace_id', workspaceId)
-        .order('started_at', { ascending: false }),
-    ]);
-    const latestJob = new Map<string, { status: string; error: string | null; touched: number }>();
-    for (const job of jobs ?? []) {
-      if (!latestJob.has(job.source_id)) {
-        latestJob.set(job.source_id, {
-          status: job.status,
-          error: job.error,
-          touched: (job.touched_pages as string[] | null)?.length ?? 0,
-        });
+    setSourcesError(null);
+    try {
+      const supabase = createClient();
+      const [sourcesResult, jobsResult] = await Promise.all([
+        supabase
+          .from('sources')
+          .select('id, kind, title, url, created_at, ingested_at')
+          .eq('workspace_id', workspaceId)
+          .order('created_at', { ascending: false })
+          .limit(200),
+        supabase
+          .from('ingest_jobs')
+          .select('source_id, status, phase, result, error, touched_pages, updated_at')
+          .eq('workspace_id', workspaceId)
+          .order('updated_at', { ascending: false }),
+      ]);
+      if (sourcesResult.error || jobsResult.error) throw new Error(t('sources.loadFailed'));
+
+      const latestJob = new Map<string, { status: string; phase: string; result: 'updated' | 'unchanged' | null; error: string | null; touched: number }>();
+      for (const job of jobsResult.data ?? []) {
+        if (!latestJob.has(job.source_id)) {
+          latestJob.set(job.source_id, {
+            status: job.status,
+            phase: job.phase,
+            result: job.result === 'updated' || job.result === 'unchanged' ? job.result : null,
+            error: job.error,
+            touched: (job.touched_pages as string[] | null)?.length ?? 0,
+          });
+        }
       }
+      setSources(
+        (sourcesResult.data ?? []).map((row) => {
+          const job = latestJob.get(row.id);
+          return {
+            ...row,
+            jobStatus: job?.status,
+            jobPhase: job?.phase,
+            jobResult: job?.result ?? null,
+            jobError: job?.error ?? null,
+            touchedCount: job?.touched ?? 0,
+          } as SourceEntry;
+        }),
+      );
+    } catch (error) {
+      setSourcesError(error instanceof Error ? error.message : t('sources.loadFailed'));
     }
-    setSources(
-      (rows ?? []).map((row) => {
-        const job = latestJob.get(row.id);
-        return {
-          ...row,
-          jobStatus: job?.status,
-          jobError: job?.error ?? null,
-          touchedCount: job?.touched ?? 0,
-        } as SourceEntry;
-      }),
-    );
-  }, [workspaceId]);
+  }, [t, workspaceId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -97,26 +166,50 @@ export function SourcesDialog({
       setReingestingId(sourceId);
       try {
         const res = await fetch(`/api/sources/${sourceId}/reingest`, { method: 'POST' });
-        const data = (await res.json().catch(() => null)) as { jobId?: string; error?: string } | null;
-        if (!res.ok || !data?.jobId) {
-          throw new Error(data?.error ?? t('sources.reingestFailed'));
+        const value = await readJsonBody(res, t('sources.reingestFailed'));
+        if (!res.ok) {
+          const message = apiError(value) ?? t('sources.reingestFailed');
+          if (res.status === 403 && isDriveReconnectError(message)) {
+            try {
+              await reconnectGoogleDrive(`/w/${workspaceId}`);
+            } catch {
+              /* Keep the server message visible when reauthorization cannot start. */
+            }
+          }
+          throw new Error(message);
         }
-        // Poll the shared ingest job protocol until it settles
+        const data = parseIngestStartResponse(value);
+        if (!data) throw new Error(t('sources.invalidReingestResponse'));
         const jobId = data.jobId;
-        for (;;) {
+        if (data.status === 'done') {
+          await loadSources();
+          return;
+        }
+        const deadline = Date.now() + 6 * 60 * 1000;
+        for (; Date.now() < deadline;) {
           await new Promise((r) => setTimeout(r, 3000));
           const poll = await fetch(`/api/ingest?job_id=${jobId}`);
-          const job = (await poll.json().catch(() => null)) as { status?: string } | null;
-          if (!job || job.status === 'done' || job.status === 'failed') break;
+          const pollValue = await readJsonBody(poll, t('sources.reingestFailed'));
+          if (!poll.ok) throw new Error(apiError(pollValue) ?? t('sources.reingestFailed'));
+          const job = parseIngestQueueJob(pollValue);
+          if (!job) throw new Error(t('sources.invalidReingestResponse'));
+          if (job.status === 'done' || job.status === 'failed' || job.status === 'paused') break;
         }
         await loadSources();
       } catch (err) {
+        if (err instanceof SourceApiError && err.status === 403 && isDriveReconnectError(err.message)) {
+          try {
+            await reconnectGoogleDrive(`/w/${workspaceId}`);
+          } catch {
+            /* Keep the server message visible when reauthorization cannot start. */
+          }
+        }
         setReingestError(err instanceof Error ? err.message : t('sources.reingestFailed'));
       } finally {
         setReingestingId(null);
       }
     },
-    [loadSources, t],
+    [loadSources, t, workspaceId],
   );
 
   const kindIcon = (kind: SourceEntry['kind']) =>
@@ -128,6 +221,7 @@ export function SourcesDialog({
       role="dialog"
       aria-modal="true"
       aria-labelledby="sources-title"
+      aria-busy={sources === null}
     >
       <button
         type="button"
@@ -138,6 +232,8 @@ export function SourcesDialog({
         tabIndex={-1}
       />
       <div
+        ref={dialogRef}
+        tabIndex={-1}
         className="relative flex max-h-[80vh] w-full max-w-lg flex-col rounded-lg border shadow-lg"
         style={{ background: 'var(--bg)', borderColor: 'var(--border)' }}
       >
@@ -151,7 +247,7 @@ export function SourcesDialog({
           <button
             type="button"
             onClick={onClose}
-            className="rounded p-1 transition-all duration-100 hover:opacity-70 active:scale-90"
+            className="flex min-h-11 min-w-11 items-center justify-center rounded-md transition-all duration-100 hover:opacity-70 active:scale-90 focus-visible:outline-2 focus-visible:outline-offset-2"
             style={{ color: 'var(--fg-muted)' }}
             aria-label={t('common.close')}
           >
@@ -166,8 +262,16 @@ export function SourcesDialog({
             {reingestError}
           </p>
         )}
+        {sourcesError && (
+          <div className="mx-4 mt-2 flex items-center gap-2 rounded-md px-2 py-1 text-[11px]" style={{ background: 'var(--bg-2)', color: 'oklch(65% 0.18 30)' }} role="alert">
+            <span className="min-w-0 flex-1">{sourcesError}</span>
+            <button type="button" onClick={() => void loadSources()} className="min-h-11 shrink-0 rounded-md px-2 font-medium underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2">{t('sources.retry')}</button>
+          </div>
+        )}
         <div className="flex-1 overflow-y-auto p-3">
-          {sources === null ? (
+          {sourcesError && sources === null ? (
+            <p className="py-8 text-center text-xs" style={{ color: 'var(--fg-muted)' }}>{t('sources.loadFailed')}</p>
+          ) : sources === null ? (
             <div className="flex justify-center py-8">
               <Loader2 size={18} className="animate-spin" style={{ color: 'var(--fg-muted)' }} />
             </div>
@@ -192,7 +296,7 @@ export function SourcesDialog({
                       {new Date(source.created_at).toLocaleDateString(locale)}
                     </span>
                   </div>
-                  {source.url && (
+                  {isSafeHttpUrl(source.url) && (
                     <a
                       href={source.url}
                       target="_blank"
@@ -204,27 +308,33 @@ export function SourcesDialog({
                     </a>
                   )}
                   <div className="mt-1 flex items-center justify-between gap-2">
-                    <p className="min-w-0 flex-1 truncate text-[10px]">
-                      {reingestingId === source.id ? (
-                        <span style={{ color: 'var(--color-accent)' }}>{t('sources.reingesting')}</span>
-                      ) : source.jobStatus === 'failed' ? (
-                        <span style={{ color: 'oklch(65% 0.18 30)' }}>
-                          {t('sources.statusFailed')}
-                          {source.jobError ? ` — ${source.jobError}` : ''}
-                        </span>
-                      ) : source.ingested_at ? (
-                        <span style={{ color: 'var(--color-accent)' }}>
-                          {t('sources.statusDone', { count: source.touchedCount ?? 0 })}
-                        </span>
-                      ) : (
-                        <span style={{ color: 'var(--fg-muted)' }}>{t('sources.statusRunning')}</span>
-                      )}
+                      <p className="min-w-0 flex-1 truncate text-[10px]">
+                        {reingestingId === source.id ? (
+                          <span style={{ color: 'var(--color-accent)' }}>{t('sources.reingesting')}</span>
+                        ) : source.jobStatus === 'failed' ? (
+                          <span style={{ color: 'oklch(65% 0.18 30)' }}>
+                            {sourceJobStatusLabel(t, source.jobStatus)}
+                            {source.jobError ? ` — ${source.jobError}` : ''}
+                          </span>
+                        ) : source.jobResult === 'unchanged' ? (
+                          <span style={{ color: 'var(--fg-muted)' }}>{sourceJobStatusLabel(t, source.jobStatus)} · {t('ingest.resultUnchanged')}</span>
+                        ) : source.jobStatus ? (
+                          <span style={{ color: source.jobStatus === 'done' ? 'var(--color-accent)' : 'var(--fg-muted)' }}>
+                            {sourceJobStatusLabel(t, source.jobStatus)}{sourceJobPhaseLabel(t, source.jobPhase) ? ` · ${sourceJobPhaseLabel(t, source.jobPhase)}` : ''} · {t('ingest.touchedPages', { count: source.touchedCount ?? 0 })}
+                          </span>
+                        ) : source.ingested_at ? (
+                          <span style={{ color: 'var(--color-accent)' }}>
+                            {t('sources.statusDone', { count: source.touchedCount ?? 0 })}
+                          </span>
+                        ) : (
+                          <span style={{ color: 'var(--fg-muted)' }}>{t('ingest.statusPending')}</span>
+                        )}
                     </p>
                     <button
                       type="button"
                       onClick={() => reingest(source.id)}
                       disabled={reingestingId !== null}
-                      className="flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[10px] transition-opacity hover:opacity-70 disabled:opacity-40"
+                      className="flex min-h-11 shrink-0 items-center gap-1 rounded px-2 text-[10px] transition-opacity hover:opacity-70 focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-40"
                       style={{
                         color: source.jobStatus === 'failed' ? 'var(--color-accent)' : 'var(--fg-muted)',
                       }}

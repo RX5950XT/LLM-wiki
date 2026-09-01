@@ -2,12 +2,21 @@
 
 > 給下一個 AI Agent 的接手指南。架構與規範細節以 `CLAUDE.md` / `AGENTS.md` 為準，這裡只記「最近做了什麼、為什麼、還缺什麼」。
 
-## 本輪研究與決策（2026-08-31，nashsu/llm_wiki v0.6.11 / e808211）
+## 本輪完成（2026-09-01，六項知識編譯能力）
+
+- 完成兩階段 `analysis → writing → review` Ingest、可恢復 queue（checkpoint、pause/resume/retry、attempt fencing）與 source SHA unchanged skip。
+- 完成 ingest 工具 allowlist、共用 writer version/lock CAS 與失敗補償；多格式 parser 支援 PDF/DOCX/PPTX/EPUB/text/Markdown/image，輸入上限 2 MiB。
+- 完成 Faithful raw-source query（只讀 raw source，citation 來自實際讀取）與 Graph Insights（孤立頁、群組、橋接頁、未解析連結）。Web/Android 已對齊，Android 為 `0.7.0`（versionCode `7`）。
+- production 已套用 `recoverable_ingest`，並驗證 `sources` 的 hash/mime/size、`ingest_jobs` 的 phase/checkpoint/attempt/result/updated_at、source hash unique 與 workspace running-job index。
+- 驗證：`bun test` 107 pass / 0 fail、`bun run typecheck` 5/5、`bun run build` 1/1、Android APK build 成功、security review 無 CRITICAL/HIGH。
+- 已知限制：Drive → DB → `page_links` 仍非單一交易；目前靠 CAS 與補償降低衝突／孤兒風險。
+
+## 前一輪研究與決策（2026-08-31，nashsu/llm_wiki v0.6.11 / e808211）
 
 - 採用統一 synthesis commit path：synthesis route 改走 `writePageForWorkspace`，補齊 `search_text`、`page_links`、content `hash`、`version` 的一致性。
-- 暫不做完整兩階段 ingest、durable SHA queue、多格式 ingest、graph insights、faithful research；這些都需要獨立的產品、成本與資料契約設計，不是本輪小改。
-- 最終驗證：`bun test` 41 pass/0 fail、`bun run typecheck` 5/5、`bun run build` 1/1、Android `assembleDebug` `BUILD SUCCESSFUL`、`git diff --check` 通過。
-- 安全複核無 CRITICAL/HIGH；中文／emoji slug collision 已由 query fallback + 12 hex UUID 關閉。既有 MEDIUM：shared writer 的 Drive→DB→page_links 非原子，本輪未做跨核心交易／補償重構。
+- 原先暫不做完整兩階段 ingest、durable SHA queue、多格式 ingest、graph insights、faithful research；本輪已全部補完。
+- 原先驗證數字（`bun test` 41 pass 等）屬前一輪歷史紀錄，不代表目前版本。
+- 安全複核無 CRITICAL/HIGH；中文／emoji slug collision 已由 query fallback + 12 hex UUID 關閉。
 
 ## 最近一次變更（2026-07-16，全專案漏洞掃描收尾）
 

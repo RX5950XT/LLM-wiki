@@ -13,6 +13,8 @@ import com.llmwiki.data.DriveClient
 import com.llmwiki.data.IngestJobRow
 import com.llmwiki.data.LlmProfileRepository
 import com.llmwiki.data.LlmProfile
+import com.llmwiki.data.GraphInsights
+import com.llmwiki.data.RawSourceCitation
 import com.llmwiki.data.PageLinkRow
 import com.llmwiki.data.WikiTargetRow
 import com.llmwiki.data.PageRepository
@@ -41,16 +43,21 @@ import io.ktor.client.request.header
 import io.ktor.client.request.patch
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
+import io.ktor.client.request.forms.MultiPartFormDataContent
+import io.ktor.client.request.forms.formData
+import io.ktor.client.request.forms.ChannelProvider
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsChannel
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
 import io.ktor.http.HttpHeaders
+import io.ktor.http.Headers
 import io.ktor.utils.io.readUTF8Line
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -61,6 +68,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
@@ -72,7 +80,10 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
-import java.time.Instant
+import io.ktor.utils.io.jvm.javaio.toByteReadChannel
+import android.net.Uri
+import java.io.FilterInputStream
+import java.io.InputStream
 
 /**
  * A deep reorganisation is cut off by the server's 300s invocation limit, so a
@@ -81,8 +92,9 @@ import java.time.Instant
  */
 private const val MAX_MAINTENANCE_PASSES = 6
 
-/** Same batch window as Web workspace-shell (30 minutes before earliest running job). */
-private const val BATCH_LOOKBACK_MS = 30L * 60L * 1000L
+const val QUERY_MODE_STANDARD = "standard"
+const val QUERY_MODE_FAITHFUL = "faithful"
+private const val MAX_IMPORT_BYTES = 2L * 1024L * 1024L
 
 data class ChatMessage(
     val role: String,
@@ -90,6 +102,8 @@ data class ChatMessage(
     val citedSlugs: List<String> = emptyList(),
     val isStreaming: Boolean = false,
     val proposals: List<ActionProposal> = emptyList(),
+    val rawCitations: List<RawSourceCitation> = emptyList(),
+    val queryMode: String = QUERY_MODE_STANDARD,
 )
 
 /** Destructive action the AI proposed; executes only after the user confirms. */
@@ -99,6 +113,12 @@ data class ActionProposal(
     val label: String,
     val status: String = "pending", // pending | running | done | error | dismissed
     val error: String? = null,
+)
+
+data class IngestJobActionFailure(
+    val jobId: String,
+    val action: String,
+    val message: String,
 )
 
 data class WikiUiState(
@@ -148,6 +168,14 @@ data class WikiUiState(
     val maintenanceChanges: Int = 0,
     /** Source id currently being re-ingested (null = none) */
     val reingestingSourceId: String? = null,
+    val selectedQueryMode: String = QUERY_MODE_STANDARD,
+    val ingestJobs: List<IngestJobRow> = emptyList(),
+    val ingestJobsLoading: Boolean = false,
+    val ingestJobActionLoadingId: String? = null,
+    val ingestJobActionFailure: IngestJobActionFailure? = null,
+    val graphInsights: GraphInsights? = null,
+    val graphInsightsLoading: Boolean = false,
+    val graphInsightsError: String? = null,
 )
 
 private val apiJson = Json { ignoreUnknownKeys = true }
@@ -203,83 +231,36 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
     private fun watchRunningIngests() {
         if (ingestWatchJob?.isActive == true) return
         ingestWatchJob = viewModelScope.launch {
-            var hadRunning = false
+            var hadActive = false
+            var watchedWorkspaceId: String? = null
             while (isActive) {
-                val snapshot = runCatching {
-                    supabase.requireAccessToken(forceRefresh = false)
-                    val running = supabase.from("ingest_jobs")
-                        .select(columns = Columns.raw("source_id,status,error,touched_pages,started_at")) {
-                            filter { eq("status", "running") } // RLS scopes this to the user
-                        }
-                        .decodeList<IngestJobRow>()
-
-                    // Match Web: report finished/failed in the same batch window.
-                    // The server only knows what was already handed to it — not how many
-                    // files the user still intends to send.
-                    var done = 0
-                    var failed = 0
-                    if (running.isNotEmpty()) {
-                        val earliestMs = running.mapNotNull { row ->
-                            row.startedAt?.let { runCatching { Instant.parse(it).toEpochMilli() }.getOrNull() }
-                        }.minOrNull() ?: System.currentTimeMillis()
-                        val since = Instant.ofEpochMilli(earliestMs - BATCH_LOOKBACK_MS).toString()
-                        done = supabase.from("ingest_jobs")
-                            .select(columns = Columns.raw("source_id,status,error,touched_pages,started_at")) {
-                                filter {
-                                    eq("status", "done")
-                                    gte("started_at", since)
-                                }
-                            }
-                            .decodeList<IngestJobRow>()
-                            .size
-                        failed = supabase.from("ingest_jobs")
-                            .select(columns = Columns.raw("source_id,status,error,touched_pages,started_at")) {
-                                filter {
-                                    eq("status", "failed")
-                                    gte("started_at", since)
-                                }
-                            }
-                            .decodeList<IngestJobRow>()
-                            .size
-                    }
-                    IngestWatchSnapshot(
-                        running = running,
-                        done = done,
-                        failed = failed,
-                    )
-                }.getOrNull()
-
-                if (snapshot != null) {
-                    val running = snapshot.running.size
-                    _uiState.update {
-                        it.copy(
-                            activeIngestCount = running,
-                            activeIngestPages = snapshot.running.sumOf { job -> job.touchedPages.size },
-                            activeIngestDone = snapshot.done,
-                            activeIngestFailed = snapshot.failed,
-                        )
-                    }
+                val wsId = workspaceId.value
+                if (wsId != watchedWorkspaceId) {
+                    watchedWorkspaceId = wsId
+                    hadActive = false
+                }
+                val jobs = wsId?.let { runCatching { fetchIngestJobs(it) }.getOrNull() }
+                if (jobs != null) {
+                    val active = jobs.count { it.status == "pending" || it.status == "running" }
+                    applyIngestJobs(wsId, jobs)
                     // The last import just landed — pull in what it wrote.
-                    if (hadRunning && running == 0) {
-                        workspaceId.value?.let { syncPagesInternal(it) }
+                    if (hadActive && active == 0 && workspaceId.value == wsId) {
+                        wsId.let { syncPagesInternal(it, forceSync = true) }
                         refreshWorkspaces(syncSelected = false)
                     }
-                    hadRunning = running > 0
+                    hadActive = active > 0
                 }
-                delay(if (hadRunning) 5_000L else 20_000L)
+                delay(if (hadActive) 5_000L else 20_000L)
             }
         }
     }
 
-    private data class IngestWatchSnapshot(
-        val running: List<IngestJobRow>,
-        val done: Int,
-        val failed: Int,
-    )
-
     private var lastForegroundSyncAt = 0L
 
     fun refreshAfterForeground() {
+        // Queue state is cheap and must be restored even when the broader page
+        // sync is throttled after a quick background/foreground transition.
+        loadIngestJobs()
         val now = System.currentTimeMillis()
         if (now - lastForegroundSyncAt < 15 * 60 * 1000L) return
         lastForegroundSyncAt = now
@@ -300,10 +281,14 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                 driveReconnectUrl = null,
                 backlinks = emptyList(),
                 sources = null,
+                ingestJobs = emptyList(),
+                graphInsights = null,
+                graphInsightsError = null,
             )
         }
         workspaceId.value = ws.id
         persistLastWorkspace(ws)
+        loadIngestJobs()
         viewModelScope.launch {
             syncPagesInternal(ws.id)
             selectDefaultPageIfNeeded(ws.id)
@@ -753,6 +738,11 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(selectedProfileId = profileId) }
     }
 
+    fun setSelectedQueryMode(mode: String) {
+        val normalized = mode.takeIf { it == QUERY_MODE_FAITHFUL } ?: QUERY_MODE_STANDARD
+        _uiState.update { it.copy(selectedQueryMode = normalized) }
+    }
+
     fun onDriveReconnectCompleted() {
         _uiState.update { it.copy(driveReconnectUrl = null, syncError = null) }
         refreshAfterForeground()
@@ -788,6 +778,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
         val placeholder = ChatMessage(role = "assistant", content = "", isStreaming = true)
         val taggedIds = _uiState.value.taggedWorkspaceIds
         val currentSlug = _uiState.value.activePage?.slug
+        val queryMode = _uiState.value.selectedQueryMode
         _uiState.update {
             it.copy(
                 chatMessages = newHistory + placeholder,
@@ -809,6 +800,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                         }
                     })
                     put("workspace_id", wsId)
+                    put("query_mode", queryMode)
                     _uiState.value.selectedProfileId?.let { put("profile_id", it) }
                     currentSlug?.let { put("current_slug", it) }
                     if (taggedIds.isNotEmpty()) {
@@ -852,13 +844,11 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
 
                 val channel = response.bodyAsChannel()
                 val raw = StringBuilder()
-                val citationDelimiter = "\u0000CITATIONS\u0000"
-
                 while (!channel.isClosedForRead) {
                     val chunk = channel.readUTF8Line() ?: break
                     raw.append(chunk).append("\n")
                     // Hide any trailing NUL-delimited metadata block while streaming
-                    val nulIdx = raw.indexOf(citationDelimiter[0])
+                    val nulIdx = raw.indexOf('\u0000')
                     val displayText = if (nulIdx >= 0) raw.substring(0, nulIdx) else raw.toString()
                     _uiState.update { state ->
                         val messages = state.chatMessages.dropLast(1) +
@@ -873,7 +863,9 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                         role = "assistant",
                         content = parsed.text.trimEnd(),
                         citedSlugs = parsed.citedSlugs,
+                        rawCitations = parsed.rawCitations,
                         proposals = parsed.proposals,
+                        queryMode = queryMode,
                     )
                     state.copy(
                         chatMessages = state.chatMessages.dropLast(1) + final,
@@ -1075,6 +1067,178 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(ingestRoutedName = null, ingestRoutedCreated = false) }
     }
 
+    fun loadIngestJobs() {
+        val wsId = workspaceId.value ?: return
+        viewModelScope.launch {
+            _uiState.update { it.copy(ingestJobsLoading = true) }
+            try {
+                applyIngestJobs(wsId, fetchIngestJobs(wsId))
+            } catch (e: Exception) {
+                if (workspaceId.value == wsId) {
+                    _uiState.update {
+                        it.copy(syncError = e.toUserFacingMessage(str(R.string.error_op_load_ingest_jobs)))
+                    }
+                }
+            } finally {
+                if (workspaceId.value == wsId) {
+                    _uiState.update { it.copy(ingestJobsLoading = false) }
+                }
+            }
+        }
+    }
+
+    fun updateIngestJob(jobId: String, action: String) {
+        if (action !in setOf("pause", "resume", "retry")) return
+        viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    ingestJobActionLoadingId = jobId,
+                    ingestJobActionFailure = null,
+                )
+            }
+            try {
+                val body = buildJsonObject {
+                    put("job_id", jobId)
+                    put("action", action)
+                }.toString()
+                val response = sendAuthorizedRequest { accessToken ->
+                    AndroidHttpClient.instance.patch(webApiUrl("/api/ingest")) {
+                        header("Authorization", "Bearer $accessToken")
+                        contentType(ContentType.Application.Json)
+                        setBody(body)
+                    }
+                } ?: throw IllegalStateException(unauthorizedMessage())
+                val text = response.bodyAsText()
+                if (response.status.value !in 200..299) {
+                    throw IllegalStateException(parseApiError(text, str(R.string.error_op_update_ingest_job)))
+                }
+                _uiState.update {
+                    it.copy(
+                        ingestJobActionLoadingId = null,
+                        ingestJobActionFailure = null,
+                        syncError = null,
+                    )
+                }
+                loadIngestJobs()
+            } catch (e: Exception) {
+                val message = e.toUserFacingMessage(str(R.string.error_op_update_ingest_job))
+                _uiState.update {
+                    it.copy(
+                        ingestJobActionLoadingId = null,
+                        ingestJobActionFailure = IngestJobActionFailure(jobId, action, message),
+                        syncError = message,
+                    )
+                }
+            }
+        }
+    }
+
+    fun clearIngestJobActionError() {
+        _uiState.update { state ->
+            val failure = state.ingestJobActionFailure
+            state.copy(
+                ingestJobActionFailure = null,
+                syncError = if (failure != null && state.syncError == failure.message) {
+                    null
+                } else {
+                    state.syncError
+                },
+            )
+        }
+    }
+
+    private suspend fun fetchIngestJobs(wsId: String): List<IngestJobRow> {
+        val response = sendAuthorizedRequest { accessToken ->
+            AndroidHttpClient.instance.get(webApiUrl("/api/ingest?workspace_id=$wsId")) {
+                header("Authorization", "Bearer $accessToken")
+            }
+        } ?: throw IllegalStateException(unauthorizedMessage())
+        val text = response.bodyAsText()
+        if (response.status.value !in 200..299) {
+            throw IllegalStateException(parseApiError(text, str(R.string.error_op_load_ingest_jobs)))
+        }
+        return decodeIngestJobs(text)
+    }
+
+    private fun applyIngestJobs(requestedWorkspaceId: String, jobs: List<IngestJobRow>) {
+        if (workspaceId.value != requestedWorkspaceId) return
+        val active = jobs.filter { it.status == "pending" || it.status == "running" }
+        _uiState.update {
+            it.copy(
+                ingestJobs = jobs,
+                activeIngestCount = active.size,
+                activeIngestPages = active.sumOf { job -> job.touchedPages.size },
+                activeIngestDone = jobs.count { it.status == "done" },
+                activeIngestFailed = jobs.count { it.status == "failed" },
+            )
+        }
+    }
+
+    private fun decodeIngestJobs(raw: String): List<IngestJobRow> {
+        val root = apiJson.parseToJsonElement(raw)
+        val candidates = when (root) {
+            is JsonArray -> root
+            else -> {
+                val jsonObject = root.jsonObject
+                val data = jsonObject["data"]
+                when {
+                    jsonObject["jobs"] is JsonArray -> jsonObject["jobs"] as JsonArray
+                    data is JsonArray -> data
+                    data?.jsonObject?.get("jobs") is JsonArray -> data.jsonObject["jobs"] as JsonArray
+                    else -> JsonArray(emptyList())
+                }
+            }
+        }
+        return candidates.mapNotNull { element ->
+            runCatching {
+                val jsonObject = element.jsonObject.toMutableMap()
+                val source = jsonObject["source"]?.jsonObject
+                if (jsonObject["source_title"] == null) source?.get("title")?.let { jsonObject["source_title"] = it }
+                if (jsonObject["source_mime_type"] == null) {
+                    source?.get("mime_type")?.let { jsonObject["source_mime_type"] = it }
+                }
+                apiJson.decodeFromJsonElement(
+                    IngestJobRow.serializer(),
+                    buildJsonObject { jsonObject.forEach { (key, value) -> put(key, value) } },
+                )
+            }.getOrNull()
+        }.filter { it.id != null || it.sourceId.isNotBlank() }
+    }
+
+    fun loadGraphInsights() {
+        val wsId = workspaceId.value ?: return
+        viewModelScope.launch {
+            _uiState.update { it.copy(graphInsightsLoading = true, graphInsightsError = null) }
+            try {
+                val response = sendAuthorizedRequest { accessToken ->
+                    AndroidHttpClient.instance.get(webApiUrl("/api/graph/insights?workspace_id=$wsId")) {
+                        header("Authorization", "Bearer $accessToken")
+                    }
+                } ?: throw IllegalStateException(unauthorizedMessage())
+                val text = response.bodyAsText()
+                if (response.status.value !in 200..299) {
+                    throw IllegalStateException(parseApiError(text, str(R.string.error_op_graph_insights)))
+                }
+                val root = apiJson.parseToJsonElement(text).jsonObject
+                val data = root["data"] ?: root
+                val insights = apiJson.decodeFromJsonElement(GraphInsights.serializer(), data)
+                if (workspaceId.value == wsId) {
+                    _uiState.update { it.copy(graphInsights = insights, graphInsightsError = null) }
+                }
+            } catch (e: Exception) {
+                if (workspaceId.value == wsId) {
+                    _uiState.update {
+                        it.copy(graphInsightsError = e.toUserFacingMessage(str(R.string.error_op_graph_insights)))
+                    }
+                }
+            } finally {
+                if (workspaceId.value == wsId) {
+                    _uiState.update { it.copy(graphInsightsLoading = false) }
+                }
+            }
+        }
+    }
+
     fun saveSynthesis(question: String, answer: String, citedSlugs: List<String>) {
         val wsId = workspaceId.value ?: return
         viewModelScope.launch {
@@ -1189,9 +1353,9 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                     }
                     .decodeList<SourceRow>()
                 val jobs = supabase.from("ingest_jobs")
-                    .select(columns = Columns.raw("source_id,status,error,touched_pages,started_at")) {
+                    .select(columns = Columns.raw("source_id,status,error,touched_pages,started_at,updated_at")) {
                         filter { eq("workspace_id", wsId) }
-                        order("started_at", order = Order.DESCENDING)
+                        order("updated_at", order = Order.DESCENDING)
                     }
                     .decodeList<IngestJobRow>()
                 val latestJob = jobs.groupBy { it.sourceId }.mapValues { it.value.first() }
@@ -1244,23 +1408,9 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                     }
                     return@launch
                 }
-                val deadline = System.currentTimeMillis() + 6 * 60 * 1000L
-                while (System.currentTimeMillis() < deadline) {
-                    delay(3_000)
-                    val poll = sendAuthorizedRequest { accessToken ->
-                        AndroidHttpClient.instance.get(webApiUrl("/api/ingest?job_id=$jobId")) {
-                            header("Authorization", "Bearer $accessToken")
-                        }
-                    } ?: continue
-                    val pollText = poll.bodyAsText()
-                    if (poll.status.value !in 200..299 || !isJsonObject(pollText)) continue
-                    val status = apiJson.parseToJsonElement(pollText).jsonObject["status"]
-                        ?.jsonPrimitive?.contentOrNull
-                    if (status == "done" || status == "failed") break
-                }
                 _uiState.update { it.copy(reingestingSourceId = null) }
                 loadSources()
-                workspaceId.value?.let { syncPagesInternal(it, forceSync = true) }
+                loadIngestJobs()
             } catch (e: Exception) {
                 _uiState.update {
                     it.copy(
@@ -1337,6 +1487,11 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
     fun ingestText(title: String, content: String, autoRoute: Boolean = false, onDone: (Boolean) -> Unit) {
         viewModelScope.launch {
             val wsId = workspaceId.value ?: return@launch
+            if (content.toByteArray(Charsets.UTF_8).size.toLong() > MAX_IMPORT_BYTES) {
+                _uiState.update { it.copy(syncError = str(R.string.error_import_file_too_large)) }
+                onDone(false)
+                return@launch
+            }
             _uiState.update {
                 it.copy(
                     ingestLoading = true,
@@ -1377,6 +1532,100 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun ingestFile(
+        uri: Uri,
+        title: String,
+        mimeType: String,
+        autoRoute: Boolean = true,
+        onDone: (Boolean) -> Unit,
+    ) {
+        viewModelScope.launch {
+            val wsId = workspaceId.value ?: return@launch
+            _uiState.update {
+                it.copy(
+                    ingestLoading = true,
+                    ingestProgress = 0,
+                    ingestRoutedName = null,
+                    ingestRoutedCreated = false,
+                )
+            }
+            try {
+                val byteSize = countImportBytes(uri)
+                val safeTitle = title
+                    .ifBlank { str(R.string.wiki_imported_file) }
+                    .toSafeUploadName()
+                    .withImportExtension(mimeType)
+                val response = sendAuthorizedRequest { accessToken ->
+                    AndroidHttpClient.instance.post(webApiUrl("/api/ingest")) {
+                        header("Authorization", "Bearer $accessToken")
+                        header("x-llm-wiki-locale", currentUiLocale())
+                        setBody(MultiPartFormDataContent(formData {
+                            append("kind", "file")
+                            append("title", safeTitle)
+                            if (autoRoute) {
+                                append("auto_route", "true")
+                                append("fallback_workspace_id", wsId)
+                            } else {
+                                append("workspace_id", wsId)
+                            }
+                            _uiState.value.selectedProfileId?.let { append("profile_id", it) }
+                            val contentType = safeTitle.toImportMimeType(mimeType)
+                            append(
+                                "file",
+                                ChannelProvider(byteSize) {
+                                    val stream = getApplication<Application>().contentResolver.openInputStream(uri)
+                                        ?: throw IllegalArgumentException("Unable to open selected file")
+                                    CountingImportInputStream(stream).toByteReadChannel()
+                                },
+                                Headers.build {
+                                    append(
+                                        HttpHeaders.ContentDisposition,
+                                        "form-data; name=\"file\"; filename=\"" + safeTitle + "\"",
+                                    )
+                                    append(HttpHeaders.ContentType, contentType)
+                                },
+                            )
+                        }))
+                    }
+                } ?: run {
+                    _uiState.update { it.copy(syncError = unauthorizedMessage()) }
+                    onDone(false)
+                    return@launch
+                }
+                handleIngestResult(wsId, response.status.value, response.bodyAsText(), onDone)
+            } catch (e: ImportTooLargeException) {
+                _uiState.update { it.copy(syncError = str(R.string.error_import_file_too_large)) }
+                onDone(false)
+            } catch (e: Exception) {
+                val message = if (e.hasImportTooLargeCause()) {
+                    str(R.string.error_import_file_too_large)
+                } else {
+                    e.toUserFacingMessage(str(R.string.error_import_file_unreadable))
+                }
+                _uiState.update { it.copy(syncError = message) }
+                onDone(false)
+            } finally {
+                _uiState.update { it.copy(ingestLoading = false, ingestProgress = 0) }
+            }
+        }
+    }
+
+    private suspend fun countImportBytes(uri: Uri): Long = withContext(Dispatchers.IO) {
+        val stream = getApplication<Application>().contentResolver.openInputStream(uri)
+            ?: throw IllegalArgumentException("Unable to open selected file")
+        stream.use { input ->
+            val buffer = ByteArray(32 * 1024)
+            var total = 0L
+            while (true) {
+                val read = input.read(buffer)
+                if (read < 0) break
+                total += read
+                if (total > MAX_IMPORT_BYTES) throw ImportTooLargeException()
+            }
+            total
+        }
+    }
+
     private suspend fun handleIngestResult(
         wsId: String,
         statusCode: Int,
@@ -1394,73 +1643,38 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
 
-        // Async ingest protocol: server responds { jobId, status: "running" } right away
-        // and runs the LLM pipeline in the background. Poll until the job is terminal —
-        // the request no longer blocks for minutes, so backgrounding the app is safe.
+        // Async ingest protocol: the server owns the queue. Keep the client request
+        // short and let the durable job list/poller report progress after this returns.
         val bodyJson = if (isJsonObject(raw)) {
             runCatching { apiJson.parseToJsonElement(raw).jsonObject }.getOrNull()
         } else null
-        val jobId = bodyJson?.get("jobId")?.jsonPrimitive?.contentOrNull
         val initialStatus = bodyJson?.get("status")?.jsonPrimitive?.contentOrNull
+        val routedWorkspaceId = bodyJson?.get("routed_workspace_id")?.jsonPrimitive?.contentOrNull
+        val jobId = bodyJson?.get("jobId")?.jsonPrimitive?.contentOrNull
+        if (bodyJson == null || jobId.isNullOrBlank() || initialStatus.isNullOrBlank()) {
+            _uiState.update { it.copy(syncError = nonJsonApiMessage(str(R.string.error_op_ingest))) }
+            onDone(false)
+            return
+        }
         // Auto-routed ingest: surface which workspace the AI picked
         val routedCreated = bodyJson?.get("routed_workspace_created")?.jsonPrimitive?.booleanOrNull ?: false
         bodyJson?.get("routed_workspace_name")?.jsonPrimitive?.contentOrNull?.let { routedName ->
             _uiState.update { it.copy(ingestRoutedName = routedName, ingestRoutedCreated = routedCreated) }
         }
 
-        if (jobId != null && initialStatus != "done") {
-            val error = pollIngestJob(jobId)
-            if (error != null) {
-                _uiState.update { it.copy(syncError = error) }
-                onDone(false)
-                return
-            }
-        }
-
         _uiState.update { it.copy(syncError = null) }
-        // Force full sync and content reload so the UI reflects ingest results immediately
-        syncPagesInternal(wsId, forceSync = true)
-        selectDefaultPageIfNeeded(wsId)
-        // Routing created a workspace server-side — the drawer must list it
-        if (routedCreated) refreshWorkspaces(preferredWorkspaceId = wsId, syncSelected = false)
-        onDone(true)
-    }
-
-    /** Polls the ingest job until done/failed. Returns null on success, error message otherwise. */
-    private suspend fun pollIngestJob(jobId: String): String? {
-        val deadline = System.currentTimeMillis() + 6 * 60 * 1000L // server budget 300s + buffer
-        var consecutiveFailures = 0
-        while (System.currentTimeMillis() < deadline) {
-            delay(3_000)
-            try {
-                val response = sendAuthorizedRequest { accessToken ->
-                    AndroidHttpClient.instance.get(webApiUrl("/api/ingest?job_id=$jobId")) {
-                        header("Authorization", "Bearer $accessToken")
-                    }
-                } ?: return unauthorizedMessage()
-                val text = response.bodyAsText()
-                if (response.status.value !in 200..299) {
-                    if (++consecutiveFailures >= 5) return parseApiError(text, str(R.string.error_op_ingest))
-                    continue
-                }
-                consecutiveFailures = 0
-                if (!isJsonObject(text)) continue
-                val obj = apiJson.parseToJsonElement(text).jsonObject
-                when (obj["status"]?.jsonPrimitive?.contentOrNull) {
-                    "done" -> return null
-                    "failed" -> return obj["error"]?.jsonPrimitive?.contentOrNull
-                        ?.takeIf { it.isNotBlank() } ?: str(R.string.error_op_ingest)
-                    else -> {
-                        // Still running — surface live cascade progress
-                        val touched = (obj["touched_pages"] as? kotlinx.serialization.json.JsonArray)?.size ?: 0
-                        if (touched > 0) _uiState.update { it.copy(ingestProgress = touched) }
-                    }
-                }
-            } catch (e: Exception) {
-                if (++consecutiveFailures >= 5) return e.toUserFacingMessage(str(R.string.error_op_ingest))
-            }
+        val targetWorkspaceId = routedWorkspaceId ?: wsId
+        if (targetWorkspaceId != wsId || routedCreated) {
+            // The old client ignored routed_workspace_id and kept showing the fallback
+            // workspace. Follow the server's decision, including a newly created one.
+            refreshWorkspaces(preferredWorkspaceId = targetWorkspaceId, syncSelected = true)
+        } else if (initialStatus == "done") {
+            // A duplicate source can be returned as already done/unchanged.
+            syncPagesInternal(targetWorkspaceId, forceSync = true)
+            selectDefaultPageIfNeeded(targetWorkspaceId)
         }
-        return getApplication<Application>().getString(R.string.error_network_timeout)
+        loadIngestJobs()
+        onDone(true)
     }
 
     private fun refreshWorkspaces(
@@ -1492,6 +1706,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 workspaceId.value = targetId
                 persistLastWorkspace(workspace)
+                if (targetId != null) loadIngestJobs()
 
                 if (targetId != null) {
                     if (syncSelected || targetId != previousId) {
@@ -1828,45 +2043,77 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
     }
 }
 
-private data class StreamMeta(
-    val text: String,
-    val citedSlugs: List<String>,
-    val proposals: List<ActionProposal>,
-)
+private class ImportTooLargeException : Exception()
 
-@kotlinx.serialization.Serializable
-private data class ProposalWire(
-    val action: String,
-    val params: Map<String, String> = emptyMap(),
-    val label: String = "",
-)
+private class CountingImportInputStream(input: InputStream) : FilterInputStream(input) {
+    private var bytesRead = 0L
 
-/**
- * Parses trailing NUL-delimited metadata blocks appended to the query stream
- * (NUL + CITATIONS + NUL + json, then NUL + ACTIONS + NUL + json).
- * Unknown block names are ignored for forward compatibility.
- */
-private fun parseStreamMeta(raw: String): StreamMeta {
-    val nul = 0.toChar()
-    val blockRegex = Regex("$nul([A-Z_]+)$nul")
-    val matches = blockRegex.findAll(raw).toList()
-    if (matches.isEmpty()) return StreamMeta(raw, emptyList(), emptyList())
-
-    val text = raw.substring(0, matches.first().range.first)
-    var cited: List<String> = emptyList()
-    var proposals: List<ActionProposal> = emptyList()
-    matches.forEachIndexed { i, match ->
-        val start = match.range.last + 1
-        val end = if (i + 1 < matches.size) matches[i + 1].range.first else raw.length
-        val jsonPart = raw.substring(start, end).trim()
-        runCatching {
-            when (match.groupValues[1]) {
-                "CITATIONS" -> cited = Json.decodeFromString<List<String>>(jsonPart)
-                "ACTIONS" -> proposals = Json { ignoreUnknownKeys = true }
-                    .decodeFromString<List<ProposalWire>>(jsonPart)
-                    .map { ActionProposal(action = it.action, params = it.params, label = it.label) }
-            }
-        }
+    override fun read(): Int {
+        val value = super.read()
+        if (value >= 0) count(1)
+        return value
     }
-    return StreamMeta(text, cited, proposals)
+
+    override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
+        val readCount = super.read(buffer, offset, length)
+        if (readCount > 0) count(readCount)
+        return readCount
+    }
+
+    private fun count(amount: Int) {
+        bytesRead += amount
+        if (bytesRead > MAX_IMPORT_BYTES) throw ImportTooLargeException()
+    }
+}
+
+private fun Throwable.hasImportTooLargeCause(): Boolean =
+    generateSequence(this) { it.cause }.any { it is ImportTooLargeException }
+
+private fun String.toSafeUploadName(): String =
+    trim()
+        .replace(Regex("[\\\"\\r\\n\\\\/]"), "_")
+        .take(120)
+        .ifBlank { "imported-file" }
+
+private fun String.toImportMimeType(declaredMime: String): String {
+    val extensionMime = when (substringAfterLast('.', missingDelimiterValue = "").lowercase()) {
+        "txt", "md", "markdown" -> "text/plain"
+        "pdf" -> "application/pdf"
+        "docx" -> "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        "pptx" -> "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        "epub" -> "application/epub+zip"
+        "png" -> "image/png"
+        "jpg", "jpeg" -> "image/jpeg"
+        "webp" -> "image/webp"
+        "gif" -> "image/gif"
+        else -> null
+    }
+    if (extensionMime != null) return extensionMime
+    return declaredMime.substringBefore(';').trim().lowercase().ifBlank { "application/octet-stream" }
+}
+
+private fun String.withImportExtension(declaredMime: String): String {
+    val extension = substringAfterLast('.', missingDelimiterValue = "").lowercase()
+    val known = setOf("txt", "md", "markdown", "pdf", "docx", "pptx", "epub", "png", "jpg", "jpeg", "webp", "gif")
+    if (extension in known) return this
+    val fallback = when (declaredMime.substringBefore(';').trim().lowercase()) {
+        "text/plain" -> "txt"
+        "text/markdown" -> "md"
+        "application/pdf" -> "pdf"
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document" -> "docx"
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation" -> "pptx"
+        "application/epub+zip" -> "epub"
+        "image/png" -> "png"
+        "image/jpeg" -> "jpg"
+        "image/webp" -> "webp"
+        "image/gif" -> "gif"
+        else -> null
+    }
+    if (fallback == null) return this
+    val baseLength = (120 - fallback.length - 1).coerceAtLeast(1)
+    return buildString {
+        append(take(baseLength).trimEnd('.'))
+        append('.')
+        append(fallback)
+    }
 }

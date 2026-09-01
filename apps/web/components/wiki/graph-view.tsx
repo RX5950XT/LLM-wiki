@@ -1,10 +1,11 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Crosshair } from 'lucide-react';
+import { ChevronDown, ChevronUp, Crosshair } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { createClient } from '@/lib/supabase/client';
 import { canonicalWikiAlias } from '@/lib/wiki/slug';
+import type { GraphInsights } from '@/lib/graph/insights';
 
 interface GraphNode {
   id: string;
@@ -20,6 +21,25 @@ interface GraphLink {
 interface GraphData {
   nodes: GraphNode[];
   links: GraphLink[];
+}
+
+function isGraphInsights(value: unknown): value is GraphInsights {
+  if (!value || typeof value !== 'object') return false;
+  const data = value as Partial<GraphInsights>;
+  const counts = data.counts;
+  if (!counts || typeof counts !== 'object') return false;
+  const countKeys = ['pages', 'links', 'orphans', 'communities', 'bridges', 'missingLinks'] as const;
+  return (
+    countKeys.every((key) => Number.isInteger(counts[key]) && counts[key] >= 0) &&
+    Array.isArray(data.orphans) &&
+    Array.isArray(data.communities) &&
+    Array.isArray(data.bridges) &&
+    Array.isArray(data.missingLinks)
+  );
+}
+
+function insightPageLabel(page: { slug: string; title: string | null }): string {
+  return page.title?.trim() || page.slug;
 }
 
 interface GraphViewProps {
@@ -89,6 +109,12 @@ export function GraphView({ workspaceId, activePage, onNodeClick, refreshKey = 0
   const containerRef = useRef<HTMLDivElement>(null);
   const [graphData, setGraphData] = useState<GraphData>({ nodes: [], links: [] });
   const [loading, setLoading] = useState(true);
+  const [graphError, setGraphError] = useState(false);
+  const [insights, setInsights] = useState<GraphInsights | null>(null);
+  const [insightsLoading, setInsightsLoading] = useState(true);
+  const [insightsError, setInsightsError] = useState(false);
+  const [showInsights, setShowInsights] = useState(false);
+  const [graphRetryKey, setGraphRetryKey] = useState(0);
   const [size, setSize] = useState<{ width: number; height: number } | null>(null);
   const [hiddenKinds, setHiddenKinds] = useState<Set<KindGroup>>(new Set());
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -103,6 +129,7 @@ export function GraphView({ workspaceId, activePage, onNodeClick, refreshKey = 0
   const positionsRef = useRef(new Map<string, { x: number; y: number }>());
   const didFitRef = useRef(false);
   const hasLoadedRef = useRef(false);
+  const graphHasDataRef = useRef(false);
   const rootContainerRef = useRef<HTMLDivElement | null>(null);
   // Read inside the canvas painter, which is created once — a ref keeps filtering
   // instant instead of tearing the force simulation down and re-settling it.
@@ -118,7 +145,8 @@ export function GraphView({ workspaceId, activePage, onNodeClick, refreshKey = 0
       // Only the first load blanks the panel. A refresh (a page written while the
       // graph is open) must not swap the canvas for a spinner and back — that
       // unmounts the force graph and loses both the layout and the camera.
-      if (!hasLoadedRef.current) setLoading(true);
+      if (!hasLoadedRef.current || !graphHasDataRef.current) setLoading(true);
+      setGraphError(false);
       try {
         const [pagesRes, linksRes] = await Promise.all([
           supabase
@@ -135,6 +163,7 @@ export function GraphView({ workspaceId, activePage, onNodeClick, refreshKey = 0
         ]);
 
         if (cancelled) return;
+        if (pagesRes.error || linksRes.error) throw new Error('graph data unavailable');
 
         const nodes: GraphNode[] = (pagesRes.data ?? []).map((p) => ({
           id: p.slug as string,
@@ -172,6 +201,10 @@ export function GraphView({ workspaceId, activePage, onNodeClick, refreshKey = 0
         }
 
         setGraphData({ nodes, links });
+        graphHasDataRef.current = true;
+      } catch (error) {
+        console.error('[graph] base graph load failed', { workspaceId, error });
+        if (!cancelled) setGraphError(true);
       } finally {
         if (!cancelled) {
           hasLoadedRef.current = true;
@@ -182,11 +215,49 @@ export function GraphView({ workspaceId, activePage, onNodeClick, refreshKey = 0
 
     load();
     return () => { cancelled = true; };
-  }, [workspaceId, refreshKey]);
+  }, [workspaceId, refreshKey, graphRetryKey]);
+
+  // Insights are served by the owner-scoped API so the analysis stays consistent
+  // with other graph consumers while the canvas can keep its settled coordinates.
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadInsights() {
+      setInsightsLoading(true);
+      setInsightsError(false);
+      try {
+        const response = await fetch(
+          `/api/graph/insights?workspace_id=${encodeURIComponent(workspaceId)}`,
+          { cache: 'no-store' },
+        );
+        if (!response.ok) throw new Error('insights request failed');
+        const body: unknown = await response.json();
+        if (
+          !body ||
+          typeof body !== 'object' ||
+          (body as { success?: unknown }).success !== true ||
+          !isGraphInsights((body as { data?: unknown }).data)
+        ) {
+          throw new Error('invalid insights response');
+        }
+        if (!cancelled) setInsights((body as { data: GraphInsights }).data);
+      } catch {
+        if (!cancelled) setInsightsError(true);
+      } finally {
+        if (!cancelled) setInsightsLoading(false);
+      }
+    }
+
+    loadInsights();
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId, refreshKey, graphRetryKey]);
 
   // A different workspace is a different map: keep neither its coordinates nor its camera.
   useEffect(() => {
     hasLoadedRef.current = false;
+    graphHasDataRef.current = false;
     positionsRef.current.clear();
     didFitRef.current = false;
   }, [workspaceId]);
@@ -477,10 +548,37 @@ export function GraphView({ workspaceId, activePage, onNodeClick, refreshKey = 0
     [],
   );
 
+  const graphErrorNotice = (
+    <div
+      className="flex max-w-[min(22rem,calc(100vw-1.5rem))] items-center justify-between gap-2 rounded-xl border px-3 py-2 text-xs shadow-lg"
+      style={{ background: 'var(--bg-2)', borderColor: 'var(--border)', color: 'var(--fg)' }}
+      role="alert"
+    >
+      <span>{t('loadError')}</span>
+      <button
+        type="button"
+        onClick={() => setGraphRetryKey((key) => key + 1)}
+        disabled={loading}
+        className="min-h-11 shrink-0 rounded-md border px-2 font-medium transition-opacity hover:opacity-75 focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+        style={{ borderColor: 'var(--border)', color: 'var(--fg)' }}
+      >
+        {t('retry')}
+      </button>
+    </div>
+  );
+
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center text-sm" style={{ color: 'var(--fg-muted)' }}>
         {t('loading')}
+      </div>
+    );
+  }
+
+  if (graphError && graphData.nodes.length === 0) {
+    return (
+      <div className="flex h-full items-center justify-center px-6 text-center">
+        {graphErrorNotice}
       </div>
     );
   }
@@ -502,9 +600,25 @@ export function GraphView({ workspaceId, activePage, onNodeClick, refreshKey = 0
     { kind: 'other', label: t('legendOther') },
   ];
 
+  const renderInsightPage = (page: { slug: string; title: string | null }) => (
+    <button
+      key={page.slug}
+      type="button"
+      onClick={() => onNodeClick?.(page.slug)}
+      disabled={!onNodeClick}
+      className="flex min-h-11 min-w-0 flex-col items-start rounded-md px-2 py-1 text-left text-xs transition-opacity hover:opacity-75 focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-default disabled:opacity-70"
+      style={{ color: 'var(--fg)' }}
+      title={page.slug}
+    >
+      <span className="max-w-full truncate">{insightPageLabel(page)}</span>
+      {page.title && <span className="max-w-full truncate text-[10px]" style={{ color: 'var(--fg-muted)' }}>{page.slug}</span>}
+    </button>
+  );
+
   return (
     <div className="relative h-full w-full">
       <div ref={containerRef} className="h-full w-full" />
+      {graphError && <div className="absolute right-3 top-3 z-20">{graphErrorNotice}</div>}
 
       {/* Legend and filter are the same control: the colour key is the switch. */}
       <div
@@ -521,7 +635,7 @@ export function GraphView({ workspaceId, activePage, onNodeClick, refreshKey = 0
               type="button"
               onClick={() => toggleKind(kind)}
               aria-pressed={!off}
-              className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] transition-opacity hover:opacity-80"
+              className="flex min-h-11 min-w-11 items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] transition-opacity hover:opacity-80 focus-visible:outline-2 focus-visible:outline-offset-2"
               style={{
                 background: off ? 'transparent' : 'var(--bg)',
                 color: off ? 'var(--fg-muted)' : 'var(--fg)',
@@ -542,11 +656,12 @@ export function GraphView({ workspaceId, activePage, onNodeClick, refreshKey = 0
       </div>
 
       {/* Readout: what the graph is showing, and how much of it is unconnected. */}
-      <div
-        className="absolute top-3 left-3 flex items-center gap-2 rounded-xl border px-2.5 py-1.5 text-[11px]"
-        style={{ background: 'var(--bg-2)', borderColor: 'var(--border)', color: 'var(--fg-muted)' }}
-      >
-        <span>{t('stats', { pages: graphData.nodes.length, links: graphData.links.length })}</span>
+      <div className="absolute top-3 left-3 z-10 flex max-w-[calc(100%-1.5rem)] flex-col items-start gap-1.5">
+        <div
+          className="flex flex-wrap items-center gap-2 rounded-xl border px-2.5 py-1.5 text-[11px]"
+          style={{ background: 'var(--bg-2)', borderColor: 'var(--border)', color: 'var(--fg-muted)' }}
+        >
+          <span aria-live="polite">{t('stats', { pages: graphData.nodes.length, links: graphData.links.length })}</span>
         {orphanCount > 0 && (
           <span
             className="rounded px-1.5 py-0.5"
@@ -555,16 +670,146 @@ export function GraphView({ workspaceId, activePage, onNodeClick, refreshKey = 0
             {t('orphans', { count: orphanCount })}
           </span>
         )}
-        <button
-          type="button"
-          onClick={zoomToFit}
-          className="ml-1 rounded p-1 transition-opacity hover:opacity-70"
-          style={{ color: 'var(--fg)' }}
-          aria-label={t('zoomToFit')}
-          title={t('zoomToFit')}
-        >
-          <Crosshair size={12} />
-        </button>
+          <button
+            type="button"
+            onClick={() => setShowInsights((visible) => !visible)}
+            className="min-h-11 rounded-md px-2 text-[11px] transition-opacity hover:opacity-75 focus-visible:outline-2 focus-visible:outline-offset-2"
+            style={{ color: 'var(--fg)', border: '1px solid var(--border)' }}
+            aria-expanded={showInsights}
+            aria-controls="graph-insights-panel"
+            aria-label={showInsights ? t('insightsClose') : t('insightsOpen')}
+          >
+            <span className="inline-flex items-center gap-1">
+              {t('insights')}
+              {showInsights ? <ChevronUp size={12} aria-hidden="true" /> : <ChevronDown size={12} aria-hidden="true" />}
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={zoomToFit}
+            className="ml-1 min-h-11 min-w-11 rounded p-1 transition-opacity hover:opacity-70 focus-visible:outline-2 focus-visible:outline-offset-2"
+            style={{ color: 'var(--fg)' }}
+            aria-label={t('zoomToFit')}
+            title={t('zoomToFit')}
+          >
+            <Crosshair size={12} />
+          </button>
+        </div>
+
+        {showInsights && (
+          <section
+            id="graph-insights-panel"
+            aria-label={t('insights')}
+            className="w-[min(25rem,calc(100vw-1.5rem))] max-h-[min(70vh,34rem)] overflow-y-auto rounded-xl border p-3 text-xs shadow-lg"
+            style={{ background: 'var(--bg-2)', borderColor: 'var(--border)', color: 'var(--fg)' }}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="font-medium">{t('insightsCounts')}</h3>
+              {insightsLoading && (
+                <span style={{ color: 'var(--fg-muted)' }} aria-live="polite">{t('insightsLoading')}</span>
+              )}
+            </div>
+
+            {insightsError && (
+              <div
+                className="mt-2 flex items-center justify-between gap-2 rounded-md border px-2 py-1.5"
+                style={{ borderColor: 'var(--border)', color: 'var(--fg)', background: 'var(--bg)' }}
+                role="alert"
+              >
+                <span>{t('insightsError')}</span>
+                <button
+                  type="button"
+                  onClick={() => setGraphRetryKey((key) => key + 1)}
+                  disabled={insightsLoading}
+                  className="min-h-11 shrink-0 rounded-md px-2 font-medium transition-opacity hover:opacity-75 focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                  style={{ border: '1px solid currentColor' }}
+                >
+                  {t('insightsRetry')}
+                </button>
+              </div>
+            )}
+
+            {insights && (
+              <>
+                <div className="mt-2 grid grid-cols-2 gap-1.5" aria-live="polite">
+                  <span>{t('insightsPages', { count: insights.counts.pages })}</span>
+                  <span>{t('insightsLinks', { count: insights.counts.links })}</span>
+                  <span>{t('insightsOrphans', { count: insights.counts.orphans })}</span>
+                  <span>{t('insightsGroups', { count: insights.counts.communities })}</span>
+                  <span>{t('insightsBridges', { count: insights.counts.bridges })}</span>
+                  <span>{t('insightsMissingLinks', { count: insights.counts.missingLinks })}</span>
+                </div>
+
+                <div className="mt-3 space-y-3">
+                  <section aria-labelledby="graph-insights-orphans">
+                    <h4 id="graph-insights-orphans" className="font-medium" style={{ color: 'var(--fg-muted)' }}>
+                      {t('insightsOrphanList')}
+                    </h4>
+                    {insights.orphans.length > 0 ? (
+                      <div className="mt-1 flex flex-wrap gap-1">{insights.orphans.map(renderInsightPage)}</div>
+                    ) : (
+                      <p className="mt-1" style={{ color: 'var(--fg-muted)' }}>{t('insightsEmpty')}</p>
+                    )}
+                  </section>
+
+                  <section aria-labelledby="graph-insights-groups">
+                    <h4 id="graph-insights-groups" className="font-medium" style={{ color: 'var(--fg-muted)' }}>
+                      {t('insightsGroupList')}
+                    </h4>
+                    {insights.communities.length > 0 ? (
+                      <ol className="mt-1 space-y-1">
+                        {insights.communities.map((group, index) => (
+                          <li key={group.id} className="rounded-md border px-1.5 py-1" style={{ borderColor: 'var(--border)' }}>
+                            <span className="text-[10px]" style={{ color: 'var(--fg-muted)' }}>
+                              {t('insightsGroupNumber', { count: index + 1 })}
+                            </span>
+                            <div className="flex flex-wrap gap-1">{group.pages.map(renderInsightPage)}</div>
+                          </li>
+                        ))}
+                      </ol>
+                    ) : (
+                      <p className="mt-1" style={{ color: 'var(--fg-muted)' }}>{t('insightsEmpty')}</p>
+                    )}
+                  </section>
+
+                  <section aria-labelledby="graph-insights-bridges">
+                    <h4 id="graph-insights-bridges" className="font-medium" style={{ color: 'var(--fg-muted)' }}>
+                      {t('insightsBridgeList')}
+                    </h4>
+                    {insights.bridges.length > 0 ? (
+                      <div className="mt-1 flex flex-wrap gap-1">{insights.bridges.map(renderInsightPage)}</div>
+                    ) : (
+                      <p className="mt-1" style={{ color: 'var(--fg-muted)' }}>{t('insightsEmpty')}</p>
+                    )}
+                  </section>
+
+                  <section aria-labelledby="graph-insights-missing">
+                    <h4 id="graph-insights-missing" className="font-medium" style={{ color: 'var(--fg-muted)' }}>
+                      {t('insightsMissingList')}
+                    </h4>
+                    {insights.missingLinks.length > 0 ? (
+                      <ul className="mt-1 space-y-1">
+                        {insights.missingLinks.map((link) => (
+                          <li
+                            key={`${link.from_slug}:${link.to_slug}`}
+                            className="flex min-h-11 items-center gap-1 rounded-md px-2 py-1"
+                            style={{ color: 'var(--fg-muted)' }}
+                          >
+                            <span className="min-w-0 truncate" title={link.from_slug}>{link.from_slug}</span>
+                            <span aria-hidden="true">→</span>
+                            <span className="min-w-0 truncate" title={link.to_slug}>{link.to_slug}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="mt-1" style={{ color: 'var(--fg-muted)' }}>{t('insightsEmpty')}</p>
+                    )}
+                  </section>
+                </div>
+              </>
+            )}
+          </section>
+        )}
       </div>
     </div>
   );

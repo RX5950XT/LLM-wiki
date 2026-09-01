@@ -14,14 +14,17 @@ import {
   Import,
   AlertTriangle,
   X,
+  ExternalLink,
 } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import { parseCitations } from '@/lib/ai/citation-parser';
 import type { ActionProposal } from '@/lib/ai/tools';
+import type { RawSourceCitation } from '@/lib/ai/source-tools';
 import { isDriveReconnectError, reconnectGoogleDrive } from '@/lib/google/drive-reconnect';
 import { ImportDialog } from './import-dialog';
 
 type ProposalStatus = 'pending' | 'running' | 'done' | 'error' | 'dismissed';
+type QueryMode = 'standard' | 'faithful';
 
 interface MessageProposal extends ActionProposal {
   status: ProposalStatus;
@@ -34,6 +37,10 @@ interface Message {
   content: string;
   /** Slugs of wiki pages the LLM referenced to produce this answer */
   citedSlugs?: string[];
+  /** Sources actually read by the Faithful query tools */
+  rawCitations?: RawSourceCitation[];
+  /** Keep rendering rules stable when the user changes mode later. */
+  queryMode?: QueryMode;
   /** Destructive actions awaiting user confirmation */
   proposals?: MessageProposal[];
 }
@@ -62,6 +69,16 @@ interface ConversationPanelProps {
   onPageClick?: (slug: string) => void;
   /** The AI can create/rename/delete workspaces mid-chat — refresh the switcher */
   onWorkspacesChanged?: () => void;
+}
+
+function isSafeSourceUrl(value: string | null): value is string {
+  if (!value) return false;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'http:' || url.protocol === 'https:';
+  } catch {
+    return false;
+  }
 }
 
 function parseInternalWikiHref(href: string): string | null {
@@ -107,6 +124,7 @@ export function ConversationPanel({
 
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
+  const [queryMode, setQueryMode] = useState<QueryMode>('standard');
   const [showActionMenu, setShowActionMenu] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const actionMenuRef = useRef<HTMLDivElement>(null);
@@ -207,7 +225,10 @@ export function ConversationPanel({
       const assistantId = crypto.randomUUID();
       const allMessages = [...messages, userMsg];
 
-      setMessages([...allMessages, { id: assistantId, role: 'assistant', content: '' }]);
+      setMessages([
+        ...allMessages,
+        { id: assistantId, role: 'assistant', content: '', queryMode },
+      ]);
       setInput('');
       setMentionQuery(null);
       setIsLoading(true);
@@ -231,14 +252,18 @@ export function ConversationPanel({
             profile_id: selectedProfileId,
             current_slug: currentSlug,
             context_workspace_ids: taggedWorkspaces.map((w) => w.id),
+            query_mode: queryMode,
           }),
           signal: controller.signal,
         });
 
         if (!res.ok) {
           const bodyText = await res.text();
-          const message = bodyText || `Query failed: ${res.statusText}`;
-          if (res.status === 403 && isDriveReconnectError(message)) {
+          const message =
+            queryMode === 'faithful'
+              ? t('query.faithfulFailed')
+              : bodyText || `Query failed: ${res.statusText}`;
+          if (res.status === 403 && isDriveReconnectError(bodyText)) {
             await startDriveReconnect();
           }
           throw new Error(message);
@@ -264,7 +289,7 @@ export function ConversationPanel({
         }
 
         // After stream ends, parse citation + action blocks from full raw response
-        const { text, citedSlugs, proposals } = parseCitations(raw);
+        const { text, citedSlugs, proposals, rawCitations } = parseCitations(raw);
         setMessages((prev) =>
           prev.map((m) =>
             m.id === assistantId
@@ -272,26 +297,36 @@ export function ConversationPanel({
                   ...m,
                   content: text,
                   citedSlugs,
+                  rawCitations,
+                  queryMode,
                   proposals: proposals.map((p) => ({ ...p, status: 'pending' as const })),
                 }
               : m,
           ),
         );
-        // The AI may have created/renamed a workspace or written pages this turn
-        onWorkspacesChanged?.();
+        // Standard tools may have changed workspace metadata; Faithful has no write path.
+        if (queryMode === 'standard') onWorkspacesChanged?.();
       } catch (err) {
         if (err instanceof Error && err.name === 'AbortError') {
           // User pressed Stop — keep the partial answer instead of discarding it
           if (raw) {
-            const { text, citedSlugs } = parseCitations(raw);
+            const { text, citedSlugs, rawCitations } = parseCitations(raw);
             setMessages((prev) =>
-              prev.map((m) => (m.id === assistantId ? { ...m, content: text, citedSlugs } : m)),
+              prev.map((m) =>
+                m.id === assistantId ? { ...m, content: text, citedSlugs, rawCitations } : m,
+              ),
             );
           } else {
             setMessages((prev) => prev.filter((m) => m.id !== assistantId));
           }
         } else {
-          setError(err instanceof Error ? err : new Error('Unknown error'));
+          setError(
+            queryMode === 'faithful'
+              ? new Error(t('query.faithfulFailed'))
+              : err instanceof Error
+                ? err
+                : new Error('Unknown error'),
+          );
           setMessages((prev) => prev.filter((m) => m.id !== assistantId));
         }
       } finally {
@@ -308,8 +343,10 @@ export function ConversationPanel({
       selectedProfileId,
       currentSlug,
       taggedWorkspaces,
+      queryMode,
       startDriveReconnect,
       onWorkspacesChanged,
+      t,
     ],
   );
 
@@ -485,30 +522,84 @@ export function ConversationPanel({
               )}
             </div>
 
-            {/* Citations */}
-            {m.role === 'assistant' && m.citedSlugs && m.citedSlugs.length > 0 && (
-              <div className="flex flex-wrap gap-1 pt-0.5">
-                {m.citedSlugs.map((slug) => (
-                  <button
-                    key={slug}
-                    onClick={() => onPageClick?.(slug)}
-                    className="rounded px-1.5 py-0.5 text-xs transition-opacity hover:opacity-70"
-                    style={{
-                      background: 'var(--color-accent-glow)',
-                      color: 'var(--color-accent)',
-                      border: '1px solid var(--color-accent)',
-                      opacity: 0.9,
-                    }}
-                    title={slug}
-                  >
-                    {slug.split('/').at(-1)?.replace('.md', '') ?? slug}
-                  </button>
-                ))}
-              </div>
+            {m.role === 'assistant' && m.queryMode === 'faithful' && (
+              <span
+                className="inline-flex items-center rounded border px-1.5 py-0.5 text-[10px]"
+                style={{ background: 'var(--bg)', borderColor: 'var(--border)', color: 'var(--fg-muted)' }}
+                aria-label={t('query.faithfulBadge')}
+              >
+                {t('query.faithfulBadge')}
+              </span>
             )}
+
+            {/* Citations */}
+            {m.role === 'assistant' &&
+              ((m.citedSlugs && m.citedSlugs.length > 0) ||
+                (m.rawCitations && m.rawCitations.length > 0)) && (
+                <div className="flex flex-wrap gap-1 pt-0.5">
+                  {m.citedSlugs?.map((slug) => (
+                    <button
+                      key={slug}
+                      onClick={() => onPageClick?.(slug)}
+                      className="min-h-11 rounded px-2 py-1 text-xs transition-opacity hover:opacity-70"
+                      style={{
+                        background: 'var(--color-accent-glow)',
+                        color: 'var(--color-accent)',
+                        border: '1px solid var(--color-accent)',
+                        opacity: 0.9,
+                      }}
+                      title={slug}
+                    >
+                      {slug.split('/').at(-1)?.replace('.md', '') ?? slug}
+                    </button>
+                  ))}
+                  {m.rawCitations?.map((citation) => {
+                    const label = citation.title || citation.source_id;
+                    const lineRange = t('query.sourceLines', {
+                      start: citation.locator.line_start,
+                      end: citation.locator.line_end,
+                    });
+                    const chip = (
+                      <span
+                        className="inline-flex min-h-11 items-center gap-1 rounded border px-2 py-1 text-xs"
+                      style={{
+                          background: 'var(--bg)',
+                          color: 'var(--fg)',
+                          borderColor: 'var(--border)',
+                          opacity: 0.9,
+                        }}
+                        title={`${label} · ${lineRange}`}
+                      >
+                        <span className="max-w-48 truncate">{label}</span>
+                        <span className="whitespace-nowrap">{lineRange}</span>
+                        {isSafeSourceUrl(citation.url) && <ExternalLink size={11} aria-hidden="true" />}
+                      </span>
+                    );
+                    return isSafeSourceUrl(citation.url) ? (
+                      <a
+                        key={`${citation.source_id}:${citation.locator.line_start}:${citation.locator.line_end}`}
+                        href={citation.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        aria-label={`${label} · ${lineRange}`}
+                      >
+                        {chip}
+                      </a>
+                    ) : (
+                      <span
+                        key={`${citation.source_id}:${citation.locator.line_start}:${citation.locator.line_end}`}
+                        aria-label={`${label} · ${lineRange}`}
+                      >
+                        {chip}
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
 
             {/* Destructive-action confirmation cards */}
             {m.role === 'assistant' &&
+              m.queryMode !== 'faithful' &&
               m.proposals?.map((proposal, idx) =>
                 proposal.status === 'dismissed' ? null : (
                   <div
@@ -563,7 +654,10 @@ export function ConversationPanel({
               )}
 
             {/* File-back button (only for completed assistant messages with citations) */}
-            {m.role === 'assistant' && m.citedSlugs !== undefined && m.content.length > 0 && (
+            {m.role === 'assistant' &&
+              m.queryMode === 'standard' &&
+              m.citedSlugs !== undefined &&
+              m.content.length > 0 && (
               <button
                 onClick={() => handleFileBack(m)}
                 disabled={fileBackPendingId !== null}
@@ -638,7 +732,7 @@ export function ConversationPanel({
               type="button"
               onClick={() => setShowActionMenu((s) => !s)}
               disabled={isLoading}
-              className="flex h-full items-center gap-1 rounded-md border px-2.5 py-2 text-xs font-medium transition-all duration-100 hover:opacity-70 active:scale-95 disabled:opacity-40"
+              className="flex min-h-11 min-w-11 h-full items-center gap-1 rounded-md border px-2.5 py-2 text-xs font-medium transition-all duration-100 hover:opacity-70 active:scale-95 focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-40"
               style={{
                 background: 'var(--bg-2)',
                 borderColor: 'var(--border)',
@@ -646,12 +740,15 @@ export function ConversationPanel({
               }}
               title={t('query.actionMenu')}
               aria-label={t('query.actionMenu')}
+              aria-expanded={showActionMenu}
+              aria-controls="query-action-menu"
             >
               <Bot size={13} />
             </button>
 
             {showActionMenu && (
               <div
+                id="query-action-menu"
                 className="absolute bottom-full left-0 z-50 mb-1 w-60 overflow-hidden rounded-lg border shadow-lg"
                 style={{
                   background: 'var(--bg-2)',
@@ -662,16 +759,63 @@ export function ConversationPanel({
               >
                 <button
                   type="button"
+                  disabled={isLoading}
                   onClick={() => {
                     setShowActionMenu(false);
                     setShowImport(true);
                   }}
-                  className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-xs font-medium transition-all duration-100 hover:opacity-70"
+                  className="flex min-h-11 w-full items-center gap-2 px-3 py-2.5 text-left text-xs font-medium transition-all duration-100 hover:opacity-70 focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                   style={{ color: 'var(--fg)', borderBottom: '1px solid var(--border)' }}
                 >
                   <Import size={13} style={{ color: 'var(--color-accent)' }} />
                   {t('ingest.dialogTitle')}
                 </button>
+
+                <div className="border-b px-2 py-2" role="group" aria-label={t('query.queryMode')}>
+                  <div className="px-1 pb-1.5 text-xs font-medium" style={{ color: 'var(--fg-muted)' }}>
+                    {t('query.queryMode')}
+                  </div>
+                  <div className="grid grid-cols-2 gap-1" role="radiogroup" aria-label={t('query.queryMode')}>
+                    {(['standard', 'faithful'] as const).map((mode) => {
+                      const selected = queryMode === mode;
+                      const label = mode === 'standard' ? t('query.modeStandard') : t('query.modeFaithful');
+                      const hint = mode === 'standard' ? t('query.modeStandardHint') : t('query.modeFaithfulHint');
+                      return (
+                        <button
+                          key={mode}
+                          type="button"
+                          role="radio"
+                          aria-checked={selected}
+                          disabled={isLoading}
+                          title={hint}
+                          onClick={() => setQueryMode(mode)}
+                          className="min-h-11 rounded-md px-2 py-1.5 text-left text-xs transition-opacity hover:opacity-80 focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                          style={{
+                            color: 'var(--fg)',
+                            border: `1px solid ${selected ? 'var(--color-accent)' : 'var(--border)'}`,
+                            background: selected ? 'var(--color-accent-glow)' : 'transparent',
+                          }}
+                        >
+                          <span className="flex items-center gap-1.5 font-medium">
+                            <span
+                              className="inline-flex h-3 w-3 items-center justify-center rounded-full border"
+                              style={{ borderColor: selected ? 'var(--color-accent)' : 'var(--fg-muted)' }}
+                              aria-hidden="true"
+                            >
+                              {selected && (
+                                <span className="h-1.5 w-1.5 rounded-full" style={{ background: 'var(--color-accent)' }} />
+                              )}
+                            </span>
+                            {label}
+                          </span>
+                          <span className="mt-0.5 block text-[10px]" style={{ color: 'var(--fg-muted)' }}>
+                            {hint}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
 
                 {profiles.length > 0 && (
                   <>
@@ -684,11 +828,12 @@ export function ConversationPanel({
                         <button
                           key={p.id}
                           type="button"
+                          disabled={isLoading}
                           onClick={() => {
                             setSelectedProfileId(p.id);
                             setShowActionMenu(false);
                           }}
-                          className="flex w-full flex-col px-3 py-2 text-left text-xs transition-all duration-100 hover:opacity-70"
+                          className="flex min-h-11 w-full flex-col px-3 py-2 text-left text-xs transition-all duration-100 hover:opacity-70 focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                           style={{
                             color: 'var(--fg)',
                             borderLeft: isSelected ? '3px solid oklch(65% 0.22 145)' : '3px solid transparent',
@@ -776,7 +921,7 @@ export function ConversationPanel({
             <button
               type="button"
               onClick={stopStreaming}
-              className="rounded-md p-2"
+                className="min-h-11 min-w-11 rounded-md p-2 focus-visible:outline-2 focus-visible:outline-offset-2"
               style={{ background: 'var(--bg-2)', color: 'var(--fg)', border: '1px solid var(--border)' }}
               aria-label={t('query.stop')}
               title={t('query.stop')}
@@ -787,16 +932,17 @@ export function ConversationPanel({
             <button
               type="submit"
               disabled={driveReconnectPending || !input.trim()}
-              className="rounded-md p-2 disabled:opacity-50"
+              className="min-h-11 min-w-11 rounded-md p-2 focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-50"
               style={{ background: 'var(--color-accent)', color: 'oklch(10% 0.015 250)' }}
             >
               <Send size={14} />
             </button>
           )}
         </div>
-        {selectedProfile && (
+        {(selectedProfile || queryMode) && (
           <p className="mt-1 truncate text-xs" style={{ color: 'var(--fg-muted)', opacity: 0.7 }}>
-            {selectedProfile.name}
+            {selectedProfile?.name} {selectedProfile ? '· ' : ''}
+            {queryMode === 'standard' ? t('query.modeStandard') : t('query.modeFaithful')}
           </p>
         )}
       </form>

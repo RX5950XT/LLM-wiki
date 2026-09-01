@@ -128,6 +128,7 @@ GOOGLE_OAUTH_CLIENT_SECRET=
 - **Phase 14** ✅（2026-07-13）：對話中心化 + 跨工作區 AI——移除筆記 UI（資料保留）、跨工作區 AI 工具（建立/改名/刪除工作區、跨工作區搬頁）、破壞性操作確認卡片（`\x00ACTIONS\x00` + `/api/agent/execute`）、對話預設帶當前頁 context + `@` 工作區標記、統一導入入口（AI 自動判斷目標工作區）、自動分類＋去重複 job（`/api/organize` + migration `0015` agent_jobs，已套用 production）、LLM profile 編輯、效能修復（Drive 呼叫移出 server component 請求路徑）、工作區拖曳 FLIP 動畫、Graph Obsidian 化。細節見 CLAUDE.md。
 
 - **Phase 16** ✅（2026-07-13）：維護合一 + AI 真權限——健康檢查與整理去重併成單一按鈕／單一 pipeline（`/api/organize`），**不再產生報告頁**；維護 job 改 `confirmDestructive: false` 並保留 workspace 生命週期工具（先前 gate 讓刪除全被拒絕＝「整理去重沒作用」的根因），新增 `reorderWorkspaces` 工具；刪除 `/api/lint`、`vercel.json` cron、`CRON_SECRET`；`_schema/lint.md` 改為「檢查並直接修正」清單並注入維護 pipeline。
+- **Phase 17** ✅（2026-09-01）：六項知識編譯能力——兩階段可恢復 Ingest queue（SHA unchanged、pause/resume/retry、checkpoint）、安全 allowlist/fencing/CAS 寫入、多格式 PDF/DOCX/PPTX/EPUB/text/image（2 MiB）、Faithful raw-source query、Graph Insights；Web/Android 對齊，Android APK `0.7.0`（versionCode `7`）。production `recoverable_ingest` migration 已套用並驗證欄位與索引。
 
 ## 關鍵功能
 
@@ -143,6 +144,12 @@ GOOGLE_OAUTH_CLIENT_SECRET=
 - LLM 可回 `NEW: <名稱>` → server 直接建新工作區並導入（上限 12 個、同名沿用、整庫還沒有知識頁時不建）；回應多帶 `routed_workspace_created`，Web/Android 收到就刷新工作區選單
 - `/api/ingest` 找不到工作區綁定的 profile 時，退回 owner 的 `is_default` profile（production 的工作區普遍沒綁 profile）
 - **去重靠 DB 頁面清單**：`runIngestPipeline` 把該工作區所有 wiki 頁（slug/kind/title，上限 400）注入 prompt，要求同主題改寫既有頁而非新建近似 slug；index.md 會漂移，不能當唯一依據
+
+### 六項知識編譯能力（Phase 17）
+- Ingest 先分析再寫入並自我審查；job 以 checkpoint、attempt fencing、pause/resume/retry 可恢復，來源 SHA unchanged 直接跳過。
+- ingest LLM 只拿 plan allowlist 工具；共用 writer 用 version/lock CAS 防止覆寫，跨 Drive/DB 失敗走補償。
+- parser 支援 PDF、DOCX、PPTX、EPUB、text/Markdown 與 PNG/JPEG/WebP/GIF，輸入與解壓資源受 2 MiB/資源上限約束。
+- Faithful 只讀 raw sources，citation 僅來自實際讀取；Graph Insights 提供孤立頁、群組、橋接頁、未解析連結，超限回錯而非空圖。
 
 ### 跨工作區 AI + 破壞性操作確認
 - `lib/ai/tools.ts` 的頁面工具都吃可選 `workspace_id`；`resolveScope()` 必帶 `.eq('owner_id', userId)`
@@ -249,6 +256,7 @@ Query API 文字串流結尾依序附加 `\x00CITATIONS\x00[...]`、`\x00ACTIONS
 - Android 語言切換需由 `AppCompatActivity` 在 `setContent` 前先套用已儲存 locale，且只在 `toLanguageTags()` 真正變動時呼叫 `AppCompatDelegate.setApplicationLocales()`，否則會造成切換失效或啟動閃黑
 - Android 呼叫 Web API 時要先用 `requireAccessToken()` 取 token；若目前 token 為空但 session 仍在，要先 refresh，再於 401 時再 refresh 重試一次，直接拿舊 access token 容易讓設定頁與 LLM profiles 同步失敗
 - Android 呼叫 Web API / Supabase PostgREST 時應先用 `requireAccessToken(forceRefresh = false)` 取現有 token；只有 token 為空或收到 401 才以 `forceRefresh=true` 重試。`refreshCurrentSession()` 必須透過共用 mutex 序列化，避免多個初始化流程同時 refresh 導致 refresh token 競爭並出現「登入狀態已失效」。
+- Android 六項能力目前以 APK `0.7.0`（versionCode `7`）提供；舊 APK 不含 Faithful、queue、多格式匯入與 Graph Insights UI。
 - Android Web API 錯誤解析要處理純文字 `Unauthorized`；部分 route（例如 `/api/query` stream）不一定回 JSON，需轉為本地化錯誤訊息
 - Android 對預期 JSON 的 Web API 回應不可只看 HTTP 2xx；Vercel 對未部署的 method/path 可能回 `200 text/html`，必須確認 body 是 JSON object 才能更新本機狀態
 - Android 讀取 LLM profiles 使用 `LlmProfileRepository` 直接查 Supabase `llm_profiles`（RLS + `owner_id`），不要用 Web API Bearer token 做列表同步；Web API 保留給需要 server-side 加密的 create/delete
@@ -300,6 +308,7 @@ Query API 文字串流結尾依序附加 `\x00CITATIONS\x00[...]`、`\x00ACTIONS
 - **深度重整靠 inventory 內容摘要 ＋ 深度任務書 prompt ＋ loop-until-dry ＋ `more_work` 自動接力（migration 0017）**，缺一就退化成「只刪重複頁就收工」。prompt 內不可出現「別讀太多頁」之類節省字眼。
 - **維護 job 的兩個必修坑（勿改回去）**：(1) 工具層 slug 解析必須走 `resolveExistingSlug()` 查 DB，不可盲目補 `.md`——舊資料存在沒有副檔名的 slug（`concepts/HBM`），硬補 `.md` 會讓這些頁永遠查不到，模型於是寫一個新 `X.md` 再刪掉同一個 `X.md`，空轉到被砍；(2) 工具迴圈要有 210s wall-clock 預算（`TOOL_LOOP_BUDGET_MS`），否則 Vercel 在 `maxDuration = 300s` 直接殺掉 invocation，job row 永遠停在 `running`，使用者只看到「Organize timed out 且沒有任何變化」。
 - **來源 re-ingest（Phase 15）**：`POST /api/sources/[id]/reingest` 讀 Drive 既有內容重跑 pipeline（不重抓 URL、不建重複 source），沿用 `/api/ingest?job_id=` 輪詢。Web/Android sources 列表每列「重新整合」按鈕。
+- **Recoverable ingest migration（Phase 17）**：production 已套用 `recoverable_ingest`；`sources` 有 `content_sha256/mime_type/byte_size`，`ingest_jobs` 有 `phase/checkpoint/attempt_count/source_sha256/result/updated_at`，並驗證 source hash unique 與每 workspace 單一 running job index。
 - Supabase DB migration 若本機 5432/6543 被擋，可從 Vercel/serverless 走 pooler：`aws-1-ap-southeast-1.pooler.supabase.com:6543`，user 格式 `postgres.<project-ref>`
 
 

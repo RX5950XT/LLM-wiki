@@ -1,10 +1,17 @@
 import type { ActionProposal } from '@/lib/ai/tools';
+import type { RawSourceCitation, SourceKind } from '@/lib/ai/source-tools';
+
+/** Model text cannot create a metadata delimiter; only the server may append one. */
+export function sanitizeModelTextChunk(chunk: string): string {
+  return chunk.replaceAll('\x00', '');
+}
 
 /**
  * Parse trailing NUL-delimited metadata blocks appended to a streamed query
  * response. The query API may append, in order:
  *   \x00CITATIONS\x00["entities/karpathy.md","concepts/rag.md"]
  *   \x00ACTIONS\x00[{"action":"delete_page","params":{...},"label":"..."}]
+ *   \x00RAW_CITATIONS\x00[{"source_id":"…","locator":{"line_start":1,"line_end":4}}]
  *
  * Unknown \x00NAME\x00 blocks are stripped and ignored so older clients keep
  * working when new blocks are introduced.
@@ -15,10 +22,12 @@ export function parseCitations(raw: string): {
   text: string;
   citedSlugs: string[];
   proposals: ActionProposal[];
+  rawCitations: RawSourceCitation[];
 } {
   let text = raw;
   let citedSlugs: string[] = [];
   let proposals: ActionProposal[] = [];
+  let rawCitations: RawSourceCitation[] = [];
 
   // Blocks are appended at the end; peel them off back-to-front.
   const blockPattern = /\x00([A-Z_]+)\x00/g;
@@ -26,7 +35,7 @@ export function parseCitations(raw: string): {
   for (const m of raw.matchAll(blockPattern)) {
     markers.push({ name: m[1]!, index: m.index!, length: m[0].length });
   }
-  if (markers.length === 0) return { text, citedSlugs, proposals };
+  if (markers.length === 0) return { text, citedSlugs, proposals, rawCitations };
 
   text = raw.slice(0, markers[0]!.index);
 
@@ -52,6 +61,8 @@ export function parseCitations(raw: string): {
             p.params != null &&
             typeof p.params === 'object',
         );
+      } else if (marker.name === 'RAW_CITATIONS' && Array.isArray(parsed)) {
+        rawCitations = parsed.filter(isRawSourceCitation);
       }
       // unknown block names: parsed but ignored
     } catch {
@@ -59,5 +70,31 @@ export function parseCitations(raw: string): {
     }
   }
 
-  return { text, citedSlugs, proposals };
+  return { text, citedSlugs, proposals, rawCitations };
+}
+
+function isRawSourceCitation(value: unknown): value is RawSourceCitation {
+  if (!value || typeof value !== 'object') return false;
+  const citation = value as Partial<RawSourceCitation> & {
+    locator?: Partial<RawSourceCitation['locator']>;
+  };
+  const locator = citation.locator;
+  return (
+    typeof citation.source_id === 'string' &&
+    citation.source_id.length > 0 &&
+    (typeof citation.title === 'string' || citation.title === null) &&
+    isSourceKind(citation.kind) &&
+    (typeof citation.url === 'string' || citation.url === null) &&
+    typeof citation.content_sha256 === 'string' &&
+    citation.content_sha256.length > 0 &&
+    !!locator &&
+    Number.isInteger(locator.line_start) &&
+    Number.isInteger(locator.line_end) &&
+    locator.line_start >= 1 &&
+    locator.line_end >= locator.line_start
+  );
+}
+
+function isSourceKind(value: unknown): value is SourceKind {
+  return value === 'url' || value === 'file' || value === 'text';
 }

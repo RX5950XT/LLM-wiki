@@ -18,7 +18,9 @@ export type UpdatedBy = 'llm' | 'human';
 
 export type SourceKind = 'url' | 'file' | 'text';
 
-export type IngestStatus = 'pending' | 'running' | 'done' | 'failed';
+export type IngestStatus = 'pending' | 'running' | 'paused' | 'done' | 'failed';
+export type IngestPhase = 'analysis' | 'writing' | 'review' | 'done';
+export type IngestResult = 'updated' | 'unchanged';
 
 export type LogKind = 'ingest' | 'query' | 'lint' | 'manual_edit';
 
@@ -56,6 +58,9 @@ export interface Source {
   title: string | null;
   url: string | null;
   drive_file_id: string | null;
+  content_sha256: string | null;
+  mime_type: string | null;
+  byte_size: number | null;
   metadata: Record<string, unknown> | null;
   created_at: Iso8601;
   ingested_at: Iso8601 | null;
@@ -87,11 +92,17 @@ export interface IngestJob {
   workspace_id: Uuid;
   source_id: Uuid;
   status: IngestStatus;
+  phase: IngestPhase;
   touched_pages: string[];
   profile_id: Uuid | null;
   error: string | null;
   started_at: Iso8601 | null;
   finished_at: Iso8601 | null;
+  checkpoint: Record<string, unknown>;
+  attempt_count: number;
+  source_sha256: string | null;
+  result: IngestResult | null;
+  updated_at: Iso8601;
 }
 
 export interface LogEntry {
@@ -104,10 +115,27 @@ export interface LogEntry {
 }
 
 export interface IngestPlan {
-  new_pages: string[];
-  updated_pages: string[];
+  people: string[];
+  concepts: string[];
+  evidence: string[];
   contradictions: Array<{ page: string; note: string }>;
+  target_pages: string[];
   summary: string;
+}
+
+export interface IngestReview {
+  written_pages: string[];
+  missing_pages: string[];
+  contradictions: Array<{ page: string; note: string }>;
+  issues: string[];
+  complete: boolean;
+  summary: string;
+}
+
+export interface IngestCheckpoint {
+  plan?: IngestPlan;
+  written_pages: string[];
+  review?: IngestReview;
 }
 
 export interface QueryCitation {

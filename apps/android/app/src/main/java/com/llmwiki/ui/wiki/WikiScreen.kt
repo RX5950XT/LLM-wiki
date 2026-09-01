@@ -54,6 +54,7 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
@@ -122,11 +123,26 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.llmwiki.R
 import com.llmwiki.data.parseDriveReconnectSource
 import com.llmwiki.data.LlmProfile
+import com.llmwiki.data.IngestJobRow
+import com.llmwiki.data.GraphInsights
 import com.llmwiki.data.SearchResult
 import com.llmwiki.data.SourceListItem
 import com.llmwiki.data.WorkspaceRow
 import com.llmwiki.data.room.PageEntity
 import kotlinx.coroutines.launch
+
+private val importMimeTypes = arrayOf(
+    "text/plain",
+    "text/markdown",
+    "application/pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "application/epub+zip",
+    "image/png",
+    "image/jpeg",
+    "image/webp",
+    "image/gif",
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -156,6 +172,8 @@ fun WikiScreen(
     var showWorkspaceMenu by remember { mutableStateOf(false) }
     var showHelpDialog by rememberSaveable { mutableStateOf(false) }
     var showSourcesDialog by rememberSaveable { mutableStateOf(false) }
+    var showIngestQueueDialog by rememberSaveable { mutableStateOf(false) }
+    var showGraphInsightsDialog by rememberSaveable { mutableStateOf(false) }
     var showMaintenanceConfirm by rememberSaveable { mutableStateOf(false) }
     var renameWorkspace by remember { mutableStateOf<WorkspaceRow?>(null) }
     var deleteWorkspace by remember { mutableStateOf<WorkspaceRow?>(null) }
@@ -173,26 +191,22 @@ fun WikiScreen(
     val configuration = LocalConfiguration.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val filePickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument(),
-    ) { uri ->
-        if (uri == null) return@rememberLauncherForActivityResult
-        val fileContent = readTextFromUri(context, uri)
-        if (fileContent.isNullOrBlank()) {
-            scope.launch {
-                snackbarHostState.showSnackbar(context.getString(R.string.wiki_snack_ingest_failed))
-            }
-            return@rememberLauncherForActivityResult
-        }
-        val fileName = readDisplayName(context, uri)
-            ?: context.getString(R.string.wiki_imported_file)
-        wikiViewModel.ingestText(fileName, fileContent) { success ->
-            scope.launch {
-                snackbarHostState.showSnackbar(
-                    context.getString(
-                        if (success) R.string.wiki_snack_ingest_started
-                        else R.string.wiki_snack_ingest_failed,
+        contract = ActivityResultContracts.OpenMultipleDocuments(),
+    ) { uris ->
+        if (uris.isEmpty()) return@rememberLauncherForActivityResult
+        uris.forEach { uri ->
+            val fileName = readDisplayName(context, uri)
+                ?: context.getString(R.string.wiki_imported_file)
+            val mimeType = context.contentResolver.getType(uri).orEmpty()
+            wikiViewModel.ingestFile(uri, fileName, mimeType, autoRoute = true) { success ->
+                scope.launch {
+                    snackbarHostState.showSnackbar(
+                        context.getString(
+                            if (success) R.string.wiki_snack_ingest_started
+                            else R.string.wiki_snack_ingest_failed,
+                        )
                     )
-                )
+                }
             }
         }
     }
@@ -457,6 +471,26 @@ fun WikiScreen(
                             contentDescription = stringResource(R.string.sources_title),
                         )
                     }
+                    IconButton(onClick = {
+                        showIngestQueueDialog = true
+                        wikiViewModel.loadIngestJobs()
+                        scope.launch { drawerState.close() }
+                    }) {
+                        Icon(
+                            Icons.Default.AttachFile,
+                            contentDescription = stringResource(R.string.ingest_queue_title),
+                        )
+                    }
+                    IconButton(onClick = {
+                        showGraphInsightsDialog = true
+                        wikiViewModel.loadGraphInsights()
+                        scope.launch { drawerState.close() }
+                    }) {
+                        Icon(
+                            Icons.Default.Share,
+                            contentDescription = stringResource(R.string.graph_insights_title),
+                        )
+                    }
                     // Single maintenance action: health check + dedupe in one pass
                     IconButton(
                         onClick = {
@@ -700,20 +734,41 @@ fun WikiScreen(
                     }
                 }
 
-                // Server-derived: an import started on the phone (or on the web) is still
-                // shown after the app is killed and reopened.
-                if (uiState.ingestLoading || uiState.activeIngestCount > 0) {
-                    Surface(color = MaterialTheme.colorScheme.secondaryContainer) {
+                // Server-derived: an active or attention-needed import is still shown
+                // after the app is killed and reopened. Completed history stays in the
+                // queue dialog and must not look like an import is still running.
+                val hasActiveIngest = uiState.ingestLoading || uiState.activeIngestCount > 0
+                val hasPausedIngest = uiState.ingestJobs.any { it.status == "paused" }
+                val hasFailedIngest = uiState.ingestJobs.any { it.status == "failed" }
+                if (hasActiveIngest || hasPausedIngest || hasFailedIngest) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.secondaryContainer,
+                        modifier = Modifier
+                            .heightIn(min = 44.dp)
+                            .clickable {
+                                showIngestQueueDialog = true
+                                wikiViewModel.loadIngestJobs()
+                            },
+                    ) {
                         Row(
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(16.dp),
-                                strokeWidth = 2.dp,
-                                color = MaterialTheme.colorScheme.onSecondaryContainer,
-                            )
+                            if (hasActiveIngest) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                )
+                            } else {
+                                Icon(
+                                    Icons.Default.AttachFile,
+                                    contentDescription = stringResource(R.string.ingest_queue_title),
+                                    modifier = Modifier.size(18.dp),
+                                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                )
+                            }
                             Text(
                                 text = when {
                                     uiState.activeIngestCount > 0 -> stringResource(
@@ -725,6 +780,10 @@ fun WikiScreen(
                                     )
                                     uiState.ingestProgress > 0 ->
                                         stringResource(R.string.ingest_running_progress, uiState.ingestProgress)
+                                    hasPausedIngest ->
+                                        stringResource(R.string.ingest_job_paused)
+                                    hasFailedIngest ->
+                                        stringResource(R.string.ingest_job_failed)
                                     else -> stringResource(R.string.ingest_running)
                                 },
                                 color = MaterialTheme.colorScheme.onSecondaryContainer,
@@ -887,6 +946,8 @@ fun WikiScreen(
             profiles = uiState.profiles,
             selectedProfileId = uiState.selectedProfileId,
             onProfileSelected = { wikiViewModel.setSelectedProfile(it) },
+            selectedQueryMode = uiState.selectedQueryMode,
+            onQueryModeSelected = { wikiViewModel.setSelectedQueryMode(it) },
             workspaces = uiState.workspaces,
             currentWorkspaceId = uiState.workspace?.id,
             taggedWorkspaceIds = uiState.taggedWorkspaceIds,
@@ -899,7 +960,7 @@ fun WikiScreen(
             },
             onImportFile = {
                 showChatSheet = false
-                filePickerLauncher.launch(arrayOf("text/*", "application/json", "application/xml", "text/markdown", "text/x-markdown"))
+                filePickerLauncher.launch(importMimeTypes)
             },
             onExecuteProposal = { mi, pi -> wikiViewModel.executeProposal(mi, pi) },
             onDismissProposal = { mi, pi -> wikiViewModel.dismissProposal(mi, pi) },
@@ -948,6 +1009,36 @@ fun WikiScreen(
             reingestingSourceId = uiState.reingestingSourceId,
             onReingest = { wikiViewModel.reingestSource(it) },
             onDismiss = { showSourcesDialog = false },
+        )
+    }
+
+    if (showIngestQueueDialog) {
+        IngestQueueDialog(
+            jobs = uiState.ingestJobs,
+            isLoading = uiState.ingestJobsLoading,
+            actionLoadingJobId = uiState.ingestJobActionLoadingId,
+            actionFailure = uiState.ingestJobActionFailure,
+            onAction = { jobId, action -> wikiViewModel.updateIngestJob(jobId, action) },
+            onClearActionError = wikiViewModel::clearIngestJobActionError,
+            onRefresh = { wikiViewModel.loadIngestJobs() },
+            onDismiss = {
+                showIngestQueueDialog = false
+                wikiViewModel.clearIngestJobActionError()
+            },
+        )
+    }
+
+    if (showGraphInsightsDialog) {
+        GraphInsightsDialog(
+            insights = uiState.graphInsights,
+            isLoading = uiState.graphInsightsLoading,
+            error = uiState.graphInsightsError,
+            onRetry = { wikiViewModel.loadGraphInsights() },
+            onPageClick = { slug ->
+                showGraphInsightsDialog = false
+                wikiViewModel.selectPageBySlug(slug)
+            },
+            onDismiss = { showGraphInsightsDialog = false },
         )
     }
 
@@ -1349,6 +1440,8 @@ private fun ChatBottomSheet(
     profiles: List<LlmProfile>,
     selectedProfileId: String?,
     onProfileSelected: (String?) -> Unit,
+    selectedQueryMode: String,
+    onQueryModeSelected: (String) -> Unit,
     workspaces: List<WorkspaceRow>,
     currentWorkspaceId: String?,
     taggedWorkspaceIds: List<String>,
@@ -1394,12 +1487,21 @@ private fun ChatBottomSheet(
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 Text(stringResource(R.string.wiki_chat), style = MaterialTheme.typography.titleMedium)
-                if (profiles.isNotEmpty()) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = stringResource(
+                            if (selectedQueryMode == QUERY_MODE_FAITHFUL) {
+                                R.string.query_mode_faithful
+                            } else {
+                                R.string.query_mode_standard
+                            },
+                        ),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
                     val selectedName = profiles.firstOrNull { it.id == selectedProfileId }?.name
                         ?: profiles.firstOrNull { it.isDefault }?.name
-                    selectedName?.let {
-                        Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-                    }
+                    selectedName?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary) }
                 }
             }
             HorizontalDivider()
@@ -1573,6 +1675,55 @@ private fun ChatBottomSheet(
                                 onImportFile()
                             },
                         )
+                        HorizontalDivider()
+                        Text(
+                            stringResource(R.string.query_mode_title),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                        )
+                        DropdownMenuItem(
+                            text = {
+                                Column {
+                                    Text(stringResource(R.string.query_mode_standard))
+                                    Text(
+                                        stringResource(R.string.query_mode_standard_hint),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            },
+                            onClick = {
+                                onQueryModeSelected(QUERY_MODE_STANDARD)
+                                showActionMenu = false
+                            },
+                            trailingIcon = {
+                                if (selectedQueryMode == QUERY_MODE_STANDARD) {
+                                    Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                                }
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = {
+                                Column {
+                                    Text(stringResource(R.string.query_mode_faithful))
+                                    Text(
+                                        stringResource(R.string.query_mode_faithful_hint),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            },
+                            onClick = {
+                                onQueryModeSelected(QUERY_MODE_FAITHFUL)
+                                showActionMenu = false
+                            },
+                            trailingIcon = {
+                                if (selectedQueryMode == QUERY_MODE_FAITHFUL) {
+                                    Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                                }
+                            },
+                        )
                         if (profiles.isNotEmpty()) {
                             HorizontalDivider()
                             Text(
@@ -1695,8 +1846,8 @@ private fun ChatBubble(
                 )
             }
         }
-        // Destructive-action confirmation cards
-        message.proposals.forEachIndexed { proposalIndex, proposal ->
+        // Destructive-action confirmation cards are never shown for faithful mode.
+        if (message.queryMode != QUERY_MODE_FAITHFUL) message.proposals.forEachIndexed { proposalIndex, proposal ->
             if (proposal.status == "dismissed") return@forEachIndexed
             Card(
                 colors = CardDefaults.cardColors(
@@ -1748,7 +1899,7 @@ private fun ChatBubble(
                 }
             }
         }
-        if (message.citedSlugs.isNotEmpty()) {
+        if (message.citedSlugs.isNotEmpty() && message.queryMode != QUERY_MODE_FAITHFUL) {
             Text(
                 text = stringResource(R.string.wiki_sources, message.citedSlugs.joinToString(", ")),
                 style = MaterialTheme.typography.labelSmall,
@@ -1765,6 +1916,37 @@ private fun ChatBubble(
                     },
                 ) {
                     Text(stringResource(R.string.query_file_back), style = MaterialTheme.typography.labelSmall)
+                }
+            }
+        }
+        if (message.rawCitations.isNotEmpty()) {
+            val context = LocalContext.current
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 4.dp, vertical = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                message.rawCitations.forEach { citation ->
+                    val title = citation.title?.takeIf { it.isNotBlank() }
+                        ?: stringResource(R.string.wiki_untitled)
+                    val url = citation.url?.takeIf(::isSafeExternalUrl)
+                    AssistChip(
+                        onClick = { url?.let { openExternalUrl(context, it) } },
+                        enabled = url != null,
+                        label = {
+                            Text(
+                                stringResource(
+                                    R.string.wiki_source_line_range,
+                                    title,
+                                    citation.locator.lineStart,
+                                    citation.locator.lineEnd,
+                                ),
+                                maxLines = 1,
+                            )
+                        },
+                    )
                 }
             }
         }
@@ -1817,13 +1999,19 @@ private fun SourcesListDialog(
                                     overflow = TextOverflow.Ellipsis,
                                 )
                             }
-                            val statusText = when {
-                                item.jobStatus == "failed" ->
+                            val statusText = when (item.jobStatus) {
+                                "pending" -> stringResource(R.string.sources_status_pending)
+                                "running" -> stringResource(R.string.sources_status_running)
+                                "paused" -> stringResource(R.string.sources_status_paused)
+                                "failed" ->
                                     stringResource(R.string.sources_status_failed) +
                                         (item.jobError?.takeIf { it.isNotBlank() }?.let { " — $it" } ?: "")
-                                item.source.ingestedAt != null ->
+                                "done" -> stringResource(R.string.sources_status_done, item.touchedCount)
+                                else -> if (item.source.ingestedAt != null) {
                                     stringResource(R.string.sources_status_done, item.touchedCount)
-                                else -> stringResource(R.string.sources_status_running)
+                                } else {
+                                    stringResource(R.string.sources_status_running)
+                                }
                             }
                             val isReingesting = reingestingSourceId == item.source.id
                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1833,7 +2021,9 @@ private fun SourcesListDialog(
                                     color = when {
                                         isReingesting -> MaterialTheme.colorScheme.primary
                                         item.jobStatus == "failed" -> MaterialTheme.colorScheme.error
-                                        item.source.ingestedAt != null -> MaterialTheme.colorScheme.primary
+                                        item.jobStatus == "done" ||
+                                            (item.jobStatus == null && item.source.ingestedAt != null) ->
+                                            MaterialTheme.colorScheme.primary
                                         else -> MaterialTheme.colorScheme.onSurfaceVariant
                                     },
                                     modifier = Modifier.weight(1f),
@@ -1867,6 +2057,298 @@ private fun SourcesListDialog(
         confirmButton = {
             TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_dismiss)) }
         },
+    )
+}
+
+// ── Durable ingest queue ──────────────────────────────────────────────────
+
+@Composable
+private fun IngestQueueDialog(
+    jobs: List<IngestJobRow>,
+    isLoading: Boolean,
+    actionLoadingJobId: String?,
+    actionFailure: IngestJobActionFailure?,
+    onAction: (jobId: String, action: String) -> Unit,
+    onClearActionError: () -> Unit,
+    onRefresh: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.ingest_queue_title)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                actionFailure?.let { failure ->
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.errorContainer,
+                            contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                        ),
+                    ) {
+                        Column(
+                            Modifier.padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            Text(
+                                stringResource(R.string.ingest_action_failed),
+                                style = MaterialTheme.typography.labelMedium,
+                            )
+                            Text(
+                                failure.message,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                TextButton(
+                                    enabled = actionLoadingJobId == null,
+                                    onClick = { onAction(failure.jobId, failure.action) },
+                                ) {
+                                    Text(stringResource(R.string.ingest_action_retry))
+                                }
+                                TextButton(onClick = onClearActionError) {
+                                    Text(stringResource(R.string.ingest_action_clear))
+                                }
+                            }
+                        }
+                    }
+                }
+                when {
+                    isLoading -> Box(
+                        Modifier.fillMaxWidth().padding(vertical = 24.dp),
+                        contentAlignment = Alignment.Center,
+                    ) { CircularProgressIndicator() }
+                    jobs.isEmpty() -> Text(
+                        stringResource(R.string.ingest_queue_empty),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    else -> LazyColumn(
+                        modifier = Modifier.heightIn(max = 520.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        items(
+                            jobs,
+                            key = { job -> job.id ?: "${job.sourceId}-${job.updatedAt}" },
+                        ) { job ->
+                            val sourceName = job.sourceTitle?.takeIf { it.isNotBlank() }
+                                ?: job.sourceId.ifBlank { stringResource(R.string.wiki_untitled) }
+                            val status = when (job.status) {
+                                "pending" -> stringResource(R.string.ingest_job_pending)
+                                "running" -> stringResource(R.string.ingest_job_running)
+                                "paused" -> stringResource(R.string.ingest_job_paused)
+                                "done" -> stringResource(R.string.ingest_job_done)
+                                "failed" -> stringResource(R.string.ingest_job_failed)
+                                else -> job.status
+                            }
+                            val phase = when (job.phase) {
+                                "analysis" -> stringResource(R.string.ingest_phase_analysis)
+                                "writing" -> stringResource(R.string.ingest_phase_writing)
+                                "review" -> stringResource(R.string.ingest_phase_review)
+                                "done" -> stringResource(R.string.ingest_phase_done)
+                                else -> null
+                            }
+                            Column(Modifier.fillMaxWidth()) {
+                                Text(
+                                    sourceName,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Text(
+                                    listOfNotNull(status, phase).joinToString(" · ") +
+                                        if (job.result == "unchanged") " · ${stringResource(R.string.ingest_result_unchanged)}" else "",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = when (job.status) {
+                                        "failed" -> MaterialTheme.colorScheme.error
+                                        "done" -> MaterialTheme.colorScheme.primary
+                                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                    },
+                                )
+                                if (job.touchedPages.isNotEmpty()) {
+                                    Text(
+                                        stringResource(R.string.ingest_running_progress, job.touchedPages.size),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                job.error?.takeIf { it.isNotBlank() }?.let {
+                                    Text(
+                                        it,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.error,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                                job.id?.let { jobId ->
+                                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        if (actionLoadingJobId == jobId) {
+                                            CircularProgressIndicator(
+                                                Modifier.size(16.dp),
+                                                strokeWidth = 2.dp,
+                                            )
+                                            Text(
+                                                stringResource(R.string.ingest_action_in_progress),
+                                                style = MaterialTheme.typography.labelSmall,
+                                            )
+                                        }
+                                        when (job.status) {
+                                            "pending", "running" -> TextButton(
+                                                enabled = actionLoadingJobId == null && !isLoading,
+                                                onClick = { onAction(jobId, "pause") },
+                                            ) {
+                                                Text(stringResource(R.string.ingest_pause))
+                                            }
+                                            "paused" -> TextButton(
+                                                enabled = actionLoadingJobId == null && !isLoading,
+                                                onClick = { onAction(jobId, "resume") },
+                                            ) {
+                                                Text(stringResource(R.string.ingest_resume))
+                                            }
+                                            "failed" -> TextButton(
+                                                enabled = actionLoadingJobId == null && !isLoading,
+                                                onClick = { onAction(jobId, "retry") },
+                                            ) {
+                                                Text(stringResource(R.string.ingest_retry))
+                                            }
+                                        }
+                                    }
+                                }
+                                HorizontalDivider(Modifier.padding(top = 4.dp))
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                TextButton(onClick = onRefresh) { Text(stringResource(R.string.action_refresh)) }
+                TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_dismiss)) }
+            }
+        },
+    )
+}
+
+// ── Graph insights ────────────────────────────────────────────────────────
+
+@Composable
+private fun GraphInsightsDialog(
+    insights: GraphInsights?,
+    isLoading: Boolean,
+    error: String?,
+    onRetry: () -> Unit,
+    onPageClick: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.graph_insights_title)) },
+        text = {
+            when {
+                isLoading -> Box(
+                    Modifier.fillMaxWidth().padding(vertical = 24.dp),
+                    contentAlignment = Alignment.Center,
+                ) { CircularProgressIndicator() }
+                error != null -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(error, color = MaterialTheme.colorScheme.error)
+                    OutlinedButton(onClick = onRetry) { Text(stringResource(R.string.graph_insights_retry)) }
+                }
+                insights == null || insights.counts.pages == 0 -> Text(
+                    stringResource(R.string.graph_insights_empty),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                else -> Column(
+                    Modifier.heightIn(max = 540.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    val counts = insights.counts
+                    Text(stringResource(R.string.graph_count_pages, counts.pages), style = MaterialTheme.typography.labelMedium)
+                    Text(stringResource(R.string.graph_count_links, counts.links), style = MaterialTheme.typography.labelMedium)
+                    Text(stringResource(R.string.graph_count_orphans, counts.orphans), style = MaterialTheme.typography.labelMedium)
+                    Text(stringResource(R.string.graph_count_communities, counts.communities), style = MaterialTheme.typography.labelMedium)
+                    Text(stringResource(R.string.graph_count_bridges, counts.bridges), style = MaterialTheme.typography.labelMedium)
+                    Text(stringResource(R.string.graph_count_missing_links, counts.missingLinks), style = MaterialTheme.typography.labelMedium)
+                    GraphInsightSection(
+                        title = stringResource(R.string.graph_section_orphans),
+                        pages = insights.orphans,
+                        onPageClick = onPageClick,
+                    )
+                    if (insights.communities.isNotEmpty()) {
+                        Text(
+                            stringResource(R.string.graph_section_communities),
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(top = 4.dp),
+                        )
+                        insights.communities.forEachIndexed { index, group ->
+                            Text(stringResource(R.string.graph_group, index + 1), style = MaterialTheme.typography.labelMedium)
+                            group.pages.forEach { page ->
+                                GraphInsightPageRow(page.slug, page.title, onPageClick)
+                            }
+                        }
+                    }
+                    GraphInsightSection(
+                        title = stringResource(R.string.graph_section_bridges),
+                        pages = insights.bridges,
+                        onPageClick = onPageClick,
+                    )
+                    if (insights.missingLinks.isNotEmpty()) {
+                        Text(
+                            stringResource(R.string.graph_section_missing_links),
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(top = 4.dp),
+                        )
+                        insights.missingLinks.forEach { link ->
+                            Text(
+                                text = stringResource(R.string.graph_missing_link, link.fromSlug, link.toSlug),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = 44.dp)
+                                    .clickable { onPageClick(link.fromSlug) }
+                                    .padding(vertical = 8.dp),
+                                color = MaterialTheme.colorScheme.primary,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_dismiss)) } },
+    )
+}
+
+@Composable
+private fun GraphInsightSection(
+    title: String,
+    pages: List<com.llmwiki.data.GraphInsightPage>,
+    onPageClick: (String) -> Unit,
+) {
+    if (pages.isEmpty()) return
+    Text(
+        title,
+        style = MaterialTheme.typography.titleSmall,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(top = 4.dp),
+    )
+    pages.forEach { page -> GraphInsightPageRow(page.slug, page.title, onPageClick) }
+}
+
+@Composable
+private fun GraphInsightPageRow(
+    slug: String,
+    title: String?,
+    onPageClick: (String) -> Unit,
+) {
+    Text(
+        text = title?.takeIf { it.isNotBlank() } ?: slug,
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 44.dp)
+            .clickable { onPageClick(slug) }
+            .padding(vertical = 8.dp),
+        color = MaterialTheme.colorScheme.primary,
+        style = MaterialTheme.typography.bodySmall,
     )
 }
 
@@ -2035,28 +2517,6 @@ private fun extractTitle(text: String, fallbackTitle: String): String =
         ?.take(80)
         ?: fallbackTitle
 
-private const val MAX_IMPORT_BYTES = 2 * 1024 * 1024L
-
-private fun readTextFromUri(context: android.content.Context, uri: Uri): String? =
-    runCatching {
-        val fileSize = readFileSize(context, uri)
-        if (fileSize != null && fileSize > MAX_IMPORT_BYTES) return null
-
-        context.contentResolver.openInputStream(uri)
-            ?.bufferedReader(Charsets.UTF_8)
-            ?.use { reader -> reader.readText() }
-    }.getOrNull()
-
-private fun readFileSize(context: android.content.Context, uri: Uri): Long? =
-    runCatching {
-        context.contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)
-            ?.use { cursor ->
-                if (!cursor.moveToFirst()) return@use null
-                val index = cursor.getColumnIndex(OpenableColumns.SIZE)
-                if (index >= 0 && !cursor.isNull(index)) cursor.getLong(index) else null
-            }
-    }.getOrNull()
-
 private fun readDisplayName(context: android.content.Context, uri: Uri): String? =
     runCatching {
         context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
@@ -2066,3 +2526,15 @@ private fun readDisplayName(context: android.content.Context, uri: Uri): String?
                 if (index >= 0) cursor.getString(index) else null
             }
     }.getOrNull()
+
+private fun isSafeExternalUrl(raw: String): Boolean {
+    val uri = runCatching { Uri.parse(raw.trim()) }.getOrNull() ?: return false
+    return (uri.scheme.equals("http", ignoreCase = true) ||
+        uri.scheme.equals("https", ignoreCase = true)) &&
+        !uri.host.isNullOrBlank()
+}
+
+private fun openExternalUrl(context: android.content.Context, raw: String) {
+    if (!isSafeExternalUrl(raw)) return
+    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(raw.trim()))) }
+}

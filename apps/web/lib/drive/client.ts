@@ -28,11 +28,18 @@ export async function getAccessToken(refreshToken: string): Promise<string> {
   return credentials.access_token;
 }
 
+export interface ReadDriveFileOptions {
+  /** Maximum UTF-8 bytes to read from the Drive response. */
+  maxBytes?: number;
+}
+
 /** Read a file's full text content from Drive. */
 export async function readDriveFile(
   drive: drive_v3.Drive,
   fileId: string,
+  options: ReadDriveFileOptions = {},
 ): Promise<string> {
+  const maxBytes = normalizeMaxBytes(options.maxBytes);
   const meta = await getDriveFileMetadata(drive, fileId);
 
   if (meta.trashed) {
@@ -45,12 +52,16 @@ export async function readDriveFile(
     );
   }
 
+  if (maxBytes !== undefined && meta.size != null) {
+    assertWithinMaxBytes(Number(meta.size), fileId, `media:${meta.mimeType ?? 'unknown'}`, maxBytes);
+  }
+
   switch (meta.mimeType) {
     case 'text/markdown':
     case 'text/plain':
-      return readMediaAsText(drive, fileId, meta.mimeType);
+      return readMediaAsText(drive, fileId, meta.mimeType, maxBytes);
     case 'application/octet-stream':
-      return readOctetStreamWithGuard(drive, fileId, Number(meta.size ?? 0));
+      return readOctetStreamWithGuard(drive, fileId, Number(meta.size ?? 0), maxBytes);
     case 'application/vnd.google-apps.document':
       if (process.env.NODE_ENV !== 'production') {
         console.warn('[Drive] Google Docs detected; exporting as text/plain', {
@@ -58,7 +69,7 @@ export async function readDriveFile(
           size: meta.size,
         });
       }
-      return exportGoogleDocAsText(drive, fileId);
+      return exportGoogleDocAsText(drive, fileId, maxBytes);
     default:
       throw new DriveReadError(
         'UNSUPPORTED_MIME_TYPE',
@@ -158,8 +169,16 @@ async function readMediaAsText(
   drive: drive_v3.Drive,
   fileId: string,
   mimeType: string,
+  maxBytes?: number,
 ): Promise<string> {
   try {
+    if (maxBytes !== undefined) {
+      const response = await drive.files.get(
+        { fileId, alt: 'media' },
+        { responseType: 'stream' },
+      );
+      return readResponseStreamAsText(response.data, fileId, `media:${mimeType}`, maxBytes);
+    }
     const res = await drive.files.get(
       { fileId, alt: 'media' },
       { responseType: 'text' },
@@ -173,8 +192,16 @@ async function readMediaAsText(
 async function exportGoogleDocAsText(
   drive: drive_v3.Drive,
   fileId: string,
+  maxBytes?: number,
 ): Promise<string> {
   try {
+    if (maxBytes !== undefined) {
+      const response = await drive.files.export(
+        { fileId, mimeType: 'text/plain' },
+        { responseType: 'stream' },
+      );
+      return readResponseStreamAsText(response.data, fileId, 'export:gdoc', maxBytes);
+    }
     const res = await drive.files.export(
       { fileId, mimeType: 'text/plain' },
       { responseType: 'text' },
@@ -189,6 +216,7 @@ async function readOctetStreamWithGuard(
   drive: drive_v3.Drive,
   fileId: string,
   size: number,
+  maxBytes?: number,
 ): Promise<string> {
   if (size > 5 * 1024 * 1024) {
     throw new DriveReadError(
@@ -200,7 +228,8 @@ async function readOctetStreamWithGuard(
     );
   }
 
-  const text = await readMediaAsText(drive, fileId, 'application/octet-stream');
+  assertWithinMaxBytes(size, fileId, 'media:application/octet-stream', maxBytes);
+  const text = await readMediaAsText(drive, fileId, 'application/octet-stream', maxBytes);
   if (looksBinary(text)) {
     throw new DriveReadError(
       'UNSUPPORTED_MIME_TYPE',
@@ -211,6 +240,83 @@ async function readOctetStreamWithGuard(
     );
   }
   return text;
+}
+
+function normalizeMaxBytes(maxBytes: number | undefined): number | undefined {
+  if (maxBytes === undefined) return undefined;
+  if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) {
+    throw new RangeError('maxBytes must be a positive safe integer');
+  }
+  return maxBytes;
+}
+
+function assertWithinMaxBytes(
+  size: number,
+  fileId: string,
+  source: string,
+  maxBytes: number | undefined,
+): void {
+  if (maxBytes !== undefined && Number.isFinite(size) && size > maxBytes) {
+    throw new DriveReadError(
+      'DRIVE_FILE_TOO_LARGE',
+      413,
+      'Drive file exceeds the maximum readable size',
+      {},
+      { fileId, source, size, maxBytes },
+    );
+  }
+}
+
+async function readResponseStreamAsText(
+  data: unknown,
+  fileId: string,
+  source: string,
+  maxBytes: number,
+): Promise<string> {
+  if (typeof data === 'string') {
+    assertWithinMaxBytes(Buffer.byteLength(data, 'utf8'), fileId, source, maxBytes);
+    return data;
+  }
+  if (Buffer.isBuffer(data) || data instanceof Uint8Array) {
+    assertWithinMaxBytes(data.byteLength, fileId, source, maxBytes);
+    return Buffer.from(data).toString('utf8');
+  }
+
+  const stream = data as {
+    [Symbol.asyncIterator]?: () => AsyncIterator<unknown>;
+    destroy?: () => void;
+  } | null;
+  if (!stream || typeof stream[Symbol.asyncIterator] !== 'function') {
+    return coerceToString(data, fileId, source);
+  }
+
+  const chunks: Buffer[] = [];
+  let total = 0;
+  try {
+    for await (const chunk of stream as AsyncIterable<unknown>) {
+      const bytes = Buffer.isBuffer(chunk)
+        ? chunk
+        : chunk instanceof Uint8Array
+          ? Buffer.from(chunk)
+          : Buffer.from(String(chunk), 'utf8');
+      total += bytes.byteLength;
+      if (total > maxBytes) {
+        stream.destroy?.();
+        throw new DriveReadError(
+          'DRIVE_FILE_TOO_LARGE',
+          413,
+          'Drive file exceeds the maximum readable size',
+          {},
+          { fileId, source, maxBytes },
+        );
+      }
+      chunks.push(bytes);
+    }
+  } catch (error) {
+    if (error instanceof DriveReadError) throw error;
+    throw mapDriveError(error, fileId, source);
+  }
+  return Buffer.concat(chunks, total).toString('utf8');
 }
 
 function coerceToString(data: unknown, fileId: string, source: string): string {

@@ -1,3 +1,48 @@
+# 六項知識編譯能力（2026-08-31）
+
+## 規劃與資料契約
+
+- [x] 盤點 Ingest / Query / Sources / Graph 的 Web、Android、DB 完整 caller
+- [x] 設計並新增 `ingest_jobs` 可恢復狀態、checkpoint、SHA256 去重 migration（GRANT + RLS 同步）
+- [x] 定義兩階段 Ingest plan、寫入、自我審查與錯誤／暫停邊界
+- [x] 定義 Faithful mode 原始來源工具與可驗證 citation metadata
+- [x] 選定最少且安全的多格式解析依賴，完成漏洞與維護狀態檢查
+
+## 後端實作
+
+- [x] 兩階段 Ingest：分析人物／概念／證據／矛盾／目標頁，再寫入並自我審查
+- [x] 共用 `writePageForWorkspace` 加安全合併：保留 sources/tags/related，拒絕可疑縮短
+- [x] 可恢復 Ingest queue：pause / resume / retry / checkpoint / SHA256 unchanged skip
+- [x] PDF / DOCX / PPTX / EPUB / image 匯入與圖片描述
+- [x] Faithful Query：只可讀 raw sources，不注入 wiki／背景知識，回傳來源 citation
+- [x] Graph Insights API：孤立頁、社群、橋接頁、可能缺失連結（5 個 fixture 通過）
+
+## Web / Android 對齊
+
+- [x] Web：Faithful 切換、queue 控制、多格式狀態、graph insights
+- [x] Android：沿用同一 API，對齊 Faithful、queue、多格式、graph insights 與雙語字串
+- [x] 未知串流 metadata 保持向後相容；錯誤／loading／disabled／a11y 狀態齊全
+
+## 驗證與交付
+
+- [x] 單元／route／DB policy 測試涵蓋安全合併、checkpoint、去重、Faithful citation、圖演算法
+- [x] `bun test`（107 pass / 0 fail）、`bun run typecheck`（5/5）、`bun run build`（1/1）、`bun audit`、`git diff --check`
+- [x] Android `./gradlew.bat :app:assembleDebug` 與相關 unit tests（APK `0.7.0`）
+- [x] 瀏覽器實測：公開登入 redirect，以及新 API 未登入時回 JSON/401
+- [x] `recoverable_ingest` migration 套用 production，欄位與索引讀回驗證
+- [ ] push 後部署並驗證公開站與 commit status
+- [x] 更新 `CONTEXT.md` / `tasks/lessons.md`，完成文件收尾（commit + push 由主代理執行）
+
+## Review
+
+- `bun test`：107 pass / 0 fail。
+- `bun run typecheck`：5/5 packages passed；`bun run build`：1/1 passed。
+- Android `testDebugUnitTest` 無測試來源但成功，`assembleDebug` 成功；APK `0.7.0` / versionCode `7`。
+- `recoverable_ingest` 已套用 production；`sources` 欄位、`ingest_jobs` 欄位與 unique/index 約束已讀回驗證。
+- Security review：無 CRITICAL/HIGH；剩餘已知限制是 Drive → DB → `page_links` 非單一交易，保留 CAS + compensation。
+
+---
+
 # 參考 nashsu/llm_wiki 改善本專案（2026-08-31）
 
 - [x] 查證 Codex 全域子代理設定欄位

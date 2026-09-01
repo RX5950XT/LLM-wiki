@@ -1,5 +1,15 @@
 # Lessons
 
+## 2026-09-01 可恢復匯入與可信查詢
+
+- **可恢復 job 必須 fencing，不只存 status**：pause/retry 會讓舊執行緒與新 attempt 重疊；每次 claim 產生 `attemptToken`，所有 checkpoint/status 寫入都要帶 token，才能避免舊 run 覆蓋新結果。
+- **可信查詢的 citation 不可相信模型輸出**：Faithful mode 只掛 raw-source read tool，citation 由實際成功讀取的 source 統計；串流先清掉模型產生的 NUL，再由 server 附加 metadata，避免偽造 citation/action block。
+- **檔案大小要在兩道門都限制**：HTTP `Content-Length` 只能擋第一層，實際 URL/Drive/上傳串流仍要在讀取時超限即中止，parser/ZIP/PDF 另外限制展開資源，才能防止繞過與記憶體爆量。
+
+## 2026-08-31 上游功能借鑑範圍
+
+- **「有沒有厲害功能可借鑑」不是只挑一個最小修補**：先把可借鑑能力按資料契約、成本與 Web／Android 影響列完整；使用者選定多項後，目標就是全部做到可驗證，不可自行縮成一個低風險小改並宣告完成。
+
 ## 2026-08-31 Codex 子代理設定相容性
 
 - **`codex --strict-config --version` 不足以驗證 agent schema**：目前桌面 runtime 會把 `[agents]` 解析成舊版角色表，加入新版 `default_subagent_*` 後出現 `expected struct AgentRoleToml`。修改全域設定後，必須啟動會完整載入 agent registry 的實際 Codex 命令；若 runtime 不支援全域預設欄位，改在 `~/.codex/agents/*.toml` 逐角色設定模型與 reasoning。

@@ -9,6 +9,10 @@ import {
   renameWorkspaceForUser,
 } from '@/lib/workspaces/manage';
 import { normalizeWikiSlug, parseWikiLink } from '@/lib/wiki/slug';
+import {
+  hasSuspiciousShortening,
+  mergePageFrontmatter,
+} from './frontmatter-merge';
 
 /** Destructive action the model proposed but that awaits user confirmation. */
 export interface ActionProposal {
@@ -32,6 +36,12 @@ interface ToolContext {
   onProposal?: (proposal: ActionProposal) => void;
   /** Optional callback invoked each time LLM reads a page slug */
   onPageRead?: (slug: string) => void;
+  /** Source id is injected by the ingest pipeline; the model never controls it. */
+  sourceId?: string;
+  /** Restrict writePage to a server-created plan allowlist. */
+  writePageAllowlist?: ReadonlySet<string>;
+  /** Ingest writing pass exposes read/list/search/write only. */
+  ingestWriteOnly?: boolean;
   /** UI locale for workspace creation seeds */
   locale?: string | null;
   /**
@@ -130,11 +140,12 @@ async function resolveExistingSlug(
   const normalized = normalizeSlug(raw);
   const candidates = raw === normalized ? [normalized] : [normalized, raw];
 
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('pages')
     .select('slug')
     .eq('workspace_id', workspaceId)
     .in('slug', candidates);
+  if (error) throw new Error(`pages lookup failed: ${error.message}`);
   if (!data?.length) return null;
 
   // Prefer the canonical `.md` row when both forms somehow exist.
@@ -210,7 +221,12 @@ export function buildWikiTools(ctx: ToolContext) {
   }
 
   const writePageCore = (scope: Scope, args: WritePageArgs) =>
-    writePageForWorkspace({ supabase: ctx.supabase, drive: ctx.drive }, scope, args, folderCache);
+    writePageForWorkspace(
+      { supabase: ctx.supabase, drive: ctx.drive },
+      scope,
+      { ...args, sourceId: args.sourceId ?? ctx.sourceId },
+      folderCache,
+    );
   const deletePageCore = (scope: Scope, rawSlug: string) =>
     deletePageForWorkspace({ supabase: ctx.supabase, drive: ctx.drive }, scope, rawSlug);
 
@@ -265,6 +281,15 @@ export function buildWikiTools(ctx: ToolContext) {
         title?: string;
         workspace_id?: string;
       }) => {
+        if (ctx.writePageAllowlist) {
+          const requestedSlug = normalizeSlug(slug);
+          const allowed = [...ctx.writePageAllowlist].some(
+            (allowedSlug) => normalizeSlug(allowedSlug) === requestedSlug,
+          );
+          if (!allowed) {
+            return { error: `Page "${requestedSlug}" is outside the validated ingest plan.` };
+          }
+        }
         const scope = await resolveScope(workspace_id);
         if ('error' in scope) return scope;
         return writePageCore(scope, { slug, content_md, kind, title });
@@ -491,6 +516,15 @@ export function buildWikiTools(ctx: ToolContext) {
       },
     }),
   };
+
+  if (ctx.ingestWriteOnly) {
+    return {
+      readPage: baseTools.readPage,
+      writePage: baseTools.writePage,
+      searchPages: baseTools.searchPages,
+      listPages: baseTools.listPages,
+    };
+  }
 
   if (!ctx.crossWorkspace || !ctx.userId) return baseTools;
   const userId = ctx.userId;
@@ -727,12 +761,22 @@ export interface WritePageArgs {
   content_md: string;
   kind: string;
   title?: string;
+  /** Internal source metadata; do not expose this as an LLM-controlled argument. */
+  sourceId?: string;
+}
+
+interface ExistingPageRow {
+  id: string;
+  drive_file_id: string;
+  version: number;
+  title: string | null;
+  locked_by_human: boolean;
 }
 
 export async function writePageForWorkspace(
   deps: PageOpDeps,
   scope: Scope,
-  { slug: rawSlug, content_md, kind, title }: WritePageArgs,
+  { slug: rawSlug, content_md, kind, title, sourceId }: WritePageArgs,
   folderCache?: Map<string, string>,
 ) {
   const guardError = guardKnowledgeSlug(rawSlug);
@@ -742,14 +786,17 @@ export async function writePageForWorkspace(
   // The page may be stored under a legacy suffix-less slug. Overwrite THAT row
   // (and migrate it to `.md` below) rather than creating a twin next to it.
   const storedSlug = await resolveExistingSlug(deps.supabase, scope.workspaceId, rawSlug);
-  const { data: existing } = storedSlug
-    ? await deps.supabase
-        .from('pages')
-        .select('id, drive_file_id, version, title, locked_by_human')
-        .eq('workspace_id', scope.workspaceId)
-        .eq('slug', storedSlug)
-        .maybeSingle()
-    : { data: null };
+  let existing: ExistingPageRow | null = null;
+  if (storedSlug) {
+    const result = await deps.supabase
+      .from('pages')
+      .select('id, drive_file_id, version, title, locked_by_human')
+      .eq('workspace_id', scope.workspaceId)
+      .eq('slug', storedSlug)
+      .maybeSingle();
+    if (result.error) throw new Error(`pages lookup failed: ${result.error.message}`);
+    existing = result.data as ExistingPageRow | null;
+  }
 
   if (existing?.locked_by_human) {
     return {
@@ -757,47 +804,85 @@ export async function writePageForWorkspace(
     };
   }
 
+  let contentToWrite = content_md;
+  let frontmatter: Record<string, unknown> = {};
+  let previousContent: string | null = null;
+  if (existing) {
+    previousContent = await readDriveFile(deps.drive, existing.drive_file_id);
+    const merged = mergePageFrontmatter(previousContent, content_md, sourceId);
+    if (hasSuspiciousShortening(previousContent, merged.content)) {
+      return { error: 'SUSPECTED_TRUNCATION' as const };
+    }
+    contentToWrite = merged.content;
+    frontmatter = merged.frontmatter;
+  } else {
+    const merged = mergePageFrontmatter('', content_md, sourceId);
+    contentToWrite = merged.content;
+    frontmatter = merged.frontmatter;
+  }
+
   const fileName = slug.split('/').at(-1) ?? slug;
   const parentFolderId = await resolveParentFolder(deps, scope, slug, folderCache);
 
-  const fileId = await writeDriveFile(deps.drive, content_md, {
+  const fileId = await writeDriveFile(deps.drive, contentToWrite, {
     fileId: existing?.drive_file_id,
     name: fileName,
     parentId: parentFolderId,
   });
 
-  const contentHash = await hashContent(content_md);
+  const contentHash = await hashContent(contentToWrite);
 
-  const searchText = content_md.slice(0, 2000);
+  const searchText = contentToWrite.slice(0, 2000);
 
   if (existing) {
-    await updatePageRecord(deps, existing.id, {
-      // `slug` (not storedSlug): a legacy row converges to the canonical .md form.
-      slug,
-      drive_file_id: fileId,
-      content_hash: contentHash,
-      version: existing.version + 1,
-      updated_by: 'llm',
-      title: title ?? existing.title,
-      search_text: searchText,
-    });
+    try {
+      const updated = await updatePageRecordCas(
+        deps,
+        existing.id,
+        existing.version,
+        {
+          // `slug` (not storedSlug): a legacy row converges to the canonical .md form.
+          slug,
+          drive_file_id: fileId,
+          content_hash: contentHash,
+          frontmatter,
+          version: existing.version + 1,
+          updated_by: 'llm',
+          title: title ?? existing.title,
+          search_text: searchText,
+        },
+      );
+      if (!updated) {
+        await restoreDriveFileBestEffort(deps, existing.drive_file_id, previousContent, fileName, parentFolderId);
+        return { error: 'WRITE_CONFLICT' as const };
+      }
+    } catch (error) {
+      await restoreDriveFileBestEffort(deps, existing.drive_file_id, previousContent, fileName, parentFolderId);
+      throw error;
+    }
   } else {
-    await insertPageRecord(deps, {
-      workspace_id: scope.workspaceId,
-      slug,
-      kind,
-      zone: 'wiki',
-      drive_file_id: fileId,
-      content_hash: contentHash,
-      title: title ?? null,
-      updated_by: 'llm',
-      search_text: searchText,
-    });
+    try {
+      await insertPageRecord(deps, {
+        workspace_id: scope.workspaceId,
+        slug,
+        kind,
+        zone: 'wiki',
+        drive_file_id: fileId,
+        content_hash: contentHash,
+        frontmatter,
+        title: title ?? null,
+        updated_by: 'llm',
+        search_text: searchText,
+      });
+    } catch (error) {
+      await trashDriveFileBestEffort(deps, fileId);
+      throw error;
+    }
   }
 
   // Sync page_links: delete old outgoing links, insert new ones. A migrated
   // legacy row still has links filed under its old suffix-less slug.
-  const toSlugs = extractWikiLinks(content_md);
+  const toSlugs = extractWikiLinks(contentToWrite);
   const { error: delError } = await deps.supabase
     .from('page_links')
     .delete()
@@ -811,7 +896,12 @@ export async function writePageForWorkspace(
     if (insError) throw new Error(`page_links insert failed: ${insError.message}`);
   }
 
-  return { ok: true as const, slug, fileId };
+  return {
+    ok: true as const,
+    slug,
+    fileId,
+    result: previousContent !== null && previousContent === contentToWrite ? 'unchanged' as const : 'updated' as const,
+  };
 }
 
 export async function deletePageForWorkspace(deps: PageOpDeps, scope: Scope, rawSlug: string) {
@@ -945,6 +1035,59 @@ async function updatePageRecord(
   }
 
   throw new Error(`pages update failed: ${error.message}`);
+}
+
+async function updatePageRecordCas(
+  deps: PageOpDeps,
+  pageId: string,
+  expectedVersion: number,
+  values: Record<string, unknown>,
+): Promise<boolean> {
+  const run = async (nextValues: Record<string, unknown>) => {
+    return deps.supabase
+      .from('pages')
+      .update(nextValues)
+      .eq('id', pageId)
+      .eq('version', expectedVersion)
+      .eq('locked_by_human', false)
+      .select('id')
+      .maybeSingle();
+  };
+
+  const { data, error } = await run(values);
+  if (!error) return Boolean(data);
+
+  if (isMissingSearchTextError(error)) {
+    const { search_text: _searchText, ...fallbackValues } = values;
+    const { data: fallbackData, error: fallbackError } = await run(fallbackValues);
+    if (!fallbackError) return Boolean(fallbackData);
+    throw new Error(`pages update failed: ${fallbackError.message}`);
+  }
+
+  throw new Error(`pages update failed: ${error.message}`);
+}
+
+async function restoreDriveFileBestEffort(
+  deps: PageOpDeps,
+  fileId: string,
+  previousContent: string | null,
+  name: string,
+  parentId: string,
+): Promise<void> {
+  if (previousContent === null) return;
+  try {
+    await writeDriveFile(deps.drive, previousContent, { fileId, name, parentId });
+  } catch (error) {
+    console.error('[wiki] failed to restore Drive page after DB conflict', { fileId, error });
+  }
+}
+
+async function trashDriveFileBestEffort(deps: PageOpDeps, fileId: string): Promise<void> {
+  try {
+    await deps.drive.files.update({ fileId, requestBody: { trashed: true }, fields: 'id' });
+  } catch (error) {
+    console.error('[wiki] failed to trash orphan Drive page', { fileId, error });
+  }
 }
 
 function isMissingSearchTextError(error: { message?: string }): boolean {
