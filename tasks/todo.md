@@ -30,7 +30,7 @@
 - [x] Android `./gradlew.bat :app:assembleDebug` 與相關 unit tests（APK `0.7.0`）
 - [x] 瀏覽器實測：公開登入 redirect，以及新 API 未登入時回 JSON/401
 - [x] `recoverable_ingest` migration 套用 production，欄位與索引讀回驗證
-- [ ] push 後部署並驗證公開站與 commit status
+- [x] push 後部署並驗證公開站與 commit status
 - [x] 更新 `CONTEXT.md` / `tasks/lessons.md`，完成文件收尾（commit + push 由主代理執行）
 
 ## Review
@@ -40,6 +40,7 @@
 - Android `testDebugUnitTest` 無測試來源但成功，`assembleDebug` 成功；APK `0.7.0` / versionCode `7`。
 - `recoverable_ingest` 已套用 production；`sources` 欄位、`ingest_jobs` 欄位與 unique/index 約束已讀回驗證。
 - Security review：無 CRITICAL/HIGH；剩餘已知限制是 Drive → DB → `page_links` 非單一交易，保留 CAS + compensation。
+- 部署：commit `3318b26`、Vercel success、GitHub Actions `33473299451` success，Android APK artifact 已上傳；production 公開頁/API 回讀正常。
 
 ---
 
