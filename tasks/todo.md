@@ -102,12 +102,13 @@
 - [x] 修 Web 知識圖譜深色模式，沿用既有主題 token
 - [x] 修匯入狀態不會自動結束的根因並補回歸檢查
 - [x] 驗證 Web 深色／淺色、匯入狀態、typecheck、build 與 Android APK
-- [ ] 更新 Review、commit、push 並確認 production 部署
+- [x] 更新 Review、commit、push 並確認 production 部署
 
 ## Review
 
 - 根因是 Web 直接查 `ingest_jobs.status=running`；Vercel 中斷留下 stale row 時，畫面會永遠顯示「匯入中」。改由 `/api/ingest` 先做 server stale sweep，再回傳 queue 清單給 UI。
 - GraphView 改用 `next-themes` 的 `resolvedTheme` 與深色專用節點／連線色，切換深色模式後重繪仍保持可讀。
 - `findStaleRunningJobs` 回歸測試確認只清理過期 running job，不影響仍活著的 job。
+- commit `67a1522` 已部署至 production；正式網址 redirect 正常，新 ingest list 未登入回 JSON `401`，近 10 分鐘無 error log。
 
 ---
