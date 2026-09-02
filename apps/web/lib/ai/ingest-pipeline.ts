@@ -1,5 +1,5 @@
 import { createHash } from 'crypto';
-import { generateText, stepCountIs, type ModelMessage } from 'ai';
+import { APICallError, generateText, stepCountIs, type ModelMessage } from 'ai';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { drive_v3 } from 'googleapis';
 import { createLLMClient } from './client';
@@ -67,7 +67,7 @@ export class IngestLeaseLostError extends Error {
   }
 }
 
-/** Keep provider/Drive details in server logs, never in the public job row. */
+/** Public job-row text: the provider's message only, never its URL/body/keys. */
 export function publicIngestError(error: unknown): string {
   const message = error instanceof Error ? error.message : '';
   if (message === 'The model wrote no pages for this source.') return message;
@@ -78,6 +78,12 @@ export function publicIngestError(error: unknown): string {
   if (/No LLM profile configured/i.test(message)) return 'No LLM profile configured';
   if (/Google Drive.*(authori[sz]|reauthor|access)/i.test(message)) {
     return 'Google Drive authorization required';
+  }
+  // A bad model id or provider outage fails every retry identically. Showing the
+  // provider's own words is the only way the user can tell retrying is pointless.
+  if (APICallError.isInstance(error)) {
+    const status = error.statusCode ? ` (${error.statusCode})` : '';
+    return `Model call failed${status}: ${message.slice(0, 200)}`;
   }
   return 'Ingest failed';
 }
