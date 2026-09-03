@@ -339,3 +339,5 @@ cd apps/android && .\gradlew.bat :app:assembleDebug   # BUILD SUCCESSFUL
 **匯入卡住**：唯一的 LLM profile 的 model 是 `google/gemini-3.7-flash:batch`。OpenRouter 對 `:batch` 變體只開放 Batch API，一般 `/chat/completions` 回 404「This model is only available through the Batch API」。每次匯入、每次「重新整合」都在 8 秒內失敗，job row 只寫 `Ingest failed`（`publicIngestError` 的 fallback），所以看不出重試是徒勞。已改 production profile 的 model 為 `google/gemini-3.7-flash`，並讓 `publicIngestError` 對 `APICallError` 透出 provider 原話（測試：`apps/web/lib/ai/ingest-pipeline.test.ts`）。
 
 **Drive 每週要重連**：GCP OAuth 同意畫面停在「測試中」，Google 對測試狀態的 app 讓 refresh token 7 天失效。修法是把同意畫面發布為正式版，這需要首頁與隱私權政策網址 → 新增 `apps/web/app/privacy/page.tsx`（`/privacy`），並在 Google Auth Platform 品牌頁填入支援 email、首頁、隱私權網址。詳見 CLAUDE.md「Google OAuth 發布狀態」。
+
+修完 model 之後又連續露出兩層（都是同一個根因：沒有 structured outputs 時，schema 只剩 prompt 在撐）——plan 階段照 `_schema/ingest.md` 的舊 JSON 範例回答、review 階段漏三個必填 key（9 頁已寫入卻標 failed）。兩個 prompt 現在各自列出所有 key，並共用一次「帶著拒絕訊息重試」。production 實測：`done / phase=done / touched=9 / result=updated`。

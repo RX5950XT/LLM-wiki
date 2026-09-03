@@ -234,6 +234,11 @@ Query API 文字串流結尾依序附加 `\x00CITATIONS\x00[...]`、`\x00ACTIONS
 - GCP 專案 `my-project-1750440589634` 的 OAuth 同意畫面必須維持**正式版**；設為「測試中」時 Google 讓 refresh token 7 天失效，使用者每週被迫重連 Google Drive（`DRIVE_RECONNECT_REQUIRED`），非程式問題
 - 發布必填：應用程式名稱、支援 email、首頁 `https://llm-wiki-seven.vercel.app`、隱私權政策 `https://llm-wiki-seven.vercel.app/privacy`（頁面在 `apps/web/app/privacy/page.tsx`）
 
+### 兩階段 ingest 的 JSON 格式
+- OpenRouter 的 Gemini 沒有 structured outputs，plan / review 的 schema 只靠 prompt 撐住；兩個 prompt 都必須逐一列出 schema 的每個 key
+- plan prompt 會把工作區的 `_schema/ingest.md` 原文注入，那份規則檔可能示範舊格式（`new_pages` / `updated_pages`）——prompt 要明講忽略其中任何 JSON 範例，並說明兩份清單合併成單一 `target_pages`
+- `generateSchemaObject` 在 `NoObjectGeneratedError` 時帶著拒絕訊息重試一次；review 失敗會讓已寫入的頁面被標成 failed job
+
 ### 匯入錯誤訊息
 - `publicIngestError` 對 `APICallError` 會透出 provider 原始訊息與 status code（截 200 字，不含 URL / request body）；不可再壓成一句 `Ingest failed`——設定錯誤（例如 model 填成 `:batch` 變體）與暫時性故障必須看得出差別，否則使用者只會一直重試
 
