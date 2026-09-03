@@ -93,6 +93,16 @@ export async function GET(
   const requestId = randomUUID();
   let workspaceId = 'unknown';
   let slugStr = 'unknown';
+  // Opening a page is the most frequent request in the app; report where its
+  // time goes so a slowdown can be read off the response instead of guessed at.
+  const started = Date.now();
+  const marks: string[] = [];
+  let last = started;
+  const mark = (name: string) => {
+    const now = Date.now();
+    marks.push(`${name};dur=${now - last}`);
+    last = now;
+  };
 
   try {
     const { workspaceId: rawWorkspaceId, slug } = await params;
@@ -105,6 +115,7 @@ export async function GET(
       : rawSlug;
 
     const { supabase, user } = await getRequestUser(request);
+    mark('auth');
     if (!user) {
       return jsonError(401, 'AUTH_REQUIRED', 'Authentication required', requestId);
     }
@@ -118,6 +129,7 @@ export async function GET(
 
     // Fuzzy fallback so links written with a different slug format still resolve
     const page = exact ?? (await resolvePageByAlias(supabase, workspaceId, slugStr));
+    mark('page');
 
     if (!page) {
       // Not here — but maintenance may have re-shelved it into another workspace.
@@ -147,9 +159,14 @@ export async function GET(
       }
       throw error;
     }
+    mark('token');
 
     const content = await readDriveFile(drive, page.drive_file_id);
-    return NextResponse.json({ ...page, content });
+    mark('drive');
+    return NextResponse.json(
+      { ...page, content },
+      { headers: { 'Server-Timing': marks.join(', ') } },
+    );
   } catch (error) {
     if (error instanceof DriveReadError) {
       console.error('[GET /api/pages] drive read failed', {
