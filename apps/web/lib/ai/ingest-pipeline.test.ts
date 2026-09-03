@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { APICallError } from 'ai';
-import { nudgeForRemaining, publicIngestError } from './ingest-pipeline';
+import { budgetExhaustedError, nudgeForRemaining, publicIngestError } from './ingest-pipeline';
 
 describe('publicIngestError', () => {
   it('surfaces the provider message so a doomed retry is visible', () => {
@@ -30,5 +30,17 @@ describe('nudgeForRemaining', () => {
 
   it('falls back to the empty-run wording when nothing was planned left', () => {
     expect(nudgeForRemaining([])).toContain('No writePage call has completed yet');
+  });
+});
+
+describe('budgetExhaustedError', () => {
+  it('says how far it got and that a retry continues', () => {
+    const message = budgetExhaustedError(6, 8).message;
+    expect(message).toContain('6 of 8');
+    expect(message).toContain('Retry');
+  });
+
+  it('is not flattened into the generic failure text', () => {
+    expect(publicIngestError(budgetExhaustedError(6, 8))).toContain('6 of 8');
   });
 });

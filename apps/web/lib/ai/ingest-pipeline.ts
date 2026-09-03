@@ -37,6 +37,19 @@ export function nudgeForRemaining(remaining: readonly string[]): string {
   return `These planned pages have no completed writePage call yet: ${remaining.join(', ')}. Write every one of them now with writePage; do not answer with prose.`;
 }
 const MAX_WRITE_ATTEMPTS = 2;
+/**
+ * Vercel kills the whole invocation at maxDuration = 300s, and a killed run
+ * never writes its job row: the job sits in `running` until the 8-minute stale
+ * sweep. Stop first, so the checkpoint is consistent and a retry resumes from it.
+ */
+const PIPELINE_BUDGET_MS = 210_000;
+
+/** Failure text for a run that ran out of wall clock with pages still owed. */
+export function budgetExhaustedError(written: number, planned: number): Error {
+  return new Error(
+    `Ingest ran out of time after ${written} of ${planned} planned pages. Retry to continue from here.`,
+  );
+}
 
 export interface IngestContext {
   supabase: SupabaseClient;
@@ -81,6 +94,7 @@ export function publicIngestError(error: unknown): string {
   const message = error instanceof Error ? error.message : '';
   if (message === 'The model wrote no pages for this source.') return message;
   if (message === 'SUSPECTED_TRUNCATION') return message;
+  if (message.startsWith('Ingest ran out of time')) return message;
   if (message.startsWith('Ingest review incomplete')) return 'Ingest review incomplete';
   if (message.startsWith('Invalid ingest target page slug')) return 'Ingest plan contains an invalid page target';
   if (message.startsWith('Ingest plan exceeds')) return 'Ingest plan contains too many page targets';
@@ -277,6 +291,7 @@ async function auditWrittenPages(
  * independently so the next invocation resumes from the saved plan.
  */
 export async function runIngestPipeline(ctx: IngestContext): Promise<string[]> {
+  const deadline = Date.now() + PIPELINE_BUDGET_MS;
   const job = await loadJob(ctx);
   const sourceId = ctx.sourceId ?? job.source_id;
   const sourceSha256 = hashSource(ctx.sourceContent);
@@ -361,6 +376,7 @@ export async function runIngestPipeline(ctx: IngestContext): Promise<string[]> {
     const unwrittenTargets = () => plannedTargets.filter((slug) => !touched.has(slug));
 
     for (let attempt = 0; attempt < MAX_WRITE_ATTEMPTS; attempt += 1) {
+      if (Date.now() > deadline) break;
       if (attempt > 0) {
         messages.push({ role: 'user', content: nudgeForRemaining(unwrittenTargets()) });
       }
@@ -370,7 +386,7 @@ export async function runIngestPipeline(ctx: IngestContext): Promise<string[]> {
           system: ctx.systemPrompt,
           messages,
           tools,
-          stopWhen: stepCountIs(30),
+          stopWhen: [stepCountIs(30), () => Date.now() > deadline],
           onStepFinish: async (step) => {
             let changed = false;
             for (const toolResult of step.toolResults ?? []) {
@@ -402,6 +418,11 @@ export async function runIngestPipeline(ctx: IngestContext): Promise<string[]> {
       return markPaused(ctx, 'writing', checkpoint);
     }
     if (lastWriteError && touched.size === 0) throw lastWriteError;
+    if (unwrittenTargets().length > 0 && Date.now() > deadline) {
+      const error = budgetExhaustedError(touched.size, plannedTargets.length);
+      await markFailed(ctx, error, checkpoint, 'writing');
+      throw error;
+    }
     if (touched.size === 0) {
       const error = new Error('The model wrote no pages for this source.');
       await markFailed(ctx, error, checkpoint, 'writing');
