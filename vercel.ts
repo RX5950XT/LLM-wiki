@@ -4,7 +4,7 @@ import { routes, type VercelConfig } from '@vercel/config/v1';
  * Vercel project configuration for LLM Wiki.
  *
  * Deployed as a Next.js 16 App Router application with Fluid Compute
- * for the ingest / query / lint background functions.
+ * for the ingest / query / organize background functions.
  */
 export const config: VercelConfig = {
   framework: 'nextjs',
@@ -12,10 +12,12 @@ export const config: VercelConfig = {
   installCommand: 'bun install',
   outputDirectory: 'apps/web/.next',
 
-  // Weekly lint pass across every active workspace the user owns.
-  crons: [
-    { path: '/api/lint/cron', schedule: '0 3 * * 1' },
-  ],
+  /**
+   * Every request reads Supabase (ap-southeast-1) several times, so running the
+   * functions in the US default put a Pacific crossing in front of each page
+   * read. Singapore sits next to the database and near the user.
+   */
+  regions: ['sin1'],
 
   headers: [
     routes.cacheControl('/_next/static/(.*)', {
