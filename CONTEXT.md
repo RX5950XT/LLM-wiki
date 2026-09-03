@@ -343,3 +343,5 @@ cd apps/android && .\gradlew.bat :app:assembleDebug   # BUILD SUCCESSFUL
 修完 model 之後又連續露出兩層（都是同一個根因：沒有 structured outputs 時，schema 只剩 prompt 在撐）——plan 階段照 `_schema/ingest.md` 的舊 JSON 範例回答、review 階段漏三個必填 key（9 頁已寫入卻標 failed）。兩個 prompt 現在各自列出所有 key，並共用一次「帶著拒絕訊息重試」。production 實測：`done / phase=done / touched=9 / result=updated`。
 
 再往下還有兩層：寫入迴圈寫出一頁就收工（計畫 11 頁只寫 4 頁 → review 正確判 incomplete），改成寫完計畫才停之後，又撞上 Vercel 300s 硬砍（job 卡 running 8 分鐘）。現在有 210s wall-clock 預算並回報「N of M planned pages, retry to continue」；續寫要用佇列的「重試」（保留 checkpoint），不是 Sources 的「重新整合」（重新規劃的新 job）。
+
+同一天處理「切頁很慢」：實測開一頁 1.6–3.4s。access token 每次重換（已快取）、function 跑在 iad1 而 Supabase 在 ap-southeast-1（已改 `regions: ['sin1']`）、Drive 兩次往返（已用 `pages.version` 做 ETag，最新版直接 304）、前端切回讀過的頁面不再重抓（PageViewer 快取 40 頁）。`Server-Timing` 留在回應裡，下次不用猜。

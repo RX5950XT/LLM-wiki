@@ -234,6 +234,10 @@ Query API 文字串流結尾依序附加 `\x00CITATIONS\x00[...]`、`\x00ACTIONS
 - GCP 專案 `my-project-1750440589634` 的 OAuth 同意畫面必須維持**正式版**；設為「測試中」時 Google 讓 refresh token 7 天失效，使用者每週被迫重連 Google Drive（`DRIVE_RECONNECT_REQUIRED`），非程式問題
 - 發布必填：應用程式名稱、支援 email、首頁 `https://llm-wiki-seven.vercel.app`、隱私權政策 `https://llm-wiki-seven.vercel.app/privacy`（頁面在 `apps/web/app/privacy/page.tsx`）
 
+### 開一頁的成本
+- `GET /api/pages/...` 改版前 1.6–3.4s；修法：access token 快取（`drive-auth.ts`）、`regions: ['sin1']`（Supabase 在 ap-southeast-1）、ETag `"<slug>:<version>"` 讓最新版 client 拿 304 而完全不碰 Drive、PageViewer 快取最近 40 頁、`Server-Timing` 標出 auth/page/token/drive 各段
+- 瓶頸是 Drive 的兩次往返（metadata + media）；有效的方向是「不打 Drive」，不是拆掉 `readDriveFile` 的 MIME 分流
+
 ### 寫入完整性與時間預算
 - 寫入迴圈必須寫完 `plan.target_pages` 才 break（只寫一頁就進審查 → review 判 incomplete → 整個 job failed）
 - pipeline 有 `PIPELINE_BUDGET_MS = 210_000` wall-clock 預算；不自己停就會被 Vercel 的 300s maxDuration 硬砍，job 卡 `running` 直到 8 分鐘 stale sweep

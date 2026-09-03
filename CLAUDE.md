@@ -523,6 +523,18 @@ Conversation panel 輸入框左側的 `Bot` 按鈕是**多功能選單**：「�
 前端：Web 輸入框偵測結尾 `@xxx` 片段 → 浮動工作區選單（↑↓ + Enter / Tab 選取）→ 選中變成 chip；Android 同樣邏輯（chip 用 `AssistChip`）。送出後 chip 清空。
 系統 prompt 尾端由 server 追加「跨工作區能力說明」（`_schema/query.md` 客製化後仍會補上，確保工具能力永遠有被說明）。
 
+## 開一頁的成本（2026-09-03 實測與修法）
+
+`GET /api/pages/[workspaceId]/[...slug]` 是全 App 最常打的請求，改版前 **1.6–3.4 秒**。它原本要做四件事：Supabase auth → 查 page row → **拿 Google access token** → **Drive metadata + 內容下載**。修法依效果排序：
+
+- **access token 快取（`lib/google/drive-auth.ts`）**：Google 的 token 有效一小時，舊版每個請求都重換一次。`cachedAccessToken` / `rememberAccessToken` 以 userId 快取到到期前 60 秒（純記憶體，冷實例自然重換）。Web / Android / ingest / query 全部受益。
+- **`regions: ['sin1']`（`vercel.ts`）**：部署預設在 `iad1`，但 Supabase 在 `ap-southeast-1`、使用者在台灣——每個請求都跨太平洋數趟。**新增 region 敏感的功能前先想這條**。
+- **ETag = `"<slug>:<version>"`**：`pages.version` 由 `writePage` 與 PATCH bump，所以它就是內容的版本號。手上是最新版的 client 收到 **304，完全不碰 Drive**——省掉兩次外部往返，這是單筆請求裡最大的一塊。
+- **PageViewer 的 `pageCache`（最近 40 頁）**：切回讀過的頁面先畫既有內容、不出骨架屏，背景再驗證（Realtime 仍會標 stale）。
+- **`Server-Timing` header**（auth / page / token / drive）：下次再有人說「變慢了」，直接讀回應，不要用猜的。
+
+跨區與 token 修完後仍是 ~1.4 秒，證明**瓶頸是 Drive 的兩次往返**——所以 ETag 這種「根本不打 Drive」的手段才是有效的方向；`readDriveFile` 的 metadata 分流有其正確性理由（見下），不要為了省一次往返把它拆掉。
+
 ## 效能：Server Component 不可在請求路徑上打 Drive
 
 `app/w/[wid]/page.tsx` 與 `app/settings/page.tsx` 的 `ensureWorkspaceSystemPages()`（Google Drive API 呼叫）已移進 `after()`。
