@@ -144,6 +144,18 @@ export async function GET(
       return jsonError(404, 'PAGE_NOT_FOUND', 'Page not found', requestId);
     }
 
+    // The page row carries the version the writers bump, so a reader holding the
+    // current one needs no Drive call at all — that is two network round trips
+    // saved on the most frequent request in the app.
+    const etag = `"${page.slug}:${page.version}"`;
+    if (request.headers.get('if-none-match') === etag) {
+      mark('page-unchanged');
+      return new NextResponse(null, {
+        status: 304,
+        headers: { ETag: etag, 'Cache-Control': 'private, no-cache', 'Server-Timing': marks.join(', ') },
+      });
+    }
+
     let drive: Awaited<ReturnType<typeof createDriveClientForUser>>;
     try {
       drive = await createDriveClientForUser(user.id);
@@ -165,7 +177,13 @@ export async function GET(
     mark('drive');
     return NextResponse.json(
       { ...page, content },
-      { headers: { 'Server-Timing': marks.join(', ') } },
+      {
+        headers: {
+          ETag: etag,
+          'Cache-Control': 'private, no-cache',
+          'Server-Timing': marks.join(', '),
+        },
+      },
     );
   } catch (error) {
     if (error instanceof DriveReadError) {
