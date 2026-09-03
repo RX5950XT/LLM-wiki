@@ -101,3 +101,13 @@ describe('plan prompt owns the output format', () => {
     expect(prompt).toContain('MUST be ignored');
   });
 });
+
+describe('review prompt owns the output format', () => {
+  const prompt = buildIngestReviewPrompt('T', PLAN, ['concepts/compiler.md']);
+
+  it('names every key the schema requires', () => {
+    for (const key of Object.keys(ingestReviewSchema.shape)) {
+      expect(prompt).toContain(`"${key}"`);
+    }
+  });
+});
