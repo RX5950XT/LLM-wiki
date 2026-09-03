@@ -29,8 +29,10 @@ const PROMPTS: Record<PromptLocale, Record<PromptKind, string>> = {
    \`\`\`json
    {
      "summary": "一句話總結來源主題。",
-     "new_pages": ["entities/name.md"],
-     "updated_pages": ["concepts/topic.md"],
+     "people": ["人名"],
+     "concepts": ["概念"],
+     "evidence": ["具體事實或數字"],
+     "target_pages": ["entities/name.md", "concepts/topic.md"],
      "contradictions": [{"page": "concepts/x.md", "note": "新來源與既有說法衝突。"}]
    }
    \`\`\`
@@ -139,8 +141,10 @@ You maintain a personal knowledge wiki. When a new source arrives, compile it in
    \`\`\`json
    {
      "summary": "One-line source summary.",
-     "new_pages": ["entities/name.md"],
-     "updated_pages": ["concepts/topic.md"],
+     "people": ["Person name"],
+     "concepts": ["Concept"],
+     "evidence": ["A concrete fact or number"],
+     "target_pages": ["entities/name.md", "concepts/topic.md"],
      "contradictions": [{"page": "concepts/x.md", "note": "The new source conflicts with an existing claim."}]
    }
    \`\`\`

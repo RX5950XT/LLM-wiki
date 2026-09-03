@@ -77,3 +77,27 @@ describe('ingest plan contract', () => {
     expect(prompt).toContain('BEGIN UNTRUSTED SOURCE CONTENT');
   });
 });
+
+describe('plan prompt owns the output format', () => {
+  // A workspace's _schema/ingest.md still documents the pre-Phase-17 plan shape
+  // ({new_pages, updated_pages}). It is injected verbatim, so the prompt has to
+  // name every schema key itself and disown the old example.
+  const prompt = buildIngestPlanPrompt({
+    systemPrompt: '產出 update plan JSON: {"new_pages": [], "updated_pages": []}',
+    sourceTitle: 'T',
+    sourceContent: 'C',
+    indexContent: 'I',
+    inventory: 'V',
+  });
+
+  it('names every key the schema requires', () => {
+    for (const key of Object.keys(ingestPlanSchema.shape)) {
+      expect(prompt).toContain(`"${key}"`);
+    }
+  });
+
+  it('tells the model to ignore the older split-list format', () => {
+    expect(prompt).toContain('Never split them into separate keys');
+    expect(prompt).toContain('MUST be ignored');
+  });
+});
