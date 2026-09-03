@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { APICallError } from 'ai';
-import { publicIngestError } from './ingest-pipeline';
+import { nudgeForRemaining, publicIngestError } from './ingest-pipeline';
 
 describe('publicIngestError', () => {
   it('surfaces the provider message so a doomed retry is visible', () => {
@@ -18,5 +18,17 @@ describe('publicIngestError', () => {
 
   it('keeps unknown errors generic', () => {
     expect(publicIngestError(new Error('boom'))).toBe('Ingest failed');
+  });
+});
+
+describe('nudgeForRemaining', () => {
+  it('names the pages the model still owes', () => {
+    const text = nudgeForRemaining(['concepts/fde.md', 'entities/palantir.md']);
+    expect(text).toContain('concepts/fde.md');
+    expect(text).toContain('entities/palantir.md');
+  });
+
+  it('falls back to the empty-run wording when nothing was planned left', () => {
+    expect(nudgeForRemaining([])).toContain('No writePage call has completed yet');
   });
 });

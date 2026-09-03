@@ -27,6 +27,15 @@ import type {
 
 const NUDGE_PROMPT =
   'No writePage call has completed yet. Continue the validated plan now; do not answer with prose.';
+
+/**
+ * The model regularly stops after a few pages and answers in prose, which the
+ * review pass then rejects as incomplete. Name the pages it still owes.
+ */
+export function nudgeForRemaining(remaining: readonly string[]): string {
+  if (remaining.length === 0) return NUDGE_PROMPT;
+  return `These planned pages have no completed writePage call yet: ${remaining.join(', ')}. Write every one of them now with writePage; do not answer with prose.`;
+}
 const MAX_WRITE_ATTEMPTS = 2;
 
 export interface IngestContext {
@@ -348,9 +357,13 @@ export async function runIngestPipeline(ctx: IngestContext): Promise<string[]> {
       },
     ];
     let lastWriteError: unknown = null;
+    const plannedTargets = plan.target_pages;
+    const unwrittenTargets = () => plannedTargets.filter((slug) => !touched.has(slug));
 
     for (let attempt = 0; attempt < MAX_WRITE_ATTEMPTS; attempt += 1) {
-      if (attempt > 0) messages.push({ role: 'user', content: NUDGE_PROMPT });
+      if (attempt > 0) {
+        messages.push({ role: 'user', content: nudgeForRemaining(unwrittenTargets()) });
+      }
       try {
         const result = await generateText({
           model,
@@ -377,7 +390,7 @@ export async function runIngestPipeline(ctx: IngestContext): Promise<string[]> {
         });
         messages.push(...result.response.messages);
         lastWriteError = null;
-        if (touched.size > 0) break;
+        if (unwrittenTargets().length === 0) break;
       } catch (error) {
         lastWriteError = error;
         if (attempt + 1 >= MAX_WRITE_ATTEMPTS) throw error;
