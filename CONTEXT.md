@@ -341,3 +341,5 @@ cd apps/android && .\gradlew.bat :app:assembleDebug   # BUILD SUCCESSFUL
 **Drive 每週要重連**：GCP OAuth 同意畫面停在「測試中」，Google 對測試狀態的 app 讓 refresh token 7 天失效。修法是把同意畫面發布為正式版，這需要首頁與隱私權政策網址 → 新增 `apps/web/app/privacy/page.tsx`（`/privacy`），並在 Google Auth Platform 品牌頁填入支援 email、首頁、隱私權網址。詳見 CLAUDE.md「Google OAuth 發布狀態」。
 
 修完 model 之後又連續露出兩層（都是同一個根因：沒有 structured outputs 時，schema 只剩 prompt 在撐）——plan 階段照 `_schema/ingest.md` 的舊 JSON 範例回答、review 階段漏三個必填 key（9 頁已寫入卻標 failed）。兩個 prompt 現在各自列出所有 key，並共用一次「帶著拒絕訊息重試」。production 實測：`done / phase=done / touched=9 / result=updated`。
+
+再往下還有兩層：寫入迴圈寫出一頁就收工（計畫 11 頁只寫 4 頁 → review 正確判 incomplete），改成寫完計畫才停之後，又撞上 Vercel 300s 硬砍（job 卡 running 8 分鐘）。現在有 210s wall-clock 預算並回報「N of M planned pages, retry to continue」；續寫要用佇列的「重試」（保留 checkpoint），不是 Sources 的「重新整合」（重新規劃的新 job）。

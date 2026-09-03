@@ -234,6 +234,11 @@ Query API 文字串流結尾依序附加 `\x00CITATIONS\x00[...]`、`\x00ACTIONS
 - GCP 專案 `my-project-1750440589634` 的 OAuth 同意畫面必須維持**正式版**；設為「測試中」時 Google 讓 refresh token 7 天失效，使用者每週被迫重連 Google Drive（`DRIVE_RECONNECT_REQUIRED`），非程式問題
 - 發布必填：應用程式名稱、支援 email、首頁 `https://llm-wiki-seven.vercel.app`、隱私權政策 `https://llm-wiki-seven.vercel.app/privacy`（頁面在 `apps/web/app/privacy/page.tsx`）
 
+### 寫入完整性與時間預算
+- 寫入迴圈必須寫完 `plan.target_pages` 才 break（只寫一頁就進審查 → review 判 incomplete → 整個 job failed）
+- pipeline 有 `PIPELINE_BUDGET_MS = 210_000` wall-clock 預算；不自己停就會被 Vercel 的 300s maxDuration 硬砍，job 卡 `running` 直到 8 分鐘 stale sweep
+- 續寫走 `PATCH /api/ingest {action:'retry'}`（保留 checkpoint）；`/api/sources/[id]/reingest` 是重新規劃的新 job
+
 ### 兩階段 ingest 的 JSON 格式
 - OpenRouter 的 Gemini 沒有 structured outputs，plan / review 的 schema 只靠 prompt 撐住；兩個 prompt 都必須逐一列出 schema 的每個 key
 - plan prompt 會把工作區的 `_schema/ingest.md` 原文注入，那份規則檔可能示範舊格式（`new_pages` / `updated_pages`）——prompt 要明講忽略其中任何 JSON 範例，並說明兩份清單合併成單一 `target_pages`
