@@ -345,3 +345,15 @@ cd apps/android && .\gradlew.bat :app:assembleDebug   # BUILD SUCCESSFUL
 再往下還有兩層：寫入迴圈寫出一頁就收工（計畫 11 頁只寫 4 頁 → review 正確判 incomplete），改成寫完計畫才停之後，又撞上 Vercel 300s 硬砍（job 卡 running 8 分鐘）。現在有 210s wall-clock 預算並回報「N of M planned pages, retry to continue」；續寫要用佇列的「重試」（保留 checkpoint），不是 Sources 的「重新整合」（重新規劃的新 job）。
 
 同一天處理「切頁很慢」：實測開一頁 1.6–3.4s。access token 每次重換（已快取）、function 跑在 iad1 而 Supabase 在 ap-southeast-1（已改 `regions: ['sin1']`）、Drive 兩次往返（已用 `pages.version` 做 ETag，最新版直接 304）、前端切回讀過的頁面不再重抓（PageViewer 快取 40 頁）。`Server-Timing` 留在回應裡，下次不用猜。
+
+## 2026-09-04：Android v0.7.1 — 開頁改成條件請求
+
+上一則把「切回讀過的頁面立刻顯示」寫成 Web-only，這是錯的：Android 從很早就有 Room 內容快取（`PageEntity.content`，`syncPages` 只在 `version` 變動時清空），切回讀過的頁本來就是即時的，而且跨重啟保留。
+
+真正缺的是另一件事：命中快取時 `loadPageContent` **完全不打 API**，所以在網頁上改過的頁，手機要等下一次 `syncPages` 才會更新。伺服器現在有 ETag，一次條件請求在 304 時連 Drive 都不碰，便宜到可以每次開頁都做。改法：
+
+- `PageRepository.loadPageContent` 對有快取的頁帶 `If-None-Match: pageEtag(slug, version)`（格式必須與伺服器 `"<slug>:<version>"` 一致）；304 沿用快取，200 用 `updateContentAndVersion` 把內容與 `version` 一起寫回 Room。
+- **任何失敗都退回已快取內容**（離線、401、Drive 重授權都不會把畫面清空）。
+- `WikiViewModel.selectPage` 改成一律呼叫 `loadContent`；`contentLoading` 仍只在沒有快取時為 true，所以畫面不會多出骨架屏。
+
+APK bump 到 `0.7.1`（versionCode `8`）。伺服器端的 token 快取、`sin1`、ETag 對舊版 APK 無害，舊版只是拿不到條件請求這一項。

@@ -237,6 +237,7 @@ Query API 文字串流結尾依序附加 `\x00CITATIONS\x00[...]`、`\x00ACTIONS
 ### 開一頁的成本
 - `GET /api/pages/...` 改版前 1.6–3.4s；修法：access token 快取（`drive-auth.ts`）、`regions: ['sin1']`（Supabase 在 ap-southeast-1）、ETag `"<slug>:<version>"` 讓最新版 client 拿 304 而完全不碰 Drive、PageViewer 快取最近 40 頁、`Server-Timing` 標出 auth/page/token/drive 各段
 - 瓶頸是 Drive 的兩次往返（metadata + media）；有效的方向是「不打 Drive」，不是拆掉 `readDriveFile` 的 MIME 分流
+- Android 早就有 Room 內容快取（`PageEntity.content`，version 變動才清空），切回讀過的頁本來就是即時的；v0.7.1 補的是**條件請求**：`loadPageContent` 帶 `If-None-Match`（`pageEtag` 必須與伺服器 `"<slug>:<version>"` 一致），304 沿用快取、200 連 `version` 一起寫回，任何失敗都退回快取內容
 
 ### 寫入完整性與時間預算
 - 寫入迴圈必須寫完 `plan.target_pages` 才 break（只寫一頁就進審查 → review 判 incomplete → 整個 job failed）

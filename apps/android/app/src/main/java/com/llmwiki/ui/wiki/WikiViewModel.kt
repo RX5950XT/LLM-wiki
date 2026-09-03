@@ -453,7 +453,10 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                 backlinks = emptyList(),
             )
         }
-        if (page.content == null) loadContent(page)
+        // Cached content is on screen already; loadContent still runs to check the
+        // page row's version against the server (a 304 costs no Drive read), so a
+        // page edited on the web stops showing its old copy until the next sync.
+        loadContent(page)
         loadBacklinks(page.slug)
     }
 

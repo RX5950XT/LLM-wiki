@@ -20,7 +20,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
 sealed class PageLoadResult {
-    data class Success(val content: String) : PageLoadResult()
+    data class Success(val content: String, val version: Long? = null) : PageLoadResult()
     data class Failure(
         val code: String,
         val userMessage: String,
@@ -28,6 +28,15 @@ sealed class PageLoadResult {
         val requestId: String? = null,
     ) : PageLoadResult()
 }
+
+/** Internal only: the server said 304, so the row we already hold is current. */
+private const val NOT_MODIFIED = "NOT_MODIFIED"
+
+/**
+ * Mirrors the server's ETag for a page row (`"<slug>:<version>"`). Writers bump
+ * `version`, so a matching tag means the Drive file cannot have changed.
+ */
+fun pageEtag(slug: String, version: Long): String = "\"$slug:$version\""
 
 object PageErrorCodes {
     const val AUTH_REQUIRED = "AUTH_REQUIRED"
@@ -137,13 +146,40 @@ class PageRepository(
                 "Page missing locally",
                 false,
             )
-        if (entity.content != null) return PageLoadResult.Success(entity.content)
 
-        val apiResult = loadPageContentFromApi(workspaceId, slug)
-        if (apiResult is PageLoadResult.Success) {
-            db.pageDao().updateContent(workspaceId, accountName, slug, apiResult.content)
+        val cached = entity.content
+        if (cached == null) {
+            val apiResult = loadPageContentFromApi(workspaceId, slug, etag = null)
+            if (apiResult is PageLoadResult.Success) {
+                db.pageDao().updateContentAndVersion(
+                    workspaceId,
+                    accountName,
+                    slug,
+                    apiResult.content,
+                    apiResult.version ?: entity.version,
+                )
+            }
+            return apiResult
         }
-        return apiResult
+
+        // The caller has already painted the cached copy, so this only asks whether it
+        // is still current. The server answers 304 straight from the page row without
+        // touching Drive, which is why the check is affordable on every page open.
+        // Anything going wrong - offline, auth, Drive - leaves the cached copy up.
+        val revalidated = runCatching {
+            loadPageContentFromApi(workspaceId, slug, etag = pageEtag(entity.slug, entity.version))
+        }.getOrNull()
+        if (revalidated is PageLoadResult.Success) {
+            db.pageDao().updateContentAndVersion(
+                workspaceId,
+                accountName,
+                slug,
+                revalidated.content,
+                revalidated.version ?: entity.version,
+            )
+            return revalidated
+        }
+        return PageLoadResult.Success(cached, entity.version)
     }
 
     suspend fun getWorkspaces(): List<WorkspaceRow> {
@@ -191,7 +227,11 @@ class PageRepository(
             header("x-llm-wiki-locale", locale)
         }
 
-    private suspend fun loadPageContentFromApi(workspaceId: String, slug: String): PageLoadResult {
+    private suspend fun loadPageContentFromApi(
+        workspaceId: String,
+        slug: String,
+        etag: String?,
+    ): PageLoadResult {
         var accessToken = supabase.requireAccessToken(forceRefresh = false)
             ?: supabase.requireAccessToken(forceRefresh = true)
             ?: return PageLoadResult.Failure(
@@ -200,7 +240,7 @@ class PageRepository(
                 false,
             )
 
-        var response = getPageContentResponse(accessToken, workspaceId, slug)
+        var response = getPageContentResponse(accessToken, workspaceId, slug, etag)
         if (response.status.value == 401) {
             accessToken = supabase.requireAccessToken(forceRefresh = true)
                 ?: return PageLoadResult.Failure(
@@ -208,7 +248,11 @@ class PageRepository(
                     "Authentication required",
                     false,
                 )
-            response = getPageContentResponse(accessToken, workspaceId, slug)
+            response = getPageContentResponse(accessToken, workspaceId, slug, etag)
+        }
+
+        if (response.status.value == 304) {
+            return PageLoadResult.Failure(NOT_MODIFIED, "Cached copy is current", false)
         }
 
         val raw = response.bodyAsText()
@@ -231,7 +275,7 @@ class PageRepository(
                         false,
                     )
                 } else {
-                    PageLoadResult.Success(content)
+                    PageLoadResult.Success(content, parsed.version)
                 }
             }.getOrElse {
                 PageLoadResult.Failure(
@@ -259,9 +303,15 @@ class PageRepository(
         }
     }
 
-    private suspend fun getPageContentResponse(accessToken: String, workspaceId: String, slug: String): HttpResponse =
+    private suspend fun getPageContentResponse(
+        accessToken: String,
+        workspaceId: String,
+        slug: String,
+        etag: String?,
+    ): HttpResponse =
         AndroidHttpClient.instance.get("${BuildConfig.WEB_API_BASE_URL.trimEnd('/')}/api/pages/$workspaceId/${slug.encodePathSegments()}") {
             header("Authorization", "Bearer $accessToken")
+            if (etag != null) header("If-None-Match", etag)
         }
 
     private suspend fun <T> withSupabaseRetry(block: suspend () -> T): T {
@@ -293,6 +343,7 @@ class PageRepository(
 @Serializable
 private data class PageContentResponse(
     val content: String? = null,
+    val version: Long? = null,
 )
 
 @Serializable

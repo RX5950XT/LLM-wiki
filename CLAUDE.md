@@ -531,6 +531,8 @@ Conversation panel 輸入框左側的 `Bot` 按鈕是**多功能選單**：「�
 - **`regions: ['sin1']`（`vercel.ts`）**：部署預設在 `iad1`，但 Supabase 在 `ap-southeast-1`、使用者在台灣——每個請求都跨太平洋數趟。**新增 region 敏感的功能前先想這條**。
 - **ETag = `"<slug>:<version>"`**：`pages.version` 由 `writePage` 與 PATCH bump，所以它就是內容的版本號。手上是最新版的 client 收到 **304，完全不碰 Drive**——省掉兩次外部往返，這是單筆請求裡最大的一塊。
 - **PageViewer 的 `pageCache`（最近 40 頁）**：切回讀過的頁面先畫既有內容、不出骨架屏，背景再驗證（Realtime 仍會標 stale）。
+- **Android 的 Room 內容快取（`PageEntity.content`，早於本次修法就有）**：切回讀過的頁面直接畫，且跨重啟保留；`syncPages` 只在 `version` 變動時把 content 清成 null。手機**不是**沒有這層快取——不要為了「補一個手機快取」再疊一層。
+- **Android 開頁一律帶 `If-None-Match`（v0.7.1）**：舊版命中 Room 快取就完全不打 API，於是「在網頁改過的頁，手機要等下一次 syncPages 才會變」。現在 `loadPageContent` 對有快取的頁仍發一次條件請求（`pageEtag(slug, version)` 必須與伺服器的 `"<slug>:<version>"` 完全一致），304 就沿用快取、200 就連 `version` 一起寫回 Room。**任何失敗（離線 / 401 / Drive）都必須回退成已快取內容**，不可讓revalidate 失敗把畫面清空。
 - **`Server-Timing` header**（auth / page / token / drive）：下次再有人說「變慢了」，直接讀回應，不要用猜的。
 
 跨區與 token 修完後仍是 ~1.4 秒，證明**瓶頸是 Drive 的兩次往返**——所以 ETag 這種「根本不打 Drive」的手段才是有效的方向；`readDriveFile` 的 metadata 分流有其正確性理由（見下），不要為了省一次往返把它拆掉。
