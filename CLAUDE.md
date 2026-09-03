@@ -339,6 +339,13 @@ apps/android/app/src/main/java/com/llmwiki/
 - `POST /api/organize` 仍是 `202 { jobId }` + `after()`，`GET /api/organize?job_id=` 輪詢（6 分鐘 stale sweep——超過 `maxDuration` 就一定是死掉的 job，設太長會讓下一次按鈕被 one-at-a-time 鎖 409 擋住、owner-scoped one-at-a-time 鎖）。Web jobId 存 `localStorage['llmwiki:maintenance']`，關頁面回來續 poll；完成時 `refreshPageList()` + `refreshWorkspaceList()`（工作區可能被改名/刪除/重排）。Android 完成時 `syncPagesInternal()` + `refreshWorkspaces()`。
 - **`/api/lint` route 與 Vercel cron 已刪除**（連同 `vercel.json`、`CRON_SECRET`）：週期性、無人看管地跑一個有刪除權的 pipeline 太危險，且會不斷產生報告頁。要恢復排程請先想清楚破壞性動作的授權模型。舊 APK 會打到不存在的 `/api/lint`，需更新。
 
+## Google OAuth 發布狀態（勿回退成「測試中」）
+
+GCP 專案 `my-project-1750440589634`（LLM Wiki）的 OAuth 同意畫面必須維持**正式版（In production）**。發布狀態一旦是「測試中」，Google 會讓 refresh token **7 天就失效**，使用者每週都要重新授權 Google Drive，症狀是 `DRIVE_RECONNECT_REQUIRED`（`getAccessToken` 拿 `invalid_grant`），與程式無關、改程式也修不好。
+
+發布為正式版的必填欄位（Google Auth Platform → 品牌）：應用程式名稱、使用者支援電子郵件、應用程式首頁（`https://llm-wiki-seven.vercel.app`）、隱私權政策網址（`https://llm-wiki-seven.vercel.app/privacy`，頁面在 `apps/web/app/privacy/page.tsx`）。`drive.file` 是非敏感 scope，發布不需要 Google 審查。
+
+
 ## 來源重新整合（re-ingest，Phase 15）
 
 `POST /api/sources/[id]/reingest`：讀 source 既有 Drive 內容（`drive_file_id`）→ 建新 `ingest_job` → `after()` 重跑 `runIngestPipeline`，沿用 `GET /api/ingest?job_id=` 輪詢。**不重新抓 URL、不建重複 source row**（來源 immutable，只是重跑整合）。用於修 provider 暫時性失敗的來源。Web `SourcesDialog` + Android `SourcesListDialog` 每列「重新整合」按鈕（`reingestingSourceId` 期間 disable 其他列）。
@@ -379,6 +386,8 @@ Web（`pollIngestJob`，3s 間隔）與 Android（`WikiViewModel.pollIngestJob`�
 向後相容：舊 server 回 `{ status: 'done' }` 時 client 直接視為完成。
 `urlToMarkdown` 有 20s fetch timeout、5 MB 頁面上限、逐跳 redirect SSRF 驗證（IP 正規化 + DNS 解析檢查，含 IPv6/link-local/CGNAT/metadata IP），並用 undici Agent 的 connect-time `lookup` 在建立連線當下驗證 IP（無 TOCTOU rebinding 窗口）。
 **即時進度**：pipeline 的 `onStepFinish` 會把 `touched_pages` 逐步寫回 job row，輪詢端在 `running` 期間即可顯示「已更新 N 頁」（Web `ingestProgress` state / Android `WikiUiState.ingestProgress`）。
+
+**匯入失敗必須說出 provider 的原話（勿回退）**：`publicIngestError` 舊版把所有未知錯誤壓成 `Ingest failed`。production 實測 profile 的 model 被設成 `google/gemini-3.7-flash:batch`（OpenRouter 只透過 Batch API 提供這個變體，一般 chat completions 回 404），每次匯入與每次「重新整合」都在 8 秒內以同一句無資訊的 `Ingest failed` 收場——使用者只能一直重試。現在 `APICallError` 直接把 provider 的訊息（含 status code、截 200 字）寫進 job row，URL 與 request body 仍不外洩。**設定錯誤與暫時性故障長得不一樣，使用者才知道重試沒有用。**
 
 **0 頁 = 失敗，不是成功（Phase 16e，勿回退）**：`runIngestPipeline` 舊版跑完一次 `generateText` 就無條件把 job 標 `done`。模型只要回一段話、沒呼叫任何工具（provider 抽風、prompt 沒踩到、內容太長），就會出現 **status=done / touched_pages=[] / 只花 10 秒** 的 job——UI 顯示「匯入完成」，wiki 卻完全沒變。production 22 次匯入中有 7 次是這樣（使用者以為存進去了，其實整篇不見）。現在：`touchedSlugs` 為空時在同一段對話追加 `NUDGE_PROMPT` 再跑一輪（provider 錯誤則等 5s 重試），兩輪都沒寫入就 **throw** → route 的 `after()` catch 把 job 標 `failed` 並寫入錯誤訊息，使用者看得到、可用「重新整合」按鈕重跑。**「有沒有真的寫進去」是程式該驗的事，不能靠模型自述。**
 

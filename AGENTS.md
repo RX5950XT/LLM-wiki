@@ -230,6 +230,13 @@ Query API 文字串流結尾依序附加 `\x00CITATIONS\x00[...]`、`\x00ACTIONS
 - Web 首頁導頁、登入回跳與工作區列表查詢若遇到 production 尚未套用 `sort_order` 或 schema cache 未刷新，必須 fallback 至 `created_at`，不可誤判為沒有工作區
 - 若 production 出現「拖曳後又跳回原順序」，先查 `workspaces.sort_order` 是否存在；缺欄位時只執行 idempotent 的 `0005_workspace_sort_order.sql` 修 schema，不要用整批 `db push` 硬套舊 migration history
 
+### Google OAuth 發布狀態
+- GCP 專案 `my-project-1750440589634` 的 OAuth 同意畫面必須維持**正式版**；設為「測試中」時 Google 讓 refresh token 7 天失效，使用者每週被迫重連 Google Drive（`DRIVE_RECONNECT_REQUIRED`），非程式問題
+- 發布必填：應用程式名稱、支援 email、首頁 `https://llm-wiki-seven.vercel.app`、隱私權政策 `https://llm-wiki-seven.vercel.app/privacy`（頁面在 `apps/web/app/privacy/page.tsx`）
+
+### 匯入錯誤訊息
+- `publicIngestError` 對 `APICallError` 會透出 provider 原始訊息與 status code（截 200 字，不含 URL / request body）；不可再壓成一句 `Ingest failed`——設定錯誤（例如 model 填成 `:batch` 變體）與暫時性故障必須看得出差別，否則使用者只會一直重試
+
 ## 安全注意事項
 
 | 嚴重度 | 位置 | 問題 | 修復 |
