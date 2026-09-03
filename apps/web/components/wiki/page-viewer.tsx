@@ -159,6 +159,29 @@ interface PageData {
   version: number;
 }
 
+/**
+ * Every page switch cost a full server round trip ending in two Google Drive
+ * calls, even when going back to a page just read. Show the copy we already
+ * have while the refetch confirms it; Realtime still marks the page stale when
+ * the LLM rewrites it.
+ */
+const pageCache = new Map<string, PageData>();
+const PAGE_CACHE_LIMIT = 40;
+
+function cacheKey(workspaceId: string, slug: string): string {
+  return `${workspaceId}:${slug}`;
+}
+
+function rememberPage(workspaceId: string, data: PageData): void {
+  const key = cacheKey(workspaceId, data.slug);
+  pageCache.delete(key);
+  pageCache.set(key, data);
+  if (pageCache.size > PAGE_CACHE_LIMIT) {
+    const oldest = pageCache.keys().next().value;
+    if (oldest !== undefined) pageCache.delete(oldest);
+  }
+}
+
 export function PageViewer({
   workspaceId,
   slug,
@@ -231,7 +254,8 @@ export function PageViewer({
       if (!target) return;
       if (dirtyRef.current && !window.confirm(t('wiki.discardChangesConfirm'))) return;
       dirtyRef.current = false;
-      setLoading(true);
+      // A cached copy is already on screen; a spinner over it would be a lie.
+      setLoading(!pageCache.has(cacheKey(workspaceId, target)));
       setError(null);
       setActionError(null);
       setStale(false);
@@ -271,6 +295,7 @@ export function PageViewer({
         })
         .then((data: PageData | null) => {
           if (!data) return; // navigating to the workspace the page moved to
+          rememberPage(workspaceId, data);
           setPage(data);
           setDraft(data.content);
           setEditing(false);
@@ -286,7 +311,14 @@ export function PageViewer({
   useEffect(() => {
     if (dirtyRef.current && !window.confirm(t('wiki.discardChangesConfirm'))) return;
     dirtyRef.current = false;
-    setPage(null);
+    const cached = slug ? pageCache.get(cacheKey(workspaceId, slug)) : undefined;
+    if (cached) {
+      setPage(cached);
+      setDraft(cached.content);
+      setEditing(false);
+    } else {
+      setPage(null);
+    }
     fetchPage();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug, workspaceId]);
@@ -354,6 +386,7 @@ export function PageViewer({
         throw new Error(data?.error ?? 'Failed to save page');
       }
       dirtyRef.current = false;
+      rememberPage(workspaceId, data);
       setPage(data);
       setDraft(data.content);
       setEditing(false);

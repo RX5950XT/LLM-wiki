@@ -13,11 +13,17 @@ export function createDriveClient(accessToken: string): drive_v3.Drive {
   return google.drive({ version: 'v3', auth });
 }
 
+export interface GoogleAccessToken {
+  token: string;
+  /** Epoch ms when Google expires it; callers may cache until shortly before. */
+  expiresAt: number;
+}
+
 /**
  * Exchange a long-lived refresh token for a new access token.
  * Used by server-side ingest jobs that run after the user session has expired.
  */
-export async function getAccessToken(refreshToken: string): Promise<string> {
+export async function getAccessToken(refreshToken: string): Promise<GoogleAccessToken> {
   const oauth2Client = new google.auth.OAuth2(
     getRequiredEnv('GOOGLE_OAUTH_CLIENT_ID'),
     getRequiredEnv('GOOGLE_OAUTH_CLIENT_SECRET'),
@@ -25,7 +31,11 @@ export async function getAccessToken(refreshToken: string): Promise<string> {
   oauth2Client.setCredentials({ refresh_token: refreshToken });
   const { credentials } = await oauth2Client.refreshAccessToken();
   if (!credentials.access_token) throw new Error('Failed to obtain Google access token');
-  return credentials.access_token;
+  // Google issues one-hour tokens; fall back to a short life if it says nothing.
+  return {
+    token: credentials.access_token,
+    expiresAt: credentials.expiry_date ?? Date.now() + 5 * 60_000,
+  };
 }
 
 export interface ReadDriveFileOptions {
