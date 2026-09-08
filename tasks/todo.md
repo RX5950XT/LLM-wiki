@@ -128,4 +128,23 @@
 - Android `testDebugUnitTest`：NO-SOURCE；`assembleDebug`、`assembleRelease`：BUILD SUCCESSFUL。
 - 正式 APK：4,854,680 bytes；SHA-256 `97FF398DC4AA6B106925EEF7AAB277608C6BFE148C781A094D3ABE5A2C5389D7`；簽章與 `v0.6.0` 相同。
 
+## 2026-09-08 審查問題修復
+
+- [x] 修維護查詢失敗誤刪、Drive 寫入衝突、ingest attempt 重用
+- [x] 修 Web / Android 切頁與 Android 跨工作區聊天回應污染
+- [x] 修根目錄 test 與 Web lint 指令，補必要回歸檢查
+- [x] 執行測試、typecheck、Web build、Android assembleDebug
+- [x] 更新 review、提交並推送目前分支
+- Android 實機測試依使用者指示留到之後。
+
+### Review（2026-09-09）
+
+- writer 用新檔 + DB CAS 發布，競爭落敗只清自己的檔案；GET 遇到已換版舊檔會重讀新 pointer 一次，真實刪除仍回錯。
+- 維護 inventory fallback 失敗會停止；ingest claim 後必須匹配自己的 status / attempt_count。
+- Web 以 request generation 丟棄晚到成功、錯誤及轉頁回應；Android 同時隔離頁面載入與跨工作區 chat 串流。
+- `bun run test`：131 pass / 0 fail（25 files），不再空跑；`bun run typecheck`：5/5；`bun run build`：成功。
+- `bun run lint` 已能執行 ESLint；仍回 exit 1（20 errors / 52 warnings）。以新 config 對照 HEAD 原始檔確認 20 errors 均已存在，本次沒有新增 error；沒有關閉規則或擴大重寫既有程式。
+- Web build 保留既有 `next.config.ts experimental.turbo` 選項 warning；不影響建置成功。
+- `apps/android`：`.\gradlew.bat :app:assembleDebug :app:testDebugUnitTest` 成功；JVM 2 tests / 0 failures / 0 errors，並非實機測試。APK SHA-256：`E307878CD069A6C26B616EB3A2732A6741EE7CBB5D552221ED3245C759A0635E`。
+
 ---

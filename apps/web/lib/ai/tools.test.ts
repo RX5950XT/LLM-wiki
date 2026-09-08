@@ -195,6 +195,9 @@ function existingPageDeps(
     onWrite?: (text: string) => void;
     updateData?: Record<string, string> | null;
     onLinkDelete?: () => void;
+    onTrash?: (fileId: string) => void;
+    onCreate?: (fileId: string, text: string) => void;
+    publish?: (values: Record<string, unknown>, expectedVersion: number) => Promise<{ data: { id: string } | null; error: null }>;
   } = {},
 ) {
   const page = {
@@ -219,15 +222,18 @@ function existingPageDeps(
             };
           },
           update: (values: Record<string, unknown>) => {
+            let expectedVersion = 0;
             const builder = {
-              eq: () => builder,
+              eq: (key: string, value: unknown) => {
+                if (key === 'version') expectedVersion = value as number;
+                return builder;
+              },
               select: () => builder,
-              maybeSingle: async () => ({
+              maybeSingle: async () => overrides.publish ? overrides.publish(values, expectedVersion) : ({
                 data: overrides.updateData === undefined ? { id: 'page-1' } : overrides.updateData,
                 error: null,
               }),
             };
-            void values;
             return builder;
           },
         };
@@ -245,13 +251,15 @@ function existingPageDeps(
       };
     },
   } as never;
+  let nextFile = 0;
   const drive = {
     files: {
       get: async ({ alt }: { alt?: string }) =>
         alt === 'media'
           ? { data: content }
           : { data: { id: 'drive-1', mimeType: 'text/markdown', trashed: false } },
-      update: async ({ media }: { media?: { body?: AsyncIterable<string> } }) => {
+      update: async ({ fileId, media, requestBody }: { fileId: string; media?: { body?: AsyncIterable<string> }; requestBody?: { trashed?: boolean } }) => {
+        if (requestBody?.trashed) overrides.onTrash?.(fileId);
         if (media?.body) {
           let next = '';
           for await (const chunk of media.body) next += chunk;
@@ -260,7 +268,15 @@ function existingPageDeps(
         return { data: { id: 'drive-1' } };
       },
       list: async () => ({ data: { files: [] } }),
-      create: async () => ({ data: { id: 'folder-1' } }),
+      create: async ({ media }: { media?: { body?: AsyncIterable<string> } }) => {
+        if (!media?.body) return { data: { id: 'folder-1' } };
+        const id = `candidate-${++nextFile}`;
+        let next = '';
+        for await (const chunk of media.body) next += chunk;
+        overrides.onWrite?.(next);
+        overrides.onCreate?.(id, next);
+        return { data: { id } };
+      },
     },
   } as never;
   return { supabase, drive };
@@ -335,12 +351,13 @@ describe('shared writer safety', () => {
     expect(updated?.frontmatter).toMatchObject({ sources: ['old', 'new', 'source-1'], tags: ['one', 'two'] });
   });
 
-  it('restores Drive and skips page_links when the version CAS loses', async () => {
+  it('trashes only its candidate and skips page_links when the version CAS loses', async () => {
     const writes: string[] = [];
+    const trashed: string[] = [];
     let linkDeletes = 0;
     const deps = existingPageDeps(
       '---\nsources: [old]\n---\nPrevious body.',
-      { onWrite: (text) => writes.push(text), updateData: null, onLinkDelete: () => (linkDeletes += 1) },
+      { onWrite: (text) => writes.push(text), onTrash: (id) => trashed.push(id), updateData: null, onLinkDelete: () => (linkDeletes += 1) },
     );
     const result = await writePageForWorkspace(
       deps,
@@ -353,19 +370,60 @@ describe('shared writer safety', () => {
       },
     );
     expect(result).toEqual({ error: 'WRITE_CONFLICT' });
-    expect(writes).toHaveLength(2);
-    expect(writes[1]).toContain('Previous body.');
+    expect(writes).toHaveLength(1);
+    expect(trashed).toEqual(['candidate-1']);
     expect(linkDeletes).toBe(0);
   });
 
-  it('trashes a newly-created Drive file when the page insert loses a race', async () => {
+  it('keeps the winning content when two writers publish the same version', async () => {
+    const files = new Map([['drive-1', 'Previous body.']]);
+    let live = { version: 3, drive_file_id: 'drive-1', search_text: 'Previous body.' };
+    let ready = 0;
+    let release!: () => void;
+    const bothReady = new Promise<void>((resolve) => { release = resolve; });
+    const deps = existingPageDeps('Previous body.', {
+      onCreate: (id, text) => { files.set(id, text); },
+      onTrash: (id) => { files.delete(id); },
+      publish: async (values, expectedVersion) => {
+        if (++ready === 2) release();
+        await bothReady;
+        if (live.version !== expectedVersion) return { data: null, error: null };
+        live = values as typeof live;
+        return { data: { id: 'page-1' }, error: null };
+      },
+    });
+    const results = await Promise.all(['First new body.', 'Second new body.'].map((content_md) =>
+      writePageForWorkspace(deps, { workspaceId: WORKSPACE, wikiFolderId: 'wiki-folder' }, {
+        slug: 'concepts/topic.md', content_md, kind: 'concept',
+      }),
+    ));
+    expect(results.filter((result) => 'ok' in result)).toHaveLength(1);
+    expect(results.filter((result) => 'error' in result)).toEqual([{ error: 'WRITE_CONFLICT' }]);
+    expect(files.size).toBe(1);
+    expect(files.get(live.drive_file_id)).toBe(live.search_text);
+    expect(live.version).toBe(4);
+  });
+
+  it('retains a possibly published candidate when the CAS response is lost', async () => {
+    const trashed: string[] = [];
+    const deps = existingPageDeps('Previous body.', {
+      onTrash: (id) => { trashed.push(id); },
+      publish: async () => { throw new Error('response lost'); },
+    });
+    await expect(writePageForWorkspace(deps, { workspaceId: WORKSPACE, wikiFolderId: 'wiki-folder' }, {
+      slug: 'concepts/topic.md', content_md: 'New body.', kind: 'concept',
+    })).rejects.toThrow('response lost');
+    expect(trashed).toEqual([]);
+  });
+
+  it.each(['23505', ''])('cleans up an insert only on a definite duplicate rejection (code %s)', async (code) => {
     let trashed = false;
     const supabase = {
       from(table: string) {
         if (table === 'pages') {
           return {
             select: () => ({ eq: () => ({ in: async () => ({ data: [], error: null }) }) }),
-            insert: async () => ({ error: { message: 'duplicate slug' } }),
+            insert: async () => ({ error: { code, message: code ? 'duplicate slug' : 'response lost' } }),
           };
         }
         return { delete: () => ({ eq: () => ({ in: async () => ({ error: null }) }) }) };
@@ -388,6 +446,6 @@ describe('shared writer safety', () => {
         { slug: 'concepts/race.md', content_md: '# Race', kind: 'concept' },
       ),
     ).rejects.toThrow('pages insert failed');
-    expect(trashed).toBe(true);
+    expect(trashed).toBe(code === '23505');
   });
 });

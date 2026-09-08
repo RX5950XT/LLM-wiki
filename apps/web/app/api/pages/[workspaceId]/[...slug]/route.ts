@@ -173,13 +173,41 @@ export async function GET(
     }
     mark('token');
 
-    const content = await readDriveFile(drive, page.drive_file_id);
+    let responsePage = page;
+    let content: string;
+    try {
+      content = await readDriveFile(drive, page.drive_file_id);
+    } catch (error) {
+      if (
+        !(error instanceof DriveReadError) ||
+        !['DRIVE_FILE_NOT_FOUND', 'DRIVE_FILE_TRASHED'].includes(error.code)
+      ) {
+        throw error;
+      }
+
+      // A copy-on-write page publish swaps the DB pointer before trashing the
+      // old Drive file. Re-read once when that exact race is visible; a stale
+      // pointer must never turn a healthy page into a transient 404/410.
+      const { data: replacement, error: replacementError } = await supabase
+        .from('pages')
+        .select(PAGE_FIELDS)
+        .eq('workspace_id', workspaceId)
+        .eq('slug', page.slug)
+        .maybeSingle();
+      if (replacementError || !replacement || replacement.drive_file_id === page.drive_file_id) {
+        throw error;
+      }
+
+      responsePage = replacement as PageRow;
+      content = await readDriveFile(drive, responsePage.drive_file_id);
+    }
     mark('drive');
+    const responseEtag = `"${responsePage.slug}:${responsePage.version}"`;
     return NextResponse.json(
-      { ...page, content },
+      { ...responsePage, content },
       {
         headers: {
-          ETag: etag,
+          ETag: responseEtag,
           'Cache-Control': 'private, no-cache',
           'Server-Timing': marks.join(', '),
         },

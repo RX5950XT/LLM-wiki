@@ -824,8 +824,9 @@ export async function writePageForWorkspace(
   const fileName = slug.split('/').at(-1) ?? slug;
   const parentFolderId = await resolveParentFolder(deps, scope, slug, folderCache);
 
+  // Publish a new file through the DB CAS. Competing writers must never modify
+  // the same Drive content, including when a losing write is cleaned up.
   const fileId = await writeDriveFile(deps.drive, contentToWrite, {
-    fileId: existing?.drive_file_id,
     name: fileName,
     parentId: parentFolderId,
   });
@@ -853,13 +854,16 @@ export async function writePageForWorkspace(
         },
       );
       if (!updated) {
-        await restoreDriveFileBestEffort(deps, existing.drive_file_id, previousContent, fileName, parentFolderId);
+        await trashDriveFileBestEffort(deps, fileId);
         return { error: 'WRITE_CONFLICT' as const };
       }
     } catch (error) {
-      await restoreDriveFileBestEffort(deps, existing.drive_file_id, previousContent, fileName, parentFolderId);
+      // A lost response may hide a committed CAS. Keep the candidate rather than
+      // trashing what might now be the live page.
+      console.error('[wiki] page publish failed; retaining Drive candidate', { fileId, error });
       throw error;
     }
+    await trashDriveFileBestEffort(deps, existing.drive_file_id);
   } else {
     try {
       await insertPageRecord(deps, {
@@ -875,7 +879,11 @@ export async function writePageForWorkspace(
         search_text: searchText,
       });
     } catch (error) {
-      await trashDriveFileBestEffort(deps, fileId);
+      if (error instanceof Error && (error.cause as { code?: string } | undefined)?.code === '23505') {
+        await trashDriveFileBestEffort(deps, fileId);
+      } else {
+        console.error('[wiki] page insert failed; retaining Drive candidate', { fileId, error });
+      }
       throw error;
     }
   }
@@ -1010,10 +1018,10 @@ async function insertPageRecord(
     const { search_text: _searchText, ...fallbackValues } = values;
     const { error: fallbackError } = await deps.supabase.from('pages').insert(fallbackValues);
     if (!fallbackError) return;
-    throw new Error(`pages insert failed: ${fallbackError.message}`);
+    throw new Error(`pages insert failed: ${fallbackError.message}`, { cause: fallbackError });
   }
 
-  throw new Error(`pages insert failed: ${error.message}`);
+  throw new Error(`pages insert failed: ${error.message}`, { cause: error });
 }
 
 async function updatePageRecord(
@@ -1065,21 +1073,6 @@ async function updatePageRecordCas(
   }
 
   throw new Error(`pages update failed: ${error.message}`);
-}
-
-async function restoreDriveFileBestEffort(
-  deps: PageOpDeps,
-  fileId: string,
-  previousContent: string | null,
-  name: string,
-  parentId: string,
-): Promise<void> {
-  if (previousContent === null) return;
-  try {
-    await writeDriveFile(deps.drive, previousContent, { fileId, name, parentId });
-  } catch (error) {
-    console.error('[wiki] failed to restore Drive page after DB conflict', { fileId, error });
-  }
 }
 
 async function trashDriveFileBestEffort(deps: PageOpDeps, fileId: string): Promise<void> {

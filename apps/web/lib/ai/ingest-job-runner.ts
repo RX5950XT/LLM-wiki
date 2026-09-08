@@ -139,6 +139,22 @@ async function loadJob(
   return (data as JobRow | null) ?? null;
 }
 
+async function loadClaimedJob(
+  supabase: SupabaseClient,
+  jobId: string,
+  attemptCount: number,
+): Promise<JobRow | null> {
+  const { data, error } = await supabase
+    .from('ingest_jobs')
+    .select(JOB_FIELDS)
+    .eq('id', jobId)
+    .eq('status', 'running')
+    .eq('attempt_count', attemptCount)
+    .maybeSingle();
+  if (error) throw databaseError('claimed ingest job lookup failed', error);
+  return (data as JobRow | null) ?? null;
+}
+
 async function loadWorkspace(
   supabase: SupabaseClient,
   workspaceId: string,
@@ -324,8 +340,15 @@ export async function runPendingIngestJob(
   }
 
   try {
-    const claimed = await loadJob(supabase, initial.id);
-    if (!claimed) throw new Error('Ingest job not found');
+    const claimed = await loadClaimedJob(supabase, initial.id, claim.attemptCount!);
+    if (!claimed) {
+      const current = await loadJob(supabase, options.jobId);
+      return {
+        claimed: true,
+        status: current?.status ?? 'not_found',
+        reason: current ? 'claimed' : 'not_found',
+      };
+    }
     await runClaimedJob(supabase, claimed, options.ownerId, options.locale, dependencies);
     const completed = await loadJob(supabase, initial.id);
     return { claimed: true, status: completed?.status ?? 'done', reason: 'claimed' };

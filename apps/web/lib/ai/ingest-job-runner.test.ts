@@ -52,6 +52,98 @@ describe('pending ingest CAS', () => {
       reason: 'workspace_busy',
     });
   });
+
+  it('does not adopt a newer attempt after the claim response', async () => {
+    let ingestSelects = 0;
+    let pipelineCalls = 0;
+    const workspace = {
+      id: 'workspace-1',
+      name: 'Workspace',
+      drive_folder_id: 'root-folder',
+      ingest_profile_id: null,
+      default_profile_id: 'profile-1',
+    };
+    const source = {
+      id: 'source-1',
+      workspace_id: 'workspace-1',
+      title: 'Source',
+      drive_file_id: 'source-file',
+    };
+    const profile = {
+      id: 'profile-1',
+      name: 'Profile',
+      base_url: 'https://provider.invalid',
+      model: 'model',
+      api_key_encrypted: 'encrypted',
+      extra_headers: {},
+      owner_id: 'owner-1',
+    };
+    const currentJob = {
+      id: 'job-1',
+      workspace_id: 'workspace-1',
+      source_id: 'source-1',
+      profile_id: 'profile-1',
+      status: 'running',
+      phase: 'analysis',
+      checkpoint: { written_pages: [] },
+      touched_pages: [],
+      attempt_count: 2,
+    };
+    type QueryResult = { data: unknown; error: { message?: string; code?: string } | null };
+    type QueryBuilder = {
+      select: (...columns: string[]) => QueryBuilder;
+      update: (values: Record<string, unknown>) => QueryBuilder;
+      eq: (column: string, value: unknown) => QueryBuilder;
+      maybeSingle: () => Promise<QueryResult>;
+    };
+    const supabase = {
+      from(table: string): QueryBuilder {
+        let operation = 'select';
+        const filters: Array<[string, unknown]> = [];
+        const builder: QueryBuilder = {
+          select() { return builder; },
+          update() { operation = 'update'; return builder; },
+          eq(column: string, value: unknown) { filters.push([column, value]); return builder; },
+          maybeSingle: async () => {
+            if (table === 'workspaces') return { data: workspace, error: null };
+            if (table === 'sources') return { data: source, error: null };
+            if (table === 'llm_profiles') return { data: profile, error: null };
+            if (operation === 'update') return { data: { id: 'job-1', attempt_count: 1 }, error: null };
+
+            const hasAttemptFilter = filters.some(([column]) => column === 'attempt_count');
+            if (hasAttemptFilter) return { data: null, error: null };
+            const result = ingestSelects++ === 0
+              ? {
+                  id: 'job-1', workspace_id: 'workspace-1', source_id: 'source-1',
+                  profile_id: 'profile-1', status: 'pending', phase: 'analysis',
+                  checkpoint: { written_pages: [] }, touched_pages: [], attempt_count: 0,
+                }
+              : currentJob;
+            return { data: result, error: null };
+          },
+        };
+        return builder;
+      },
+    } as unknown as SupabaseClient;
+
+    const result = await runPendingIngestJob({
+      jobId: 'job-1',
+      ownerId: 'owner-1',
+      dependencies: {
+        supabase,
+        createDrive: async () => ({}) as never,
+        findDriveFile: async (_drive, name) => (name === 'wiki' ? 'wiki-folder' : null),
+        readDrive: async () => 'source body',
+        runPipeline: async () => {
+          pipelineCalls += 1;
+          return [];
+        },
+      },
+    });
+
+    expect(result).toEqual({ claimed: true, status: 'running', reason: 'claimed' });
+    expect(pipelineCalls).toBe(0);
+  });
 });
 
 describe('ingest failure handling', () => {

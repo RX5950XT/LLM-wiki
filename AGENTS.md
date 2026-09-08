@@ -240,6 +240,7 @@ Query API 文字串流結尾依序附加 `\x00CITATIONS\x00[...]`、`\x00ACTIONS
 - Android 早就有 Room 內容快取（`PageEntity.content`，version 變動才清空），切回讀過的頁本來就是即時的；v0.7.1 補的是**條件請求**：`loadPageContent` 帶 `If-None-Match`（`pageEtag` 必須與伺服器 `"<slug>:<version>"` 一致），304 沿用快取、200 連 `version` 一起寫回，任何失敗都退回快取內容
 
 ### 寫入完整性與時間預算
+- 共用 wiki writer 先寫新 Drive 檔，再以 DB version / lock CAS 切換檔案 id；成功才 trash 舊檔，明確衝突只 trash 自己的新檔。禁止用舊內容覆蓋共用 Drive 檔作為補償；DB 回應不明時保留候選檔，避免誤刪已發布內容。GET 頁面遇到舊檔已 trash 時，僅在 DB 指向新檔後重讀一次，回傳新版本與 ETag。
 - 寫入迴圈必須寫完 `plan.target_pages` 才 break（只寫一頁就進審查 → review 判 incomplete → 整個 job failed）
 - pipeline 有 `PIPELINE_BUDGET_MS = 210_000` wall-clock 預算；不自己停就會被 Vercel 的 300s maxDuration 硬砍，job 卡 `running` 直到 8 分鐘 stale sweep
 - 續寫走 `PATCH /api/ingest {action:'retry'}`（保留 checkpoint）；`/api/sources/[id]/reingest` 是重新規劃的新 job

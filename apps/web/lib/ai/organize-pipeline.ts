@@ -64,7 +64,7 @@ async function loadLinkRows(
   return (data ?? []) as LinkRow[];
 }
 
-async function loadInventoryRows(
+export async function loadInventoryRows(
   supabase: SupabaseClient,
   workspaceIds: string[],
 ): Promise<InventoryRow[]> {
@@ -82,13 +82,16 @@ async function loadInventoryRows(
   if (!error) return (data ?? []) as InventoryRow[];
 
   // Deployments predating the search_text column: fall back to the bare listing.
-  const { data: fallback } = await supabase
+  const { data: fallback, error: fallbackError } = await supabase
     .from('pages')
     .select('workspace_id, slug, title, kind')
     .in('workspace_id', workspaceIds)
     .eq('zone', 'wiki')
     .order('updated_at', { ascending: false })
     .limit(3000);
+  if (fallbackError) {
+    throw new Error(`page inventory lookup failed: ${fallbackError.message}`);
+  }
   return (fallback ?? []) as InventoryRow[];
 }
 

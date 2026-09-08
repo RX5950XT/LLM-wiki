@@ -2,6 +2,13 @@
 
 > 給下一個 AI Agent 的接手指南。架構與規範細節以 `CLAUDE.md` / `AGENTS.md` 為準，這裡只記「最近做了什麼、為什麼、還缺什麼」。
 
+## 2026-09-08 審查修復
+
+- 共用 wiki writer 改為先建立新 Drive 檔，再以 DB version / lock CAS 發布檔案 id；成功後才 trash 舊檔，明確衝突只 trash 自己的新檔，禁止把舊內容寫回共用檔案。
+- DB 回應不明時保留新檔並記錄錯誤，避免請求其實已成功卻誤刪正式內容；可能留下待清理檔案，Drive / DB / page_links 仍不是單一交易。
+- 維護讀不到 inventory 時停止；ingest claim 後核對原 attempt，Web / Android 以請求編號隔離晚到回應。根目錄 test 已接上 Web 測試；lint 已改用 ESLint 原生 flat config，仍有 20 項經 HEAD 對照確認的既有 error。
+- Android 實機測試依使用者指示延後，不能以 APK 建置或本機回歸測試宣稱已通過實機驗收。
+
 ## Android v0.7.0 正式發行（2026-09-01）
 
 - Android 版本為 `versionName 0.7.0`、`versionCode 7`；發行前已確認 tag 與 GitHub Release 未使用 `v0.7.0`。

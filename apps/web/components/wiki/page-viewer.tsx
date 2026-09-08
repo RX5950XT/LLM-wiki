@@ -210,6 +210,7 @@ export function PageViewer({
   const [reconnectPending, setReconnectPending] = useState(false);
   const [backlinks, setBacklinks] = useState<string[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const pageRequestRef = useRef(0);
 
   // Backlinks: pages whose [[wikilinks]] point at the current slug
   useEffect(() => {
@@ -254,6 +255,7 @@ export function PageViewer({
       if (!target) return;
       if (dirtyRef.current && !window.confirm(t('wiki.discardChangesConfirm'))) return;
       dirtyRef.current = false;
+      const requestId = ++pageRequestRef.current;
       // A cached copy is already on screen; a spinner over it would be a lie.
       setLoading(!pageCache.has(cacheKey(workspaceId, target)));
       setError(null);
@@ -274,6 +276,7 @@ export function PageViewer({
               };
             }
             | null;
+          if (requestId !== pageRequestRef.current) return null;
           if (!response.ok) {
             const code = data?.error?.code ?? 'UNKNOWN';
             // Maintenance re-shelved the page: follow it instead of calling the
@@ -294,15 +297,21 @@ export function PageViewer({
           return data as PageData;
         })
         .then((data: PageData | null) => {
-          if (!data) return; // navigating to the workspace the page moved to
+          if (!data || requestId !== pageRequestRef.current) return;
           rememberPage(workspaceId, data);
           setPage(data);
           setDraft(data.content);
           setEditing(false);
           onPageLoaded?.(data);
         })
-        .catch((e) => setError(e instanceof Error ? e.message : String(e)))
-        .finally(() => setLoading(false));
+        .catch((e) => {
+          if (requestId === pageRequestRef.current) {
+            setError(e instanceof Error ? e.message : String(e));
+          }
+        })
+        .finally(() => {
+          if (requestId === pageRequestRef.current) setLoading(false);
+        });
     },
     [onPageLoaded, workspaceId, slug, t, router],
   );
@@ -320,6 +329,9 @@ export function PageViewer({
       setPage(null);
     }
     fetchPage();
+    return () => {
+      pageRequestRef.current += 1;
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug, workspaceId]);
 

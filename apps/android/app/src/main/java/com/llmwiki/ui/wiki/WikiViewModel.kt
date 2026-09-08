@@ -55,6 +55,7 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.Headers
 import io.ktor.utils.io.readUTF8Line
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
@@ -84,6 +85,29 @@ import io.ktor.utils.io.jvm.javaio.toByteReadChannel
 import android.net.Uri
 import java.io.FilterInputStream
 import java.io.InputStream
+
+internal fun isPageRequestCurrent(
+    requestToken: Long,
+    latestRequestToken: Long,
+    currentWorkspaceId: String?,
+    page: PageEntity,
+    activePage: PageEntity?,
+): Boolean =
+    requestToken == latestRequestToken &&
+        currentWorkspaceId == page.workspaceId &&
+        activePage?.let {
+            it.workspaceId == page.workspaceId &&
+                it.accountName == page.accountName &&
+                it.slug == page.slug &&
+                it.version == page.version
+        } == true
+
+internal fun isQueryRequestCurrent(
+    requestToken: Long,
+    latestRequestToken: Long,
+    requestWorkspaceId: String,
+    currentWorkspaceId: String?,
+): Boolean = requestToken == latestRequestToken && currentWorkspaceId == requestWorkspaceId
 
 /**
  * A deep reorganisation is cut off by the server's 300s invocation limit, so a
@@ -195,6 +219,12 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
     private val workspaceId = MutableStateFlow<String?>(null)
     private val accountNameFlow = MutableStateFlow("")
     private var searchJob: Job? = null
+    private var queryJob: Job? = null
+    private var queryGeneration = 0L
+    private var pageRequestGeneration = 0L
+    private var syncGeneration = 0L
+    private var contentLoadGeneration = 0L
+    private var backlinksLoadGeneration = 0L
 
     val pages: StateFlow<List<PageEntity>> = combine(workspaceId, accountNameFlow) { id, account -> id to account }
         .flatMapLatest { (id, account) ->
@@ -269,12 +299,18 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun switchWorkspace(ws: WorkspaceRow) {
+        queryGeneration += 1
+        pageRequestGeneration += 1
+        queryJob?.cancel()
         _uiState.update {
             it.copy(
                 workspace = ws,
                 activePage = null,
                 pageContent = null,
                 chatMessages = emptyList(),
+                chatLoading = false,
+                synthesisSavedSlug = null,
+                taggedWorkspaceIds = emptyList(),
                 showSearch = false,
                 searchQuery = "",
                 searchResults = emptyList(),
@@ -396,6 +432,12 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                 db.pageDao().deleteByWorkspace(workspace.id, accountName)
                 val remaining = _uiState.value.workspaces.filterNot { it.id == workspace.id }
                 val next = remaining.firstOrNull()
+                val deletedCurrentWorkspace = workspace.id == workspaceId.value
+                if (deletedCurrentWorkspace) {
+                    queryGeneration += 1
+                    pageRequestGeneration += 1
+                    queryJob?.cancel()
+                }
                 _uiState.update {
                     it.copy(
                         workspaces = remaining,
@@ -403,6 +445,9 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                         activePage = null,
                         pageContent = null,
                         chatMessages = emptyList(),
+                        chatLoading = if (deletedCurrentWorkspace) false else it.chatLoading,
+                        synthesisSavedSlug = if (deletedCurrentWorkspace) null else it.synthesisSavedSlug,
+                        taggedWorkspaceIds = if (deletedCurrentWorkspace) emptyList() else it.taggedWorkspaceIds,
                         workspaceActionLoading = false,
                         syncError = null,
                     )
@@ -442,6 +487,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun selectPage(page: PageEntity) {
+        pageRequestGeneration += 1
         _uiState.update {
             it.copy(
                 activePage = page,
@@ -457,13 +503,15 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
         // page row's version against the server (a 304 costs no Drive read), so a
         // page edited on the web stops showing its old copy until the next sync.
         loadContent(page)
-        loadBacklinks(page.slug)
+        loadBacklinks(page)
     }
 
     /** Pages whose [[wikilinks]] point at the given slug (mirrors the Web backlinks panel). */
-    private fun loadBacklinks(slug: String) {
+    private fun loadBacklinks(page: PageEntity) {
+        val requestToken = ++backlinksLoadGeneration
         viewModelScope.launch {
-            val wsId = workspaceId.value ?: return@launch
+            val wsId = page.workspaceId
+            val slug = page.slug
             val backlinks = runCatching {
                 supabase.requireAccessToken(forceRefresh = false)
                 supabase.from("page_links")
@@ -479,7 +527,15 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                     .sorted()
             }.getOrDefault(emptyList())
             _uiState.update { state ->
-                if (state.activePage?.slug == slug) state.copy(backlinks = backlinks) else state
+                if (
+                    requestToken == backlinksLoadGeneration &&
+                    workspaceId.value == wsId &&
+                    state.activePage?.let { it.workspaceId == wsId && it.slug == slug } == true
+                ) {
+                    state.copy(backlinks = backlinks)
+                } else {
+                    state
+                }
             }
         }
     }
@@ -557,23 +613,28 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun loadContent(page: PageEntity) {
+        val requestToken = ++contentLoadGeneration
         viewModelScope.launch {
             try {
-                val wsId = workspaceId.value ?: return@launch
                 val repo = PageRepository(db, driveClient)
-                when (val result = repo.loadPageContent(wsId, accountName, page.slug)) {
+                when (val result = repo.loadPageContent(page.workspaceId, page.accountName, page.slug)) {
                     is PageLoadResult.Success -> {
                         _uiState.update {
-                            it.copy(
-                                pageContent = result.content,
-                                contentLoading = false,
-                                syncError = null,
-                                driveReconnectUrl = null,
-                                lastErrorRequestId = null,
-                            )
+                            if (!isCurrentPage(page, requestToken)) it else it.copy(
+                                    activePage = it.activePage?.let { activePage -> activePage.copy(
+                                        content = result.content,
+                                        version = result.version ?: activePage.version,
+                                    ) },
+                                    pageContent = result.content,
+                                    contentLoading = false,
+                                    syncError = null,
+                                    driveReconnectUrl = null,
+                                    lastErrorRequestId = null,
+                                )
                         }
                     }
                     is PageLoadResult.Failure -> {
+                        if (!isCurrentPage(page, requestToken)) return@launch
                         if (result.reconnectRequired) {
                             val message = mapPageLoadError(result)
                             _uiState.update {
@@ -597,10 +658,23 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
             } catch (e: Exception) {
-                _uiState.update { it.copy(contentLoading = false, syncError = e.toUserFacingMessage(str(R.string.error_op_load_page))) }
+                if (isCurrentPage(page, requestToken)) {
+                    _uiState.update {
+                        it.copy(contentLoading = false, syncError = e.toUserFacingMessage(str(R.string.error_op_load_page)))
+                    }
+                }
             }
         }
     }
+
+    private fun isCurrentPage(page: PageEntity, requestToken: Long): Boolean =
+        isPageRequestCurrent(
+            requestToken,
+            contentLoadGeneration,
+            workspaceId.value,
+            page,
+            _uiState.value.activePage,
+        )
 
     fun toggleLock(slug: String, currentLocked: Boolean) {
         val newLocked = !currentLocked
@@ -773,7 +847,10 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
 
     fun sendQuery(userText: String) {
         if (userText.isBlank()) return
+        if (_uiState.value.chatLoading) return
         val wsId = workspaceId.value ?: return
+        val queryToken = ++queryGeneration
+        queryJob?.cancel()
 
         val userMsg = ChatMessage(role = "user", content = userText)
         val history = _uiState.value.chatMessages
@@ -791,7 +868,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
 
-        viewModelScope.launch {
+        queryJob = viewModelScope.launch {
             try {
                 val bodyJson = buildJsonObject {
                     put("messages", buildJsonArray {
@@ -819,6 +896,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                         setBody(bodyJson)
                     }
                 } ?: run {
+                    if (!isCurrentQuery(queryToken, wsId)) return@launch
                     _uiState.update { state ->
                         state.copy(
                             chatMessages = state.chatMessages.dropLast(1),
@@ -829,8 +907,10 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                     return@launch
                 }
 
+                if (!isCurrentQuery(queryToken, wsId)) return@launch
                 if (response.status.value !in 200..299) {
                     val message = parseApiError(response.bodyAsText(), str(R.string.error_op_query))
+                    if (!isCurrentQuery(queryToken, wsId)) return@launch
                     if (response.status.value == 403 && isDriveReconnectError(message)) {
                         requestDriveReconnect("query", message)
                     } else {
@@ -849,19 +929,23 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                 val raw = StringBuilder()
                 while (!channel.isClosedForRead) {
                     val chunk = channel.readUTF8Line() ?: break
+                    if (!isCurrentQuery(queryToken, wsId)) return@launch
                     raw.append(chunk).append("\n")
                     // Hide any trailing NUL-delimited metadata block while streaming
                     val nulIdx = raw.indexOf('\u0000')
                     val displayText = if (nulIdx >= 0) raw.substring(0, nulIdx) else raw.toString()
                     _uiState.update { state ->
+                        if (!isCurrentQuery(queryToken, wsId)) return@update state
                         val messages = state.chatMessages.dropLast(1) +
                             placeholder.copy(content = displayText.trimEnd())
                         state.copy(chatMessages = messages)
                     }
                 }
 
+                if (!isCurrentQuery(queryToken, wsId)) return@launch
                 val parsed = parseStreamMeta(raw.toString())
                 _uiState.update { state ->
+                    if (!isCurrentQuery(queryToken, wsId)) return@update state
                     val final = ChatMessage(
                         role = "assistant",
                         content = parsed.text.trimEnd(),
@@ -880,8 +964,12 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                 // The AI may have created/renamed a workspace this turn — refresh the
                 // switcher list (syncSelected=false keeps it cheap unless it changed)
                 refreshWorkspaces(syncSelected = false)
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
+                if (!isCurrentQuery(queryToken, wsId)) return@launch
                 _uiState.update { state ->
+                    if (!isCurrentQuery(queryToken, wsId)) return@update state
                     state.copy(
                         chatMessages = state.chatMessages.dropLast(1),
                         chatLoading = false,
@@ -891,6 +979,9 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
+
+    private fun isCurrentQuery(queryToken: Long, wsId: String): Boolean =
+        isQueryRequestCurrent(queryToken, queryGeneration, wsId, workspaceId.value)
 
     /** Runs a user-confirmed destructive action via the same server path the AI tools use. */
     fun executeProposal(messageIndex: Int, proposalIndex: Int) {
@@ -1694,9 +1785,14 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                     ?: previousId?.takeIf { selected -> workspaces.any { it.id == selected } }
                     ?: workspaces.firstOrNull()?.id
                 val workspace = workspaces.firstOrNull { it.id == targetId }
+                val switchedWorkspace = targetId != previousId
+                if (switchedWorkspace) {
+                    queryGeneration += 1
+                    pageRequestGeneration += 1
+                    queryJob?.cancel()
+                }
 
                 _uiState.update {
-                    val switchedWorkspace = targetId != previousId
                     it.copy(
                         workspace = workspace,
                         workspaces = workspaces,
@@ -1704,6 +1800,9 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                         activePage = if (switchedWorkspace) null else it.activePage,
                         pageContent = if (switchedWorkspace) null else it.pageContent,
                         chatMessages = if (switchedWorkspace) emptyList() else it.chatMessages,
+                        chatLoading = if (switchedWorkspace) false else it.chatLoading,
+                        synthesisSavedSlug = if (switchedWorkspace) null else it.synthesisSavedSlug,
+                        taggedWorkspaceIds = if (switchedWorkspace) emptyList() else it.taggedWorkspaceIds,
                         syncError = null,
                     )
                 }
@@ -1771,20 +1870,30 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private suspend fun syncPagesInternal(wsId: String, forceSync: Boolean = false) {
+        val syncRequestToken = ++syncGeneration
+        val requestGeneration = pageRequestGeneration
+        val requestedActiveSlug = _uiState.value.activePage?.slug
+        fun isSyncCurrent(): Boolean = isCurrentSyncRequest(syncRequestToken, wsId)
+        fun isCurrent(state: WikiUiState = _uiState.value): Boolean =
+            isSyncCurrent() && isCurrentPageRequest(wsId, requestGeneration, requestedActiveSlug, state)
+
         _uiState.update { it.copy(syncLoading = true) }
         try {
             val repo = PageRepository(db, driveClient)
             repo.syncPages(wsId, accountName, currentUiLocale(), forceSync)
-            val activeSlug = _uiState.value.activePage?.slug
+            if (!isCurrent()) return
+            val activeSlug = requestedActiveSlug
             if (activeSlug != null) {
                 val updatedPage = db.pageDao().getPage(wsId, accountName, activeSlug)
+                if (!isCurrent()) return
                 if (updatedPage != null) {
                     if (forceSync) {
                         // Always reload active page content after ingest to reflect changes
-                        _uiState.update { state ->
-                            state.copy(activePage = updatedPage, contentLoading = true, syncError = null)
+                        _uiState.update {
+                            it.copy(activePage = updatedPage, contentLoading = true, syncError = null)
                         }
                         db.pageDao().clearContent(wsId, accountName, activeSlug)
+                        if (!isCurrent()) return
                         loadContent(updatedPage)
                     } else {
                         _uiState.update { state ->
@@ -1795,7 +1904,9 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                                 syncError = null,
                             )
                         }
-                        if (updatedPage.content == null) {
+                        if (updatedPage.content == null &&
+                            isCurrent()
+                        ) {
                             loadContent(updatedPage)
                         }
                     }
@@ -1804,9 +1915,13 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                 _uiState.update { it.copy(syncError = null) }
             }
         } catch (e: Exception) {
-            _uiState.update { it.copy(syncError = e.toUserFacingMessage(str(R.string.error_op_sync))) }
+            if (isSyncCurrent()) {
+                _uiState.update { it.copy(syncError = e.toUserFacingMessage(str(R.string.error_op_sync))) }
+            }
         } finally {
-            _uiState.update { it.copy(syncLoading = false) }
+            if (isSyncCurrent()) {
+                _uiState.update { it.copy(syncLoading = false) }
+            }
         }
     }
 
@@ -1815,14 +1930,36 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
     private suspend fun selectDefaultPageIfNeeded(wsId: String) {
         val active = _uiState.value.activePage
         if (active?.workspaceId == wsId) return
+        val requestGeneration = pageRequestGeneration
+        val requestedActiveSlug = active?.slug
 
         val page = db.pageDao().getPage(wsId, accountName, "index.md")
             ?: db.pageDao().getPage(wsId, accountName, "log.md")
             ?: return
+        if (!isCurrentPageRequest(wsId, requestGeneration, requestedActiveSlug)) return
         selectPage(page)
     }
 
+    private fun isCurrentPageRequest(
+        wsId: String,
+        requestGeneration: Long,
+        requestedActiveSlug: String?,
+        state: WikiUiState = _uiState.value,
+    ): Boolean =
+        pageRequestGeneration == requestGeneration &&
+            workspaceId.value == wsId &&
+            if (requestedActiveSlug == null) {
+                state.activePage == null
+            } else {
+                state.activePage?.let { it.workspaceId == wsId && it.slug == requestedActiveSlug } == true
+            }
+
+    private fun isCurrentSyncRequest(syncRequestToken: Long, wsId: String): Boolean =
+        syncGeneration == syncRequestToken && workspaceId.value == wsId
+
     private suspend fun selectPageBySlugFromDb(wsId: String, slug: String) {
+        val requestGeneration = pageRequestGeneration
+        val requestedActiveSlug = _uiState.value.activePage?.slug
         val resolvedSlug = resolvePageSlug(slug)?.slug
         val normalized = normalizeWikiSlug(slug)
         val page = listOfNotNull(resolvedSlug, normalized, slug)
@@ -1831,6 +1968,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                 db.pageDao().getPage(wsId, accountName, candidate)
             }
         if (page != null) {
+            if (!isCurrentPageRequest(wsId, requestGeneration, requestedActiveSlug)) return
             selectPage(page)
         } else {
             selectDefaultPageIfNeeded(wsId)
