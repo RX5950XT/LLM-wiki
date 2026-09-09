@@ -193,31 +193,35 @@ export function PageViewer({
 }: PageViewerProps) {
   const t = useTranslations();
   const router = useRouter();
-  const [page, setPage] = useState<PageData | null>(null);
+  const [page, setPage] = useState<PageData | null>(() => (
+    slug ? pageCache.get(cacheKey(workspaceId, slug)) ?? null : null
+  ));
   // Start loading whenever there is a page to load: the fetch only begins in an
   // effect, so a `false` here paints "page not found" on the very first frame —
   // for the seconds a cold Drive read takes, the wiki looks broken on arrival.
-  const [loading, setLoading] = useState(Boolean(slug));
+  const [loading, setLoading] = useState(() => (
+    Boolean(slug && !pageCache.has(cacheKey(workspaceId, slug)))
+  ));
   const [error, setError] = useState<string | null>(null);
   // Non-fatal action failures (lock toggle, save) — shown inline, must NOT
   // trip the full-page error screen or the open editor would be unmounted
   const [actionError, setActionError] = useState<string | null>(null);
-  const [stale, setStale] = useState(false);
+  const [seenRefreshKey, setSeenRefreshKey] = useState(0);
   const [lockPending, setLockPending] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
   const [savePending, setSavePending] = useState(false);
   const [reconnectPending, setReconnectPending] = useState(false);
-  const [backlinks, setBacklinks] = useState<string[]>([]);
+  const [backlinkState, setBacklinkState] = useState<{
+    key: string;
+    items: string[];
+  } | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const pageRequestRef = useRef(0);
 
   // Backlinks: pages whose [[wikilinks]] point at the current slug
   useEffect(() => {
-    if (!slug) {
-      setBacklinks([]);
-      return;
-    }
+    if (!slug) return;
     const supabase = createClient();
     let cancelled = false;
     supabase
@@ -228,7 +232,10 @@ export function PageViewer({
       .then(({ data }) => {
         if (cancelled) return;
         const unique = Array.from(new Set((data ?? []).map((row) => row.from_slug as string)));
-        setBacklinks(unique.sort());
+        setBacklinkState({
+          key: cacheKey(workspaceId, slug),
+          items: unique.sort(),
+        });
       });
     return () => {
       cancelled = true;
@@ -250,17 +257,27 @@ export function PageViewer({
   }, []);
 
   const fetchPage = useCallback(
-    (forceSlug?: string) => {
+    (forceSlug?: string, resetFromCache = false) => {
       const target = forceSlug ?? slug;
       if (!target) return;
       if (dirtyRef.current && !window.confirm(t('wiki.discardChangesConfirm'))) return;
       dirtyRef.current = false;
       const requestId = ++pageRequestRef.current;
+      const cached = pageCache.get(cacheKey(workspaceId, target));
+      if (resetFromCache) {
+        if (cached) {
+          setPage(cached);
+          setDraft(cached.content);
+          setEditing(false);
+        } else {
+          setPage(null);
+        }
+      }
       // A cached copy is already on screen; a spinner over it would be a lie.
-      setLoading(!pageCache.has(cacheKey(workspaceId, target)));
+      setLoading(!cached);
       setError(null);
       setActionError(null);
-      setStale(false);
+      setSeenRefreshKey(refreshKey ?? 0);
 
       fetch(`/api/pages/${workspaceId}/${encodeSlugPath(target)}`)
         .then(async (response) => {
@@ -313,22 +330,14 @@ export function PageViewer({
           if (requestId === pageRequestRef.current) setLoading(false);
         });
     },
-    [onPageLoaded, workspaceId, slug, t, router],
+    [onPageLoaded, workspaceId, slug, t, router, refreshKey],
   );
 
   // Fetch on slug change (asking first if unsaved editor changes would be lost)
   useEffect(() => {
     if (dirtyRef.current && !window.confirm(t('wiki.discardChangesConfirm'))) return;
     dirtyRef.current = false;
-    const cached = slug ? pageCache.get(cacheKey(workspaceId, slug)) : undefined;
-    if (cached) {
-      setPage(cached);
-      setDraft(cached.content);
-      setEditing(false);
-    } else {
-      setPage(null);
-    }
-    fetchPage();
+    fetchPage(undefined, true);
     return () => {
       pageRequestRef.current += 1;
     };
@@ -336,11 +345,12 @@ export function PageViewer({
   }, [slug, workspaceId]);
 
   // When refreshKey increments (Realtime update), mark as stale instead of
-  // auto-reloading to preserve scroll position.
-  useEffect(() => {
-    if (refreshKey === undefined || refreshKey === 0) return;
-    setStale(true);
-  }, [refreshKey]);
+  // auto-reloading to preserve scroll position. The acknowledged key is updated
+  // by the existing fetch/save paths, so this stays derived from the props.
+  const stale = refreshKey !== undefined && refreshKey > seenRefreshKey;
+  const visibleBacklinks = backlinkState?.key === (page ? cacheKey(workspaceId, page.slug) : null)
+    ? backlinkState.items
+    : [];
 
   useEffect(() => {
     if (!page || !anchor) return;
@@ -402,7 +412,7 @@ export function PageViewer({
       setPage(data);
       setDraft(data.content);
       setEditing(false);
-      setStale(false);
+      setSeenRefreshKey(refreshKey ?? 0);
       onPageLoaded?.(data);
       onPageSaved?.();
     } catch (saveError) {
@@ -411,7 +421,7 @@ export function PageViewer({
     } finally {
       setSavePending(false);
     }
-  }, [draft, onPageLoaded, onPageSaved, page, workspaceId]);
+  }, [draft, onPageLoaded, onPageSaved, page, refreshKey, workspaceId]);
 
   const editorActions: EditorAction[] = [
     { id: 'h1', label: t('wiki.editorHeading'), apply: (input) => prefixSelectedLines(input, '# ', 'Heading') },
@@ -741,7 +751,7 @@ export function PageViewer({
               {stripFrontmatterAndWikilinks(page.content)}
             </ReactMarkdown>
 
-            {backlinks.length > 0 && (
+            {visibleBacklinks.length > 0 && (
               <nav
                 className="mt-10 border-t pt-4"
                 style={{ borderColor: 'var(--border)' }}
@@ -751,7 +761,7 @@ export function PageViewer({
                   {t('wiki.backlinks')}
                 </p>
                 <div className="flex flex-wrap gap-1.5">
-                  {backlinks.map((from) => (
+                  {visibleBacklinks.map((from) => (
                     <button
                       key={from}
                       type="button"

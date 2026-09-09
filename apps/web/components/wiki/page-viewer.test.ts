@@ -56,16 +56,16 @@ function deferred<T>(): Deferred<T> {
   return { promise, resolve, reject };
 }
 
-function pageResponse(slug: string, content: string): Response {
+function pageResponse(slug: string, content: string, zone = 'wiki', lockedByHuman = false): Response {
   return new Response(
     JSON.stringify({
       slug,
       title: slug,
       content,
       kind: 'concept',
-      zone: 'wiki',
+       zone,
       updated_by: 'llm',
-      locked_by_human: false,
+       locked_by_human: lockedByHuman,
       version: 1,
     }),
     { status: 200, headers: { 'Content-Type': 'application/json' } },
@@ -95,9 +95,14 @@ function installFetchStub() {
   dom.window.fetch = fetchStub as typeof dom.window.fetch;
 }
 
-async function renderViewer(workspaceId: string, slug: string | null, onPageLoaded: (page: { slug: string }) => void) {
+async function renderViewer(
+  workspaceId: string,
+  slug: string | null,
+  onPageLoaded: (page: { slug: string }) => void,
+  refreshKey = 0,
+) {
   await act(async () => {
-    root.render(React.createElement(PageViewer, { workspaceId, slug, onPageLoaded }));
+    root.render(React.createElement(PageViewer, { workspaceId, slug, onPageLoaded, refreshKey }));
   });
 }
 
@@ -110,6 +115,7 @@ beforeEach(() => {
   document.body.append(container);
   root = createRoot(container);
   routerPush.mockClear();
+  dom.window.confirm = () => true;
   installFetchStub();
 });
 
@@ -124,6 +130,124 @@ afterAll(() => {
 });
 
 describe('PageViewer request ordering', () => {
+  test('keeps the dirty page and draft when navigation is rejected', async () => {
+    await renderViewer('dirty-reject', 'a.md', () => undefined);
+    await act(async () => {
+      pending.get('a.md')!.resolve(pageResponse('a.md', 'original-content', 'notes'));
+      await flushReact();
+    });
+
+    const editButton = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.title === 'common.edit',
+    );
+    expect(editButton).not.toBeUndefined();
+    await act(async () => {
+      (editButton as HTMLButtonElement).click();
+      await flushReact();
+    });
+
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement;
+    const setValue = Object.getOwnPropertyDescriptor(
+      dom.window.HTMLTextAreaElement.prototype,
+      'value',
+    )?.set;
+    await act(async () => {
+      setValue?.call(textarea, 'unsaved-draft');
+      textarea.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
+      await flushReact();
+    });
+    expect(textarea.value).toBe('unsaved-draft');
+
+    const confirm = mock(() => false);
+    dom.window.confirm = confirm;
+    await renderViewer('dirty-reject', 'b.md', () => undefined);
+
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(pending.has('b.md')).toBe(false);
+    expect(container.textContent).toContain('a.md');
+    expect((container.querySelector('textarea') as HTMLTextAreaElement).value).toBe('unsaved-draft');
+  });
+
+  test('discards the dirty draft after navigation is accepted', async () => {
+    await renderViewer('dirty-accept', 'a.md', () => undefined);
+    await act(async () => {
+      pending.get('a.md')!.resolve(pageResponse('a.md', 'original-content', 'notes'));
+      await flushReact();
+    });
+
+    const editButton = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.title === 'common.edit',
+    );
+    await act(async () => {
+      (editButton as HTMLButtonElement).click();
+      await flushReact();
+    });
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement;
+    const setValue = Object.getOwnPropertyDescriptor(
+      dom.window.HTMLTextAreaElement.prototype,
+      'value',
+    )?.set;
+    await act(async () => {
+      setValue?.call(textarea, 'unsaved-draft');
+      textarea.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
+      await flushReact();
+    });
+
+    dom.window.confirm = mock(() => true);
+    await renderViewer('dirty-accept', 'b.md', () => undefined);
+    expect(pending.has('b.md')).toBe(true);
+    expect(container.querySelector('textarea')).toBeNull();
+
+    await act(async () => {
+      pending.get('b.md')!.resolve(pageResponse('b.md', 'new-content', 'notes'));
+      await flushReact();
+    });
+    expect(container.textContent).toContain('new-content');
+    expect(container.textContent).not.toContain('unsaved-draft');
+  });
+
+  test('keeps a successful lock change visible while manual refresh is pending', async () => {
+    await renderViewer('refresh-lock', 'a.md', () => undefined);
+    await act(async () => {
+      pending.get('a.md')!.resolve(pageResponse('a.md', 'content', 'notes'));
+      await flushReact();
+    });
+
+    const previousFetch = globalThis.fetch;
+    const patchFetch = (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'PATCH') {
+        return Promise.resolve(pageResponse('a.md', 'content', 'notes', true));
+      }
+      return previousFetch(input, init);
+    };
+    globalThis.fetch = patchFetch as typeof fetch;
+    dom.window.fetch = patchFetch as typeof dom.window.fetch;
+
+    const lockButton = container.querySelector('button[title="wiki.unlockedTitle"]') as HTMLButtonElement;
+    await act(async () => {
+      lockButton.click();
+      await flushReact();
+    });
+    expect(container.querySelector('button[title="wiki.lockedTitle"]')).not.toBeNull();
+
+    await renderViewer('refresh-lock', 'a.md', () => undefined, 1);
+    const refreshButton = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent?.includes('wiki.refresh'),
+    );
+    expect(refreshButton).not.toBeUndefined();
+    await act(async () => {
+      (refreshButton as HTMLButtonElement).click();
+      await flushReact();
+    });
+    expect(container.querySelector('button[title="wiki.lockedTitle"]')).not.toBeNull();
+
+    await act(async () => {
+      pending.get('a.md')!.resolve(pageResponse('a.md', 'content', 'notes'));
+      await flushReact();
+    });
+    expect(container.querySelector('button[title="wiki.unlockedTitle"]')).not.toBeNull();
+  });
+
   test('keeps the newest page when an older response arrives late', async () => {
     const loaded: { slug: string }[] = [];
     await renderViewer('race-a', 'a.md', (page) => loaded.push(page));

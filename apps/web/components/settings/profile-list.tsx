@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Pencil, Trash2 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { ProfileForm } from './profile-form';
@@ -15,13 +15,10 @@ interface Profile {
 
 export function ProfileList({ profiles }: { profiles: Profile[] }) {
   const t = useTranslations('settings');
-  const [list, setList] = useState(profiles);
+  const [hiddenIds, setHiddenIds] = useState<Set<string>>(() => new Set());
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
-
-  useEffect(() => {
-    setList(profiles);
-  }, [profiles]);
+  const list = profiles.filter((profile) => !hiddenIds.has(profile.id));
 
   const handleDelete = async (id: string) => {
     // Deleting a profile removes a stored API-key config — confirm first
@@ -34,7 +31,7 @@ export function ProfileList({ profiles }: { profiles: Profile[] }) {
         setDeleteError(data?.error ?? t('deleteProfileFailed'));
         return;
       }
-      setList((prev) => prev.filter((p) => p.id !== id));
+      setHiddenIds((prev) => new Set(prev).add(id));
     } catch {
       setDeleteError(t('deleteProfileFailed'));
     }

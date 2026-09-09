@@ -1,16 +1,18 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useSyncExternalStore } from 'react';
 import { useTheme } from 'next-themes';
 import { Sun, Moon, Monitor } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 
+const subscribeToMount = () => () => {};
+const getClientMounted = () => true;
+const getServerMounted = () => false;
+
 export function ThemeSwitcher() {
   const { theme, setTheme } = useTheme();
   const t = useTranslations('settings');
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => setMounted(true), []);
+  const mounted = useSyncExternalStore(subscribeToMount, getClientMounted, getServerMounted);
   if (!mounted) return null;
 
   const options = [

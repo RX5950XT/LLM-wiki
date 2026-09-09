@@ -1,24 +1,23 @@
 'use client';
 
-import { useState, useEffect, useTransition } from 'react';
+import { useTransition } from 'react';
+import { useLocale } from 'next-intl';
 
 const LOCALES = [
   { value: 'zh-TW', label: '繁體中文' },
   { value: 'en', label: 'English' },
 ];
 
+function writeLocaleCookie(locale: string) {
+  document.cookie = `NEXT_LOCALE=${locale}; path=/; max-age=31536000; samesite=lax`;
+}
+
 export function LocaleSwitcher() {
-  const [current, setCurrent] = useState('zh-TW');
+  const current = useLocale();
   const [, startTransition] = useTransition();
 
-  useEffect(() => {
-    const match = document.cookie.match(/NEXT_LOCALE=([^;]+)/)?.[1];
-    if (match) setCurrent(match);
-  }, []);
-
   const setLocale = (locale: string) => {
-    document.cookie = `NEXT_LOCALE=${locale}; path=/; max-age=31536000; samesite=lax`;
-    setCurrent(locale);
+    writeLocaleCookie(locale);
     startTransition(() => window.location.reload());
   };
 

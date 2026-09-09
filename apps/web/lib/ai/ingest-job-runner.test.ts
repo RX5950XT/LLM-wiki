@@ -239,7 +239,13 @@ describe('background source bounds', () => {
       owner_id: 'owner-1',
     };
     let updating = false;
-    const builder: any = {
+    type MockBuilder = {
+      select: () => MockBuilder;
+      update: () => MockBuilder;
+      eq: () => MockBuilder;
+      maybeSingle: () => Promise<{ data: unknown; error: null }>;
+    };
+    const builder: MockBuilder = {
       select() { return builder; },
       update() { updating = true; return builder; },
       eq() { return builder; },

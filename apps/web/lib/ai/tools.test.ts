@@ -317,10 +317,11 @@ describe('shared writer safety', () => {
     (deps.supabase as { from: (table: string) => unknown }).from = (table: string) => {
       const base = existingPageDeps(
         '---\nsources: [old]\ntags: [one]\ncustom_flag: true\n---\nOld body.',
-      ).supabase as never;
-      if (table !== 'pages') return (base as { from: (name: string) => unknown }).from(table);
+      ).supabase as { from: (name: string) => unknown };
+      if (table !== 'pages') return base.from(table);
+      const pages = base.from('pages') as { select: (fields: string) => unknown };
       return {
-        select: (fields: string) => (base as any).from('pages').select(fields),
+        select: (fields: string) => pages.select(fields),
         update: (values: Record<string, unknown>) => {
           updated = values;
           const builder = {

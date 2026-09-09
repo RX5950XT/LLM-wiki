@@ -138,7 +138,9 @@ export function GraphView({ workspaceId, activePage, onNodeClick, refreshKey = 0
   // Read inside the canvas painter, which is created once — a ref keeps filtering
   // instant instead of tearing the force simulation down and re-settling it.
   const hiddenRef = useRef(hiddenKinds);
-  hiddenRef.current = hiddenKinds;
+  useEffect(() => {
+    hiddenRef.current = hiddenKinds;
+  }, [hiddenKinds]);
 
   // Load graph data from Supabase
   useEffect(() => {

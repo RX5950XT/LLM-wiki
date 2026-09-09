@@ -148,3 +148,17 @@
 - `apps/android`：`.\gradlew.bat :app:assembleDebug :app:testDebugUnitTest` 成功；JVM 2 tests / 0 failures / 0 errors，並非實機測試。APK SHA-256：`E307878CD069A6C26B616EB3A2732A6741EE7CBB5D552221ED3245C759A0635E`。
 
 ---
+
+## 2026-09-09 修復既有 lint 錯誤
+
+- [x] 修 workspace-shell 的狀態更新、ref 及內部連結
+- [x] 修設定元件、PageViewer、GraphView 與測試型別
+- [x] 確認 lint 0 errors，執行回歸測試、typecheck、Web build、Android APK
+- [x] 更新 review、提交並推送；Android 實機測試仍延後
+
+### Review
+
+- 修完 20 個既有 lint errors，未停用規則；52 個既有 warnings 未納入本次範圍。
+- 新增頁面草稿取消／確認、手動刷新鎖定狀態、設定刪除與 props 同步、手機面板、搜尋索引及維護輪詢回歸。
+- `bun run test`：140 pass / 0 fail（27 files）；`bun run typecheck`：5/5；`bun run build`：成功，保留既有 `experimental.turbo` warning。
+- `apps/android` 執行 `.\gradlew.bat :app:assembleDebug`：BUILD SUCCESSFUL；實機測試依使用者指示延後。

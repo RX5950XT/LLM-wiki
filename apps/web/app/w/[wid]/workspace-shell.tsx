@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { PanelLeft, PanelRight, GitFork, ChevronDown, LogOut, Plus, Settings, Search, Loader2, HelpCircle, Pencil, Trash2, GripVertical, Library, Wrench, CheckCircle2, AlertCircle, X } from 'lucide-react';
@@ -62,6 +62,80 @@ const MAX_MAINTENANCE_PASSES = 6;
  */
 const BATCH_LOOKBACK_MS = 30 * 60 * 1000;
 
+function getResponsivePanelDefaults(isMobile: boolean, isTablet: boolean): { leftOpen: boolean; rightOpen: boolean } {
+  return {
+    leftOpen: !isMobile,
+    rightOpen: !isMobile && !isTablet,
+  };
+}
+
+function togglePanelOverride(override: boolean | null, defaultOpen: boolean): boolean {
+  return !(override ?? defaultOpen);
+}
+
+function getSearchRequestKey(showSearch: boolean, workspaceId: string, query: string): string | null {
+  const normalizedQuery = query.trim();
+  return showSearch && normalizedQuery.length >= 2 ? `${workspaceId}:${normalizedQuery}` : null;
+}
+
+function subscribeToMediaQuery(query: string, onChange: () => void): () => void {
+  const mediaQuery = window.matchMedia(query);
+  mediaQuery.addEventListener('change', onChange);
+  return () => mediaQuery.removeEventListener('change', onChange);
+}
+
+function getMediaQuerySnapshot(query: string): boolean {
+  return window.matchMedia(query).matches;
+}
+
+function getServerMediaQuerySnapshot(): boolean {
+  return false;
+}
+
+function useMediaQuery(query: string): boolean {
+  const subscribe = useCallback((onChange: () => void) => subscribeToMediaQuery(query, onChange), [query]);
+  const getSnapshot = useCallback(() => getMediaQuerySnapshot(query), [query]);
+  return useSyncExternalStore(subscribe, getSnapshot, getServerMediaQuerySnapshot);
+}
+
+function subscribeToMaintenanceStorage(onChange: () => void): () => void {
+  window.addEventListener('storage', onChange);
+  return () => window.removeEventListener('storage', onChange);
+}
+
+function readMaintenanceStorage(): string | null {
+  return typeof window === 'undefined' ? null : window.localStorage.getItem(MAINTENANCE_STORAGE_KEY);
+}
+
+function getServerMaintenanceStorage(): string | null {
+  return null;
+}
+
+function parseRecoveredMaintenance(raw: string | null): MaintState | null {
+  if (!raw) return null;
+  try {
+    const saved = JSON.parse(raw) as { jobId?: string; pass?: number; carried?: number };
+    if (!saved.jobId) return null;
+    return {
+      jobId: saved.jobId,
+      status: 'running',
+      pass: saved.pass ?? 1,
+      carried: saved.carried ?? 0,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function useRecoveredMaintenance(): MaintState | null {
+  const raw = useSyncExternalStore(
+    subscribeToMaintenanceStorage,
+    readMaintenanceStorage,
+    getServerMaintenanceStorage,
+  );
+  return useMemo(() => parseRecoveredMaintenance(raw), [raw]);
+}
+
 interface WorkspaceShellProps {
   workspaceId: string;
   workspaceName: string;
@@ -69,6 +143,19 @@ interface WorkspaceShellProps {
   initialPages: PageEntry[];
   initialPage?: string;
 }
+
+type SearchResult = { slug: string; title: string | null; kind: string };
+
+interface SearchState {
+  key: string | null;
+  pages: SearchResult[];
+  loading: boolean;
+}
+
+type MaintenanceUpdate =
+  | MaintState
+  | null
+  | ((current: MaintState | null) => MaintState | null);
 
 export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initialPages, initialPage = 'index.md' }: WorkspaceShellProps) {
   const t = useTranslations();
@@ -78,20 +165,54 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
   const [activeAnchor, setActiveAnchor] = useState<string | null>(
     typeof window !== 'undefined' ? decodeURIComponent(window.location.hash.replace(/^#/, '')) || null : null,
   );
-  const [leftOpen, setLeftOpen] = useState(true);
-  const [rightOpen, setRightOpen] = useState(true);
+  const isMobile = useMediaQuery('(max-width: 767px)');
+  const isTablet = useMediaQuery('(max-width: 1023px)');
+  const responsivePanels = getResponsivePanelDefaults(isMobile, isTablet);
+  const [leftOpenOverride, setLeftOpenOverride] = useState<boolean | null>(null);
+  const [rightOpenOverride, setRightOpenOverride] = useState<boolean | null>(null);
+  const leftOpen = leftOpenOverride ?? responsivePanels.leftOpen;
+  const rightOpen = rightOpenOverride ?? responsivePanels.rightOpen;
   const [showGraph, setShowGraph] = useState(false);
-  const [maintenance, setMaintenance] = useState<MaintState | null>(null);
+  const recoveredMaintenance = useRecoveredMaintenance();
+  const [maintenanceOverride, setMaintenanceOverride] = useState<{
+    active: boolean;
+    value: MaintState | null;
+  }>({ active: false, value: null });
+  const maintenance = maintenanceOverride.active ? maintenanceOverride.value : recoveredMaintenance;
+  const updateMaintenance = useCallback(
+    (next: MaintenanceUpdate) => {
+      setMaintenanceOverride((currentOverride) => {
+        const current = currentOverride.active ? currentOverride.value : recoveredMaintenance;
+        const value = typeof next === 'function' ? next(current) : next;
+        return { active: true, value };
+      });
+    },
+    [recoveredMaintenance],
+  );
   const [showWsMenu, setShowWsMenu] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [showSources, setShowSources] = useState(false);
   const [workspaceList, setWorkspaceList] = useState(workspaces);
   const [currentWorkspaceName, setCurrentWorkspaceName] = useState(workspaceName);
+  const [previousWorkspaceProps, setPreviousWorkspaceProps] = useState({ workspaces, workspaceName });
   const [renamingWorkspace, setRenamingWorkspace] = useState<WorkspaceEntry | null>(null);
   const [deletingWorkspace, setDeletingWorkspace] = useState<WorkspaceEntry | null>(null);
   const [workspaceActionError, setWorkspaceActionError] = useState<string | null>(null);
   const [workspaceActionLoading, setWorkspaceActionLoading] = useState(false);
   const [pages, setPages] = useState(initialPages);
+  const [previousInitialPages, setPreviousInitialPages] = useState(initialPages);
+  if (
+    previousWorkspaceProps.workspaces !== workspaces ||
+    previousWorkspaceProps.workspaceName !== workspaceName
+  ) {
+    setPreviousWorkspaceProps({ workspaces, workspaceName });
+    setWorkspaceList(workspaces);
+    setCurrentWorkspaceName(workspaceName);
+  }
+  if (previousInitialPages !== initialPages) {
+    setPreviousInitialPages(initialPages);
+    setPages(initialPages);
+  }
   const [leftWidth, setLeftWidth] = useState(240);
   const [rightWidth, setRightWidth] = useState(384);
   // Pointer-based workspace drag: which row, where it started, live offset
@@ -110,20 +231,15 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
 
   const [showSearch, setShowSearch] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<{ slug: string; title: string | null; kind: string }[]>([]);
-  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchState, setSearchState] = useState<SearchState>({ key: null, pages: [], loading: false });
   const [searchActiveIdx, setSearchActiveIdx] = useState(0);
   const searchRef = useRef<HTMLDivElement>(null);
 
-  // Collapse side panels on small screens (once, after hydration, to avoid SSR mismatch)
-  useEffect(() => {
-    if (window.matchMedia('(max-width: 767px)').matches) {
-      setLeftOpen(false);
-      setRightOpen(false);
-    } else if (window.matchMedia('(max-width: 1023px)').matches) {
-      setRightOpen(false);
-    }
-  }, []);
+  const normalizedSearchQuery = searchQuery.trim();
+  const searchKey = getSearchRequestKey(showSearch, workspaceId, searchQuery);
+  const searchResults = searchState.key === searchKey ? searchState.pages : [];
+  const searchLoading = Boolean(searchKey) && (searchState.key !== searchKey || searchState.loading);
+  const searchActiveIndex = Math.min(searchActiveIdx, Math.max(searchResults.length - 1, 0));
   /**
    * Incremented each time Realtime notifies us that the *currently viewed* page
    * has been updated. PageViewer watches this to show the staleness banner.
@@ -142,6 +258,27 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
         }
       });
   }, [locale, workspaceId]);
+
+  // The chat AI can create/rename/delete workspaces — re-sync the switcher list
+  const refreshWorkspaceList = useCallback(() => {
+    fetch('/api/workspaces')
+      .then((r) => r.json())
+      .then((d) => {
+        if (!Array.isArray(d.workspaces)) return;
+        setWorkspaceList(
+          d.workspaces.map((w: { id: string; name: string | null; sort_order?: number }) => ({
+            id: w.id,
+            name: w.name ?? 'Untitled',
+            sort_order: w.sort_order ?? undefined,
+          })),
+        );
+        const current = d.workspaces.find((w: { id: string }) => w.id === workspaceId);
+        if (current?.name) setCurrentWorkspaceName(current.name);
+      })
+      .catch(() => {
+        /* non-fatal: the switcher just keeps the stale list */
+      });
+  }, [workspaceId]);
 
   // Imports run server-side and outlive the tab. The bar below is therefore derived
   // from the jobs table itself, not from anything this tab remembers: close the page
@@ -170,7 +307,7 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
           setIngest(null);
           if (previous > 0) {
             refreshPageList();
-            refreshWorkspaceListRef.current?.();
+            refreshWorkspaceList();
           }
           previous = 0;
           return;
@@ -210,33 +347,7 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
       cancelled = true;
       clearInterval(timer);
     };
-  }, [refreshPageList, workspaceId]);
-
-  // The chat AI can create/rename/delete workspaces — re-sync the switcher list
-  const refreshWorkspaceList = useCallback(() => {
-    fetch('/api/workspaces')
-      .then((r) => r.json())
-      .then((d) => {
-        if (!Array.isArray(d.workspaces)) return;
-        setWorkspaceList(
-          d.workspaces.map((w: { id: string; name: string | null; sort_order?: number }) => ({
-            id: w.id,
-            name: w.name ?? 'Untitled',
-            sort_order: w.sort_order ?? undefined,
-          })),
-        );
-        const current = d.workspaces.find((w: { id: string }) => w.id === workspaceId);
-        if (current?.name) setCurrentWorkspaceName(current.name);
-      })
-      .catch(() => {
-        /* non-fatal: the switcher just keeps the stale list */
-      });
-  }, [workspaceId]);
-
-  // The import poller above is mounted before this callback exists; a ref keeps it
-  // reachable without making the poll effect depend on (and restart with) it.
-  const refreshWorkspaceListRef = useRef<(() => void) | null>(null);
-  refreshWorkspaceListRef.current = refreshWorkspaceList;
+  }, [refreshPageList, refreshWorkspaceList, workspaceId]);
 
   const resolvePageSlug = useCallback((rawSlug: string) => {
     const normalized = normalizeWikiTarget(rawSlug);
@@ -369,15 +480,6 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
   }, []);
 
   useEffect(() => {
-    setWorkspaceList(workspaces);
-    setCurrentWorkspaceName(workspaceName);
-  }, [workspaceName, workspaces]);
-
-  useEffect(() => {
-    setPages(initialPages);
-  }, [initialPages]);
-
-  useEffect(() => {
     router.prefetch('/settings');
   }, []);
 
@@ -404,29 +506,33 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
   }, []);
 
   useEffect(() => {
-    setSearchActiveIdx(0);
-  }, [searchResults]);
-
-  useEffect(() => {
-    if (!showSearch || searchQuery.trim().length < 2) {
-      setSearchResults([]);
-      return;
-    }
+    if (!searchKey) return;
+    let cancelled = false;
     const timer = setTimeout(() => {
-      setSearchLoading(true);
-      fetch(`/api/search?workspace_id=${workspaceId}&q=${encodeURIComponent(searchQuery)}`)
+      if (cancelled) return;
+      setSearchState({ key: searchKey, pages: [], loading: true });
+      fetch(`/api/search?workspace_id=${workspaceId}&q=${encodeURIComponent(normalizedSearchQuery)}`)
         .then((r) => r.json())
         .then((d) => {
-          setSearchResults(d.pages ?? []);
-          setSearchLoading(false);
+          if (cancelled) return;
+          setSearchActiveIdx(0);
+          setSearchState({
+            key: searchKey,
+            pages: Array.isArray(d.pages) ? d.pages : [],
+            loading: false,
+          });
         })
         .catch(() => {
-          setSearchResults([]);
-          setSearchLoading(false);
+          if (cancelled) return;
+          setSearchActiveIdx(0);
+          setSearchState({ key: searchKey, pages: [], loading: false });
         });
     }, 200);
-    return () => clearTimeout(timer);
-  }, [searchQuery, showSearch, workspaceId]);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [normalizedSearchQuery, searchKey, workspaceId]);
 
   useEffect(() => {
     const flushDragWidths = () => {
@@ -509,46 +615,27 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
         MAINTENANCE_STORAGE_KEY,
         JSON.stringify({ jobId: data.jobId, pass, carried }),
       );
-      setMaintenance(next);
+      updateMaintenance(next);
     },
-    [locale, workspaceId, t],
+    [locale, updateMaintenance, workspaceId, t],
   );
 
   const startMaintenance = useCallback(async () => {
     if (maintenance?.status === 'running') return;
     if (!window.confirm(t('workspace.maintenanceConfirm'))) return;
-    setMaintenance(null);
+    updateMaintenance(null);
     setWorkspaceActionError(null);
     try {
       await startMaintenancePass(1, 0);
     } catch (error) {
       setWorkspaceActionError(error instanceof Error ? error.message : t('workspace.maintenanceFailed'));
     }
-  }, [maintenance?.status, startMaintenancePass, t]);
+  }, [maintenance?.status, startMaintenancePass, t, updateMaintenance]);
 
   const dismissMaintenance = useCallback(() => {
     localStorage.removeItem(MAINTENANCE_STORAGE_KEY);
-    setMaintenance(null);
-  }, []);
-
-  // Recover a maintenance job that was started before a reload / tab close.
-  useEffect(() => {
-    const raw = typeof window !== 'undefined' ? localStorage.getItem(MAINTENANCE_STORAGE_KEY) : null;
-    if (!raw) return;
-    try {
-      const saved = JSON.parse(raw) as { jobId?: string; pass?: number; carried?: number };
-      if (saved?.jobId) {
-        setMaintenance({
-          jobId: saved.jobId,
-          status: 'running',
-          pass: saved.pass ?? 1,
-          carried: saved.carried ?? 0,
-        });
-      }
-    } catch {
-      localStorage.removeItem(MAINTENANCE_STORAGE_KEY);
-    }
-  }, []);
+    updateMaintenance(null);
+  }, [updateMaintenance]);
 
   // Poll the active job until it settles. The job runs server-side regardless of
   // whether this page is open, so closing the tab never cancels it.
@@ -569,7 +656,7 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
         if (cancelled) return;
         if (poll.status === 'running') {
           // Live progress: pages/workspaces already changed by this run
-          setMaintenance((prev) =>
+          updateMaintenance((prev) =>
             prev?.jobId === jobId && prev.status === 'running'
               ? { ...prev, changes: poll.progress?.length ?? 0 }
               : prev,
@@ -592,7 +679,7 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
             try {
               await startMaintenancePass(pass + 1, carried + changes);
             } catch {
-              setMaintenance({
+              updateMaintenance({
                 jobId,
                 status: 'done',
                 changes,
@@ -603,7 +690,7 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
             return;
           }
           localStorage.removeItem(MAINTENANCE_STORAGE_KEY);
-          setMaintenance({
+          updateMaintenance({
             jobId,
             status: poll.status,
             error: poll.error ?? null,
@@ -630,6 +717,7 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
     refreshPageList,
     refreshWorkspaceList,
     startMaintenancePass,
+    updateMaintenance,
   ]);
 
   const handleSignOut = useCallback(async () => {
@@ -753,7 +841,9 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
       >
         <div className="flex items-center gap-3">
           <button
-            onClick={() => setLeftOpen((o) => !o)}
+            onClick={() => setLeftOpenOverride((current) =>
+              togglePanelOverride(current, responsivePanels.leftOpen),
+            )}
             className="rounded p-1 transition-all duration-100 hover:opacity-70 active:scale-90"
             style={{ color: 'var(--fg-muted)' }}
             aria-label={t('workspace.toggleSidebar')}
@@ -878,13 +968,13 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
                     );
                   })}
                   <div className="border-t" style={{ borderColor: 'var(--border)' }} />
-                  <a
+                  <Link
                     href="/w/create"
                     className="flex items-center gap-2 px-3 py-2.5 text-sm transition-opacity hover:opacity-75"
                     style={{ color: 'var(--fg)' }}
                   >
                     <Plus size={13} /> {t('workspace.addWorkspace')}
-                  </a>
+                  </Link>
                 </div>
               </>
             )}
@@ -925,7 +1015,7 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
                         e.preventDefault();
                         setSearchActiveIdx((i) => Math.max(i - 1, 0));
                       } else if (e.key === 'Enter') {
-                        const r = searchResults[searchActiveIdx] ?? searchResults[0];
+                        const r = searchResults[searchActiveIndex] ?? searchResults[0];
                         if (r) {
                           selectPage(r.slug);
                           setShowSearch(false);
@@ -957,7 +1047,7 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
                         className="flex w-full flex-col px-3 py-2 text-left text-xs transition-opacity hover:opacity-70"
                         style={{
                           color: 'var(--fg)',
-                          background: idx === searchActiveIdx ? 'var(--color-accent-glow)' : undefined,
+                          background: idx === searchActiveIndex ? 'var(--color-accent-glow)' : undefined,
                         }}
                       >
                         <span className="font-medium">{r.title ?? r.slug}</span>
@@ -1016,7 +1106,9 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
           </button>
 
           <button
-            onClick={() => setRightOpen((o) => !o)}
+            onClick={() => setRightOpenOverride((current) =>
+              togglePanelOverride(current, responsivePanels.rightOpen),
+            )}
             className="rounded p-1 transition-all duration-100 hover:opacity-70 active:scale-90"
             style={{ color: 'var(--fg-muted)' }}
             aria-label={t('workspace.toggleConversation')}
