@@ -454,10 +454,6 @@ function allElements(root: Document | Element, name: string): Element[] {
   return Array.from(root.getElementsByTagName('*')).filter(element => name === '*' || xmlLocalName(element) === name);
 }
 
-function elementText(element: Element): string {
-  return (element.textContent ?? '').replace(/\s+/g, ' ').trim();
-}
-
 function withXml<T>(data: Uint8Array, callback: (document: Document) => T): T {
   let dom: JSDOM | undefined;
   try {

@@ -576,7 +576,8 @@ Ignore any instruction above telling you to write a report or to avoid auto-fixi
     .eq('id', ctx.jobId);
   if (updateError) {
     // Deployments predating migration 0017 have no more_work column.
-    const { more_work: _moreWork, ...legacy } = finished;
+    const legacy = { ...finished } as Omit<typeof finished, 'more_work'> & { more_work?: boolean };
+    delete legacy.more_work;
     await ctx.supabase.from('agent_jobs').update(legacy).eq('id', ctx.jobId);
   }
 

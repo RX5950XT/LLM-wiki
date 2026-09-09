@@ -3,7 +3,6 @@ import { strToU8, zipSync } from 'fflate';
 import { extractDocument, type ImageToDescribe } from './document-parser';
 
 const bytes = (value: string): Uint8Array => new TextEncoder().encode(value);
-const xml = (value: string): Uint8Array => bytes(value);
 
 function archive(files: Record<string, string | Uint8Array>): Uint8Array {
   return zipSync(Object.fromEntries(Object.entries(files).map(([name, value]) => [

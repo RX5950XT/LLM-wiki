@@ -55,8 +55,7 @@ interface GraphViewProps {
  * warm exception: synthesis pages are the only ones the wiki reasons out for itself
  * rather than transcribes, so they are the one thing that reads warm on a cold field.
  */
-const KIND_GROUPS = ['entity', 'concept', 'summary', 'synthesis'] as const;
-type KindGroup = (typeof KIND_GROUPS)[number] | 'other';
+type KindGroup = 'entity' | 'concept' | 'summary' | 'synthesis' | 'other';
 
 const KIND_COLOR: Record<KindGroup, string> = {
   entity: '#4ea8de',

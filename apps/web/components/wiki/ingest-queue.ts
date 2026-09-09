@@ -139,6 +139,7 @@ export function mergeIngestQueueJobs(
 }
 
 export function isSupportedIngestFile(fileName: string, _mimeType: string): boolean {
+  void _mimeType;
   const extension = fileName.slice(fileName.lastIndexOf('.')).toLowerCase();
   return ['.txt', '.md', '.pdf', '.docx', '.pptx', '.epub', '.png', '.jpg', '.jpeg', '.webp', '.gif'].includes(extension);
 }

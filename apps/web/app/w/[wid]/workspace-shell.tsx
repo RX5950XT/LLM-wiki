@@ -179,6 +179,10 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
     value: MaintState | null;
   }>({ active: false, value: null });
   const maintenance = maintenanceOverride.active ? maintenanceOverride.value : recoveredMaintenance;
+  const activeMaintenanceStatus = maintenance?.status;
+  const activeMaintenanceJobId = maintenance?.jobId;
+  const activeMaintenancePass = maintenance?.pass;
+  const activeMaintenanceCarried = maintenance?.carried;
   const updateMaintenance = useCallback(
     (next: MaintenanceUpdate) => {
       setMaintenanceOverride((currentOverride) => {
@@ -481,7 +485,7 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
 
   useEffect(() => {
     router.prefetch('/settings');
-  }, []);
+  }, [router]);
 
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
@@ -640,8 +644,15 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
   // Poll the active job until it settles. The job runs server-side regardless of
   // whether this page is open, so closing the tab never cancels it.
   useEffect(() => {
-    if (maintenance?.status !== 'running') return;
-    const { jobId, pass, carried } = maintenance;
+    if (
+      activeMaintenanceStatus !== 'running' ||
+      !activeMaintenanceJobId ||
+      activeMaintenancePass === undefined ||
+      activeMaintenanceCarried === undefined
+    ) return;
+    const jobId = activeMaintenanceJobId;
+    const pass = activeMaintenancePass;
+    const carried = activeMaintenanceCarried;
     let cancelled = false;
     const tick = async () => {
       try {
@@ -710,10 +721,10 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
       window.clearInterval(id);
     };
   }, [
-    maintenance?.status,
-    maintenance?.jobId,
-    maintenance?.pass,
-    maintenance?.carried,
+    activeMaintenanceCarried,
+    activeMaintenanceJobId,
+    activeMaintenancePass,
+    activeMaintenanceStatus,
     refreshPageList,
     refreshWorkspaceList,
     startMaintenancePass,
@@ -723,8 +734,8 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
   const handleSignOut = useCallback(async () => {
     const supabase = createClient();
     await supabase.auth.signOut();
-    window.location.href = '/login';
-  }, []);
+    router.push('/login');
+  }, [router]);
 
   const renameWorkspace = useCallback(async (workspace: WorkspaceEntry, name: string) => {
     const trimmed = name.trim();

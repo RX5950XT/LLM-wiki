@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { FileText } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { PageViewer } from '@/components/wiki/page-viewer';
 
@@ -17,6 +18,7 @@ interface RulesPanelProps {
 
 export function RulesPanel({ workspaceId, pages }: RulesPanelProps) {
   const t = useTranslations();
+  const router = useRouter();
   const orderedPages = useMemo(() => pages, [pages]);
   const [activeSlug, setActiveSlug] = useState<string | null>(orderedPages[0]?.slug ?? null);
 
@@ -62,7 +64,7 @@ export function RulesPanel({ workspaceId, pages }: RulesPanelProps) {
             slug={activeSlug}
             onWikiLinkClick={(slug, anchor) => {
               const hash = anchor ? `#${encodeURIComponent(anchor)}` : '';
-              window.location.href = `/w/${workspaceId}?page=${encodeURIComponent(slug)}${hash}`;
+              router.push(`/w/${workspaceId}?page=${encodeURIComponent(slug)}${hash}`);
             }}
           />
         </div>

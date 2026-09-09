@@ -36,9 +36,8 @@ export async function createWorkspaceForUser(
 
   let { error: workspaceError } = await admin.from('workspaces').insert(workspaceRecord);
   if (isMissingSortOrderError(workspaceError)) {
-    const { sort_order: _sortOrder, ...legacyWorkspaceRecord } = workspaceRecord as typeof workspaceRecord & {
-      sort_order?: number;
-    };
+    const legacyWorkspaceRecord = { ...workspaceRecord };
+    delete legacyWorkspaceRecord.sort_order;
     const retry = await admin.from('workspaces').insert(legacyWorkspaceRecord);
     workspaceError = retry.error;
   }

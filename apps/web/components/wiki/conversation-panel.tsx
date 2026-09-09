@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { useRouter } from 'next/navigation';
 import {
   Send,
   Bookmark,
@@ -107,6 +108,7 @@ export function ConversationPanel({
 }: ConversationPanelProps) {
   const t = useTranslations();
   const locale = useLocale();
+  const router = useRouter();
   const [driveReconnectPending, setDriveReconnectPending] = useState(false);
   const [wasReconnected] = useState(() =>
     typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('r') === '1',
@@ -391,13 +393,13 @@ export function ConversationPanel({
         onSourceAdded?.();
         if (proposal.action === 'delete_workspace' && proposal.params.workspace_id === workspaceId) {
           // Current workspace is gone — leave it
-          window.location.href = '/w';
+          router.push('/w');
         }
       } catch {
         setProposalStatus(messageId, proposalIdx, 'error', t('query.actionFailed'));
       }
     },
-    [setProposalStatus, onSourceAdded, workspaceId, t],
+    [setProposalStatus, onSourceAdded, router, workspaceId, t],
   );
 
   const handleFileBack = useCallback(

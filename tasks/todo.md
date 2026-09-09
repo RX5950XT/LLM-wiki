@@ -162,3 +162,18 @@
 - 新增頁面草稿取消／確認、手動刷新鎖定狀態、設定刪除與 props 同步、手機面板、搜尋索引及維護輪詢回歸。
 - `bun run test`：140 pass / 0 fail（27 files）；`bun run typecheck`：5/5；`bun run build`：成功，保留既有 `experimental.turbo` warning。
 - `apps/android` 執行 `.\gradlew.bat :app:assembleDebug`：BUILD SUCCESSFUL；實機測試依使用者指示延後。
+
+---
+
+## 2026-09-09 處理該處理的 lint warnings
+
+- [x] 修 React Hook 依賴與 SPA 內部導頁警告
+- [x] 清除未使用變數警告，保留必要診斷 console
+- [x] 確認 lint、測試、typecheck、Web build、Android APK
+- [ ] 提交並推送；Android 實機測試仍延後
+
+### Review
+
+- lint：38 warnings / 0 errors；剩餘為 37 個診斷 `console` 與 1 個 module export 格式警告。
+- `bun run test`：140 pass / 0 fail；`bun run typecheck`：5/5；`bun run build`：成功。
+- `apps/android` 執行 `.\gradlew.bat :app:assembleDebug`：BUILD SUCCESSFUL；實機測試依使用者指示延後。

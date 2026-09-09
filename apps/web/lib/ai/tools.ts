@@ -1015,7 +1015,8 @@ async function insertPageRecord(
   if (!error) return;
 
   if (isMissingSearchTextError(error)) {
-    const { search_text: _searchText, ...fallbackValues } = values;
+    const fallbackValues = { ...values };
+    delete fallbackValues.search_text;
     const { error: fallbackError } = await deps.supabase.from('pages').insert(fallbackValues);
     if (!fallbackError) return;
     throw new Error(`pages insert failed: ${fallbackError.message}`, { cause: fallbackError });
@@ -1033,7 +1034,8 @@ async function updatePageRecord(
   if (!error) return;
 
   if (isMissingSearchTextError(error)) {
-    const { search_text: _searchText, ...fallbackValues } = values;
+    const fallbackValues = { ...values };
+    delete fallbackValues.search_text;
     const { error: fallbackError } = await deps.supabase
       .from('pages')
       .update(fallbackValues)
@@ -1066,7 +1068,8 @@ async function updatePageRecordCas(
   if (!error) return Boolean(data);
 
   if (isMissingSearchTextError(error)) {
-    const { search_text: _searchText, ...fallbackValues } = values;
+    const fallbackValues = { ...values };
+    delete fallbackValues.search_text;
     const { data: fallbackData, error: fallbackError } = await run(fallbackValues);
     if (!fallbackError) return Boolean(fallbackData);
     throw new Error(`pages update failed: ${fallbackError.message}`);
