@@ -11,51 +11,125 @@ import type { LLMProfile } from '@llm-wiki/shared-types';
 export const LLM_REQUEST_TIMEOUT_MS = 150_000;
 
 /**
- * Normal time-to-headers is 2–15s (measured against OpenRouter). A request that has
- * not answered by this point is stuck, not slow — send it again instead of waiting
- * out the whole budget. The AI SDK never retries a request we abort ourselves.
+ * A streaming request that has produced no `data:` event by now is stalled, not
+ * thinking: with reasoning on, the reasoning itself streams within seconds.
+ * Measured against OpenRouter / gemini-3.8-flash with the real query prompt and
+ * tool set: healthy first steps finish in 3–9s, stalled ones send headers and
+ * then nothing at all for 90s+. Nothing has reached the caller yet at that
+ * point, so the request is simply sent again. The AI SDK never retries a
+ * request we abort ourselves. Non-streaming calls are exempt — their body only
+ * arrives when the whole answer is done, which can legitimately take minutes.
  */
-export const LLM_HEADERS_TIMEOUT_MS = 35_000;
-const LLM_HEADER_ATTEMPTS = 2;
+export const LLM_FIRST_DATA_TIMEOUT_MS = 35_000;
+const LLM_STREAM_ATTEMPTS = 2;
+
+/**
+ * gemini-3.8-flash via OpenRouter stalls reproducibly at reasoning effort "high"
+ * and intermittently at the provider default; "medium" was stable in every run.
+ * Applied only when the request does not choose an effort itself.
+ */
+const OPENROUTER_DEFAULT_REASONING = { effort: 'medium' } as const;
 
 interface LLMClientOptions {
   /** Whole-invocation deadline: aborts every request made after it fires. */
   signal?: AbortSignal;
 }
 
-class HeadersTimeoutError extends Error {}
+class FirstDataTimeoutError extends Error {}
+
+function isStreamingRequest(init: RequestInit | undefined): boolean {
+  return typeof init?.body === 'string' && /"stream"\s*:\s*true/.test(init.body);
+}
+
+/** Re-wrap a partially read body: replay what was held back, then pipe the rest. */
+function resumeBody(held: Uint8Array[], reader: ReadableStreamDefaultReader<Uint8Array>): ReadableStream<Uint8Array> {
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const chunk of held) controller.enqueue(chunk);
+    },
+    async pull(controller) {
+      const { done, value } = await reader.read();
+      if (done) controller.close();
+      else controller.enqueue(value);
+    },
+    cancel(reason) {
+      return reader.cancel(reason);
+    },
+  });
+}
 
 /**
- * fetch with a whole-request timeout plus a time-to-headers timeout that retries
- * once. Exported for tests; `baseFetch` is injectable for the same reason.
+ * fetch with a whole-request timeout and, for streaming requests, a
+ * time-to-first-data timeout that re-sends once. Exported for tests;
+ * `baseFetch` is injectable for the same reason.
  */
 export async function fetchWithLLMTimeouts(
   input: RequestInfo | URL,
   init: RequestInit | undefined,
   outer: AbortSignal | undefined,
   baseFetch: typeof fetch = fetch,
-  headersTimeoutMs = LLM_HEADERS_TIMEOUT_MS,
+  firstDataTimeoutMs = LLM_FIRST_DATA_TIMEOUT_MS,
 ): Promise<Response> {
   const whole = AbortSignal.timeout(LLM_REQUEST_TIMEOUT_MS);
+  const baseSignals = [whole, ...(init?.signal ? [init.signal] : []), ...(outer ? [outer] : [])];
+  if (!isStreamingRequest(init)) {
+    return baseFetch(input, { ...init, signal: AbortSignal.any(baseSignals) });
+  }
+
   for (let attempt = 1; ; attempt += 1) {
-    const headersGate = new AbortController();
-    const timer = setTimeout(() => headersGate.abort(new HeadersTimeoutError()), headersTimeoutMs);
-    const signals = [whole, headersGate.signal];
-    if (init?.signal) signals.push(init.signal);
-    if (outer) signals.push(outer);
+    const gate = new AbortController();
+    const timer = setTimeout(() => gate.abort(new FirstDataTimeoutError()), firstDataTimeoutMs);
     const startedAt = Date.now();
     try {
-      const response = await baseFetch(input, { ...init, signal: AbortSignal.any(signals) });
+      const response = await baseFetch(input, { ...init, signal: AbortSignal.any([...baseSignals, gate.signal]) });
+      if (!response.ok || !response.body) return response;
+      // Hold everything back until the first data event: SSE comments such as
+      // OpenRouter's ": OPENROUTER PROCESSING" keep-alives do not count.
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      const held: Uint8Array[] = [];
+      let seen = '';
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        held.push(value);
+        seen += decoder.decode(value, { stream: true });
+        if (/^data:/m.test(seen)) break;
+      }
       const waitedMs = Date.now() - startedAt;
-      if (waitedMs > 15_000) console.warn('[llm] slow response headers', { waitedMs, status: response.status, attempt });
-      return response;
+      if (waitedMs > 15_000) console.warn('[llm] slow first data', { waitedMs, attempt });
+      return new Response(resumeBody(held, reader), {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+      });
     } catch (error) {
-      const stuck = headersGate.signal.aborted && !whole.aborted && !outer?.aborted && !init?.signal?.aborted;
-      if (!stuck || attempt >= LLM_HEADER_ATTEMPTS) throw error;
-      console.warn('[llm] no response headers, retrying', { waitedMs: Date.now() - startedAt, attempt });
+      const stalled = gate.signal.aborted && !baseSignals.some((signal) => signal.aborted);
+      if (!stalled || attempt >= LLM_STREAM_ATTEMPTS) throw error;
+      console.warn('[llm] stream produced no data, re-sending', { waitedMs: Date.now() - startedAt, attempt });
     } finally {
       clearTimeout(timer);
     }
+  }
+}
+
+/** Add OpenRouter's default reasoning effort unless the request already sets one. */
+export function withOpenRouterDefaults(init: RequestInit | undefined): RequestInit | undefined {
+  if (typeof init?.body !== 'string') return init;
+  try {
+    const body = JSON.parse(init.body) as Record<string, unknown>;
+    if (body.reasoning !== undefined || body.reasoning_effort !== undefined) return init;
+    return { ...init, body: JSON.stringify({ ...body, reasoning: OPENROUTER_DEFAULT_REASONING }) };
+  } catch {
+    return init;
+  }
+}
+
+function isOpenRouter(baseUrl: string): boolean {
+  try {
+    return new URL(baseUrl).hostname.endsWith('openrouter.ai');
+  } catch {
+    return false;
   }
 }
 
@@ -73,12 +147,14 @@ export function createLLMClient(profile: LLMProfile, options: LLMClientOptions =
     headers = JSON.parse(decryptApiKey(profile.extra_headers_encrypted));
   }
 
+  const openRouter = isOpenRouter(profile.base_url);
   const provider = createOpenAICompatible({
     name: profile.name,
     baseURL: profile.base_url,
     apiKey,
     headers,
-    fetch: (input, init) => fetchWithLLMTimeouts(input, init, options.signal),
+    fetch: (input, init) =>
+      fetchWithLLMTimeouts(input, openRouter ? withOpenRouterDefaults(init) : init, options.signal),
   });
 
   return provider.chatModel(profile.model);
