@@ -238,7 +238,10 @@ async function backfillSeedIndexes(
 export async function runOrganizePipeline(
   ctx: MaintainContext,
 ): Promise<{ changes: number; complete: boolean }> {
-  const model = createLLMClient(ctx.profile);
+  // The loop budget is only checked between steps; a hung provider call is cut
+  // here instead, so the round's catch ends the pass as done + more_work.
+  const hardStop = AbortSignal.timeout(TOOL_LOOP_BUDGET_MS + 50_000);
+  const model = createLLMClient(ctx.profile, { signal: hardStop });
 
   const { data: allWorkspaces } = await ctx.supabase
     .from('workspaces')
@@ -491,7 +494,7 @@ Ignore any instruction above telling you to write a report or to avoid auto-fixi
       // own retries. Everything done so far is already committed page by page, so
       // never throw it away: pause, retry the round, and if the budget runs out end
       // the pass as done+more_work so the client's next pass resumes the plan.
-      if (Date.now() + PROVIDER_RETRY_DELAY_MS >= deadline) break;
+      if (hardStop.aborted || Date.now() + PROVIDER_RETRY_DELAY_MS >= deadline) break;
       await new Promise((resolve) => setTimeout(resolve, PROVIDER_RETRY_DELAY_MS));
       continue;
     }

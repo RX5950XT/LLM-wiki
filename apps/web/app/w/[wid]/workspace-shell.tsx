@@ -306,7 +306,8 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
         const jobs = parseIngestJobsResponse(await response.json().catch(() => null), workspaceId);
         if (cancelled || !jobs) return;
 
-        const inFlight = jobs.filter((job) => job.status === 'running');
+        // Queued (pending) imports are part of the batch too — same rule as Android.
+        const inFlight = jobs.filter((job) => job.status === 'running' || job.status === 'pending');
         if (inFlight.length === 0) {
           setIngest(null);
           if (previous > 0) {

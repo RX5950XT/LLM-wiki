@@ -22,10 +22,25 @@ import { getDefaultPrompt } from '@llm-wiki/prompts';
 
 export const maxDuration = 120;
 
+/**
+ * Past this the model may no longer call tools and must answer with what it has
+ * read; a question that kept it researching until Vercel's kill at maxDuration
+ * used to end in FUNCTION_INVOCATION_TIMEOUT with not one word streamed.
+ */
+const QUERY_TOOL_BUDGET_MS = 70_000;
+const QUERY_STEP_LIMIT = 20;
+/** Cut any request still in flight before Vercel does, so the stream closes cleanly. */
+const QUERY_HARD_STOP_MS = 105_000;
+
 /** Shown when the model streams no text at all — never leave an empty answer bubble. */
 const EMPTY_ANSWER_MESSAGE: Record<string, string> = {
   'zh-TW': '模型這次沒有回覆任何內容（供應商暫時性問題）。請再問一次。',
   en: 'The model returned no answer this time (a transient provider issue). Please ask again.',
+};
+
+const TIMED_OUT_MESSAGE: Record<string, string> = {
+  'zh-TW': '模型回應逾時，這次沒能完成回答。請再問一次，或把問題問得更具體。',
+  en: 'The model took too long and could not finish this answer. Please ask again, or narrow the question.',
 };
 
 const MessagesSchema = z
@@ -76,6 +91,8 @@ function getFaithfulQueryPrompt(locale: string): string {
 }
 
 export async function POST(request: NextRequest) {
+  const answerBy = Date.now() + QUERY_TOOL_BUDGET_MS;
+  const hardStop = AbortSignal.timeout(QUERY_HARD_STOP_MS);
   const locale = resolveUiLocaleFromRequest(request);
   const { supabase, user } = await getRequestUser(request);
   if (!user) return new Response('Unauthorized', { status: 401 });
@@ -222,7 +239,7 @@ export async function POST(request: NextRequest) {
         onPageRead: (slug: string) => readSlugs.add(slug),
       });
 
-  const model = createLLMClient(profile as Parameters<typeof createLLMClient>[0]);
+  const model = createLLMClient(profile as Parameters<typeof createLLMClient>[0], { signal: hardStop });
 
   let augmentedMessages: ModelMessage[] = faithful ? [lastUserMessage!] : messages;
   if (!faithful) {
@@ -318,7 +335,13 @@ export async function POST(request: NextRequest) {
     system: systemPrompt,
     messages: augmentedMessages,
     tools,
-    stopWhen: stepCountIs(20),
+    stopWhen: stepCountIs(QUERY_STEP_LIMIT),
+    // Out of time or steps: no more tools, answer now from what was read.
+    prepareStep: ({ stepNumber }) =>
+      stepNumber >= QUERY_STEP_LIMIT - 1 || Date.now() > answerBy
+        ? { toolChoice: 'none' as const }
+        : undefined,
+    abortSignal: hardStop,
     onFinish: async ({ text, finishReason, steps, reasoningText }) => {
       // An answer that arrives with citations but no words looks like the wiki has
       // nothing to say. Name the shape of the failure so it is diagnosable at all.
@@ -351,10 +374,19 @@ export async function POST(request: NextRequest) {
   const stream = new ReadableStream({
     async start(controller) {
       let wroteText = false;
-      for await (const chunk of textStream) {
-        const safeChunk = sanitizeModelTextChunk(chunk);
-        if (safeChunk) wroteText = true;
-        controller.enqueue(encoder.encode(safeChunk));
+      try {
+        for await (const chunk of textStream) {
+          const safeChunk = sanitizeModelTextChunk(chunk);
+          if (safeChunk) wroteText = true;
+          controller.enqueue(encoder.encode(safeChunk));
+        }
+      } catch (error) {
+        if (!hardStop.aborted) console.warn('[query] stream failed', error);
+      }
+      if (hardStop.aborted) {
+        const notice = TIMED_OUT_MESSAGE[locale] ?? TIMED_OUT_MESSAGE.en;
+        controller.enqueue(encoder.encode(wroteText ? `\n\n${notice}` : notice));
+        wroteText = true;
       }
       // The provider does hand back an empty answer (seen under load: tools ran, then
       // not one word). An empty bubble reads as "the wiki has nothing to say" — say

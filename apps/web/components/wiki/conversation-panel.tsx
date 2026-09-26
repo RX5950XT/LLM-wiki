@@ -391,15 +391,19 @@ export function ConversationPanel({
         }
         setProposalStatus(messageId, proposalIdx, 'done');
         onSourceAdded?.();
-        if (proposal.action === 'delete_workspace' && proposal.params.workspace_id === workspaceId) {
-          // Current workspace is gone — leave it
-          router.push('/w');
+        if (proposal.action === 'delete_workspace') {
+          if (proposal.params.workspace_id === workspaceId) {
+            // Current workspace is gone — leave it
+            router.push('/w');
+          } else {
+            onWorkspacesChanged?.();
+          }
         }
       } catch {
         setProposalStatus(messageId, proposalIdx, 'error', t('query.actionFailed'));
       }
     },
-    [setProposalStatus, onSourceAdded, router, workspaceId, t],
+    [setProposalStatus, onSourceAdded, onWorkspacesChanged, router, workspaceId, t],
   );
 
   const handleFileBack = useCallback(

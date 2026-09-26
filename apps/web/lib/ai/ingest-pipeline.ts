@@ -43,6 +43,12 @@ const MAX_WRITE_ATTEMPTS = 2;
  * sweep. Stop first, so the checkpoint is consistent and a retry resumes from it.
  */
 const PIPELINE_BUDGET_MS = 210_000;
+/**
+ * The budget above is only checked between steps; a provider call that hangs
+ * past it would still be killed by Vercel. This aborts any request in flight,
+ * so the failure is recorded on the job and "retry" resumes from the checkpoint.
+ */
+const PIPELINE_HARD_STOP_MS = 260_000;
 
 /** Failure text for a run that ran out of wall clock with pages still owed. */
 export function budgetExhaustedError(written: number, planned: number): Error {
@@ -292,6 +298,7 @@ async function auditWrittenPages(
  */
 export async function runIngestPipeline(ctx: IngestContext): Promise<string[]> {
   const deadline = Date.now() + PIPELINE_BUDGET_MS;
+  const hardStop = AbortSignal.timeout(PIPELINE_HARD_STOP_MS);
   const job = await loadJob(ctx);
   const sourceId = ctx.sourceId ?? job.source_id;
   const sourceSha256 = hashSource(ctx.sourceContent);
@@ -312,7 +319,7 @@ export async function runIngestPipeline(ctx: IngestContext): Promise<string[]> {
     if (!plan) {
       if (await isPaused(ctx)) return markPaused(ctx, 'analysis', checkpoint);
 
-      const model = createLLMClient(ctx.profile);
+      const model = createLLMClient(ctx.profile, { signal: hardStop });
       const { data: indexPage, error: indexError } = await ctx.supabase
         .from('pages')
         .select('drive_file_id')
@@ -349,7 +356,7 @@ export async function runIngestPipeline(ctx: IngestContext): Promise<string[]> {
     if (!plan) throw new Error('Ingest analysis produced no plan.');
     if (await isPaused(ctx)) return markPaused(ctx, 'writing', checkpoint);
 
-    const model = createLLMClient(ctx.profile);
+    const model = createLLMClient(ctx.profile, { signal: hardStop });
     const touched = new Set(checkpoint.written_pages);
     let wroteUpdatedPage = touched.size > 0;
     let pauseAfterStep = false;
