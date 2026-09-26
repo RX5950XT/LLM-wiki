@@ -555,7 +555,7 @@ export function PageViewer({
 
       {/* Header */}
       <div
-        className="flex items-center justify-between border-b px-6 py-3"
+        className="flex items-center justify-between gap-3 border-b px-4 py-3 md:px-6"
         style={{ borderColor: 'var(--border)' }}
       >
         <div className="flex items-center gap-2">
@@ -635,13 +635,13 @@ export function PageViewer({
             )
           )}
         </div>
-        <span className="text-xs" style={{ color: 'var(--fg-muted)' }}>
+        <span className="min-w-0 truncate text-xs" style={{ color: 'var(--fg-muted)' }}>
           v{page.version} · {page.slug}
         </span>
       </div>
 
       {/* Markdown content */}
-      <div className="flex-1 overflow-y-auto px-8 py-6">
+      <div className="flex-1 overflow-y-auto px-4 py-4 md:px-8 md:py-6">
         {editing ? (
           <div className="space-y-3">
             <div className="flex flex-wrap gap-2">

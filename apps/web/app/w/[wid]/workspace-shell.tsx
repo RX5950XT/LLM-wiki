@@ -841,6 +841,86 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
     }
   }, [persistWorkspaceOrder, workspaceList]);
 
+  // Secondary top-bar actions. Below md they move into the drawer footer (the
+  // Android drawer's bottom row) so the phone-width header never overflows.
+  const toolButtons = (
+    <>
+          {/* Sources list */}
+          <button
+            onClick={() => setShowSources(true)}
+            className="rounded p-1 transition-all duration-100 hover:opacity-70 active:scale-90"
+            style={{ color: 'var(--fg-muted)' }}
+            aria-label={t('sources.open')}
+            title={t('sources.open')}
+          >
+            <Library size={16} />
+          </button>
+
+          {/* Graph view toggle */}
+          <button
+            onClick={() => setShowGraph((g) => !g)}
+            className="rounded p-1 transition-all duration-100 hover:opacity-70 active:scale-90"
+            style={{ color: showGraph ? 'var(--color-accent)' : 'var(--fg-muted)' }}
+            aria-label={t('workspace.toggleGraphView')}
+            title={t('workspace.graphView')}
+          >
+            <GitFork size={16} />
+          </button>
+
+          {/* Maintenance: health check + organize/dedupe in one background pass */}
+          <button
+            onClick={startMaintenance}
+            disabled={maintenance?.status === 'running'}
+            className="rounded p-1 transition-all duration-100 hover:opacity-70 active:scale-90 disabled:cursor-default"
+            style={{ color: maintenance?.status === 'running' ? 'var(--color-accent)' : 'var(--fg-muted)' }}
+            aria-label={t('workspace.maintenance')}
+            title={t('workspace.maintenanceDesc')}
+          >
+            {maintenance?.status === 'running' ? (
+              <Loader2 size={16} className="animate-spin" />
+            ) : (
+              <Wrench size={16} />
+            )}
+          </button>
+
+    </>
+  );
+  const accountButtons = (
+    <>
+          <Link
+            href="/settings"
+            prefetch
+            className="rounded p-1 transition-all duration-100 hover:opacity-70 active:scale-90"
+            style={{ color: 'var(--fg-muted)' }}
+            aria-label={t('common.settings')}
+            title={t('common.settings')}
+          >
+            <Settings size={16} />
+          </Link>
+
+          <button
+            onClick={() => setShowHelp(true)}
+            className="rounded p-1 transition-all duration-100 hover:opacity-70 active:scale-90"
+            style={{ color: 'var(--fg-muted)' }}
+            aria-label={t('help.open')}
+            title={t('help.open')}
+          >
+            <HelpCircle size={16} />
+          </button>
+
+          {/* Logout */}
+          <button
+            onClick={handleSignOut}
+            className="rounded p-1 transition-all duration-100 hover:opacity-70 active:scale-90"
+            style={{ color: 'var(--fg-muted)' }}
+            aria-label={t('auth.signOut')}
+            title={t('auth.signOut')}
+          >
+            <LogOut size={16} />
+          </button>
+    </>
+  );
+
   return (
     <div
       className="flex h-screen flex-col"
@@ -868,7 +948,7 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
           <div className="relative">
             <button
               onClick={() => setShowWsMenu((o) => !o)}
-              className="flex min-w-[180px] max-w-[260px] items-center justify-between gap-3 rounded-lg border px-3 py-1.5 text-sm font-medium transition-all duration-150 hover:opacity-80 active:scale-[0.98]"
+              className="flex min-w-0 max-w-[260px] items-center md:min-w-[180px] justify-between gap-3 rounded-lg border px-3 py-1.5 text-sm font-medium transition-all duration-150 hover:opacity-80 active:scale-[0.98]"
               style={{ color: 'var(--fg)', background: 'var(--bg)', borderColor: 'var(--border)' }}
               aria-expanded={showWsMenu}
               aria-label={t('workspace.switchWorkspace')}
@@ -1079,43 +1159,7 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
             )}
           </div>
 
-          {/* Sources list */}
-          <button
-            onClick={() => setShowSources(true)}
-            className="rounded p-1 transition-all duration-100 hover:opacity-70 active:scale-90"
-            style={{ color: 'var(--fg-muted)' }}
-            aria-label={t('sources.open')}
-            title={t('sources.open')}
-          >
-            <Library size={16} />
-          </button>
-
-          {/* Graph view toggle */}
-          <button
-            onClick={() => setShowGraph((g) => !g)}
-            className="rounded p-1 transition-all duration-100 hover:opacity-70 active:scale-90"
-            style={{ color: showGraph ? 'var(--color-accent)' : 'var(--fg-muted)' }}
-            aria-label={t('workspace.toggleGraphView')}
-            title={t('workspace.graphView')}
-          >
-            <GitFork size={16} />
-          </button>
-
-          {/* Maintenance: health check + organize/dedupe in one background pass */}
-          <button
-            onClick={startMaintenance}
-            disabled={maintenance?.status === 'running'}
-            className="rounded p-1 transition-all duration-100 hover:opacity-70 active:scale-90 disabled:cursor-default"
-            style={{ color: maintenance?.status === 'running' ? 'var(--color-accent)' : 'var(--fg-muted)' }}
-            aria-label={t('workspace.maintenance')}
-            title={t('workspace.maintenanceDesc')}
-          >
-            {maintenance?.status === 'running' ? (
-              <Loader2 size={16} className="animate-spin" />
-            ) : (
-              <Wrench size={16} />
-            )}
-          </button>
+          <div className="hidden items-center gap-2 md:flex">{toolButtons}</div>
 
           <button
             onClick={() => setRightOpenOverride((current) =>
@@ -1129,37 +1173,7 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
             <PanelRight size={16} />
           </button>
 
-          <Link
-            href="/settings"
-            prefetch
-            className="rounded p-1 transition-all duration-100 hover:opacity-70 active:scale-90"
-            style={{ color: 'var(--fg-muted)' }}
-            aria-label={t('common.settings')}
-            title={t('common.settings')}
-          >
-            <Settings size={16} />
-          </Link>
-
-          <button
-            onClick={() => setShowHelp(true)}
-            className="rounded p-1 transition-all duration-100 hover:opacity-70 active:scale-90"
-            style={{ color: 'var(--fg-muted)' }}
-            aria-label={t('help.open')}
-            title={t('help.open')}
-          >
-            <HelpCircle size={16} />
-          </button>
-
-          {/* Logout */}
-          <button
-            onClick={handleSignOut}
-            className="rounded p-1 transition-all duration-100 hover:opacity-70 active:scale-90"
-            style={{ color: 'var(--fg-muted)' }}
-            aria-label={t('auth.signOut')}
-            title={t('auth.signOut')}
-          >
-            <LogOut size={16} />
-          </button>
+          <div className="hidden items-center gap-2 md:flex">{accountButtons}</div>
         </div>
       </header>
 
@@ -1248,10 +1262,45 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
         </div>
       )}
 
-      {/* Main three-panel layout */}
+      {/* Main three-panel layout. Below md (phone) the page tree is an overlay
+          drawer and the conversation takes the whole width — the Android layout —
+          instead of squeezing the page into a sliver between two side panels. */}
       <div className="flex flex-1 overflow-hidden">
         {/* Left: page tree */}
-        {leftOpen && (
+        {leftOpen && isMobile && (
+          <>
+            <div
+              className="fixed inset-0 z-40"
+              style={{ background: 'oklch(8% 0.01 250 / 0.55)' }}
+              onClick={() => setLeftOpenOverride(false)}
+              aria-hidden="true"
+            />
+            <div
+              className="fixed inset-y-0 left-0 z-50 flex w-[min(300px,85vw)] flex-col"
+              style={{ borderRight: '1px solid var(--border)', background: 'var(--bg-2)' }}
+            >
+              <div className="min-h-0 flex-1">
+                <PageTree
+                  initialPages={pages}
+                  activePage={activePage}
+                  onSelectPage={(slug) => {
+                    selectPage(slug);
+                    setLeftOpenOverride(false);
+                  }}
+                />
+              </div>
+              <div
+                className="flex items-center justify-around border-t px-2 py-2 [&_a]:p-2 [&_button]:p-2"
+                style={{ borderColor: 'var(--border)' }}
+                onClick={() => setLeftOpenOverride(false)}
+              >
+                {toolButtons}
+                {accountButtons}
+              </div>
+            </div>
+          </>
+        )}
+        {leftOpen && !isMobile && (
           <>
             <div
               className="shrink-0 overflow-hidden"
@@ -1274,7 +1323,7 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
         )}
 
         {/* Center: wiki page viewer OR graph view */}
-        <div className="flex-1 overflow-hidden">
+        <div className={`flex-1 overflow-hidden ${isMobile && rightOpen ? 'hidden' : ''}`}>
           {showGraph ? (
             <GraphView
               workspaceId={workspaceId}
@@ -1303,29 +1352,40 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
         {/* Right: conversation + ingest */}
         {rightOpen && (
           <>
+            {!isMobile && (
+              <div
+                className="shrink-0 cursor-col-resize"
+                style={{ width: 4, touchAction: 'none' }}
+                onPointerDown={(e) => startDrag(e, 'right')}
+                onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'var(--color-accent)'; (e.currentTarget as HTMLDivElement).style.opacity = '0.4'; }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = ''; (e.currentTarget as HTMLDivElement).style.opacity = ''; }}
+              />
+            )}
             <div
-              className="shrink-0 cursor-col-resize"
-              style={{ width: 4, touchAction: 'none' }}
-              onPointerDown={(e) => startDrag(e, 'right')}
-              onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'var(--color-accent)'; (e.currentTarget as HTMLDivElement).style.opacity = '0.4'; }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = ''; (e.currentTarget as HTMLDivElement).style.opacity = ''; }}
-            />
-            <div style={{ width: rightWidth, maxWidth: '80vw' }} className="shrink-0 overflow-hidden">
+              style={isMobile ? undefined : { width: rightWidth, maxWidth: '80vw' }}
+              className={isMobile ? 'min-w-0 flex-1 overflow-hidden' : 'shrink-0 overflow-hidden'}
+            >
               <ConversationPanel
                 workspaceId={workspaceId}
                 workspaceName={currentWorkspaceName}
                 currentSlug={activePage}
                 workspaces={workspaceList}
                 onSourceAdded={refreshPageList}
-                onPageWritten={handlePageWritten}
-                onPageClick={selectPage}
+                onPageWritten={(slug) => {
+                  handlePageWritten(slug);
+                  if (isMobile) setRightOpenOverride(false);
+                }}
+                onPageClick={(slug) => {
+                  selectPage(slug);
+                  // Full-width chat on a phone: show the page the user asked for
+                  if (isMobile) setRightOpenOverride(false);
+                }}
                 onWorkspacesChanged={refreshWorkspaceList}
               />
             </div>
           </>
         )}
-      </div>
-      <HelpDialog open={showHelp} onClose={() => setShowHelp(false)} />
+      </div>      <HelpDialog open={showHelp} onClose={() => setShowHelp(false)} />
       {showSources && <SourcesDialog workspaceId={workspaceId} onClose={() => setShowSources(false)} />}
       {renamingWorkspace && (
         <WorkspaceRenameDialog
