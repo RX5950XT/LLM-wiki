@@ -91,7 +91,8 @@ function getFaithfulQueryPrompt(locale: string): string {
 }
 
 export async function POST(request: NextRequest) {
-  const answerBy = Date.now() + QUERY_TOOL_BUDGET_MS;
+  const startedAt = Date.now();
+  const answerBy = startedAt + QUERY_TOOL_BUDGET_MS;
   const hardStop = AbortSignal.timeout(QUERY_HARD_STOP_MS);
   const locale = resolveUiLocaleFromRequest(request);
   const { supabase, user } = await getRequestUser(request);
@@ -330,6 +331,7 @@ export async function POST(request: NextRequest) {
     systemPrompt += `\n${capabilityNote}`;
   }
 
+  console.info('[query] context ready', { elapsedMs: Date.now() - startedAt });
   const result = streamText({
     model,
     system: systemPrompt,
@@ -342,6 +344,16 @@ export async function POST(request: NextRequest) {
         ? { toolChoice: 'none' as const }
         : undefined,
     abortSignal: hardStop,
+    // Where a slow answer spends its time (model vs. tools) — read it, don't guess.
+    onStepFinish: ({ finishReason, toolCalls, usage }) => {
+      console.info('[query] step', {
+        elapsedMs: Date.now() - startedAt,
+        finishReason,
+        tools: toolCalls.map((c) => c.toolName),
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+      });
+    },
     onFinish: async ({ text, finishReason, steps, reasoningText }) => {
       // An answer that arrives with citations but no words looks like the wiki has
       // nothing to say. Name the shape of the failure so it is diagnosable at all.

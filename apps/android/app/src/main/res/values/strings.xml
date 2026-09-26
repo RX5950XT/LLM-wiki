@@ -103,10 +103,9 @@
     <string name="ingest_job_paused">Paused</string>
     <string name="ingest_job_done">Done</string>
     <string name="ingest_job_failed">Failed</string>
-    <string name="ingest_phase_analysis">Analysing</string>
+    <string name="ingest_phase_analysis">Analysis</string>
     <string name="ingest_phase_writing">Writing</string>
-    <string name="ingest_phase_review">Reviewing</string>
-    <string name="ingest_phase_done">Finished</string>
+    <string name="ingest_phase_review">Review</string>
     <string name="ingest_result_unchanged">No changes needed</string>
     <string name="ingest_pause">Pause</string>
     <string name="ingest_resume">Resume</string>
@@ -240,4 +239,9 @@
     <string name="error_op_lock">Failed to update page lock</string>
     <string name="error_op_synthesis">Failed to save synthesis</string>
     <string name="ingest_running_batch">Importing… %1$d in progress, %2$d pages updated · %3$d done · %4$d failed · runs in the background</string>
+    <string name="chat_thinking">Thinking…</string>
+    <string name="chat_stop">Stop</string>
+    <string name="action_view">View</string>
+    <string name="auth_sign_out_confirm">Sign out? Pages cached on this phone will be cleared.</string>
+    <string name="ingest_touched_pages">%1$d pages updated</string>
 </resources>

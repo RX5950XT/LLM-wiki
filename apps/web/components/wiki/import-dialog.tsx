@@ -712,7 +712,7 @@ export function ImportDialog({
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-xs font-medium" style={{ color: 'var(--fg)' }}>{job.source_title || t('common.untitled')}</p>
                         <p className="mt-0.5 truncate text-[10px]" style={{ color: 'var(--fg-muted)' }}>
-                          {statusLabel(t, job.status)} · {phaseLabel(t, job.phase)} · {t('ingest.touchedPages', { count: job.touched_pages.length })}
+                          {statusLabel(t, job.status)}{job.phase === 'done' ? '' : ` · ${phaseLabel(t, job.phase)}`} · {t('ingest.touchedPages', { count: job.touched_pages.length })}
                           {job.result === 'unchanged' ? ` · ${t('ingest.resultUnchanged')}` : job.result === 'updated' ? ` · ${t('ingest.resultUpdated')}` : ''}
                         </p>
                         {job.workspace_id !== workspaceId && (

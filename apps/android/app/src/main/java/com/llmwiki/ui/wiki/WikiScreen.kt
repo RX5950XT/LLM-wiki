@@ -56,6 +56,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.SmartToy
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
@@ -97,6 +98,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -175,6 +177,7 @@ fun WikiScreen(
     var showIngestQueueDialog by rememberSaveable { mutableStateOf(false) }
     var showGraphInsightsDialog by rememberSaveable { mutableStateOf(false) }
     var showMaintenanceConfirm by rememberSaveable { mutableStateOf(false) }
+    var showSignOutConfirm by rememberSaveable { mutableStateOf(false) }
     var renameWorkspace by remember { mutableStateOf<WorkspaceRow?>(null) }
     var deleteWorkspace by remember { mutableStateOf<WorkspaceRow?>(null) }
     var inlineEditorPageSlug by rememberSaveable { mutableStateOf<String?>(null) }
@@ -229,12 +232,15 @@ fun WikiScreen(
         }
     }
 
-    // System back closes search / the inline editor instead of exiting the app
+    // System back: drawer → search / inline editor → previous page → leave the app.
+    // Later handlers take priority, so the order below is lowest to highest.
+    BackHandler(enabled = uiState.canGoBack) { wikiViewModel.goBackPage() }
     BackHandler(enabled = uiState.showSearch) { wikiViewModel.clearSearch() }
     BackHandler(enabled = inlineEditorPageSlug != null) {
         inlineEditorPageSlug = null
         inlineEditorValue = TextFieldValue(uiState.pageContent.orEmpty())
     }
+    BackHandler(enabled = drawerState.isOpen) { scope.launch { drawerState.close() } }
 
     LaunchedEffect(uiState.activePage?.slug) {
         inlineEditorPageSlug = null
@@ -518,7 +524,10 @@ fun WikiScreen(
                         )
                     }
                     IconButton(
-                        onClick = { wikiViewModel.signOut() },
+                        onClick = {
+                            scope.launch { drawerState.close() }
+                            showSignOutConfirm = true
+                        },
                         colors = IconButtonDefaults.iconButtonColors(
                             contentColor = MaterialTheme.colorScheme.error,
                         ),
@@ -562,7 +571,9 @@ fun WikiScreen(
                             Text(
                                 uiState.activePage?.let { localizedSystemPageLabel(it.slug) ?: it.title }
                                     ?: uiState.workspace?.name
-                                    ?: stringResource(R.string.app_name)
+                                    ?: stringResource(R.string.app_name),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                             )
                         }
                     },
@@ -586,6 +597,22 @@ fun WikiScreen(
                             val isInlineEditing = inlineEditorPageSlug == editablePage?.slug
                             IconButton(onClick = { wikiViewModel.toggleSearch() }) {
                                 Icon(Icons.Default.Search, contentDescription = stringResource(R.string.wiki_search))
+                            }
+                            // Same lock toggle the Web page header has, on the page itself
+                            uiState.activePage?.let { page ->
+                                IconButton(onClick = { wikiViewModel.toggleLock(page.slug, page.lockedByHuman) }) {
+                                    Icon(
+                                        if (page.lockedByHuman) Icons.Default.Lock else Icons.Default.LockOpen,
+                                        contentDescription = stringResource(
+                                            if (page.lockedByHuman) R.string.wiki_locked else R.string.wiki_unlocked,
+                                        ),
+                                        tint = if (page.lockedByHuman) {
+                                            MaterialTheme.colorScheme.primary
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                        },
+                                    )
+                                }
                             }
                             if (editablePage != null) {
                                 if (isInlineEditing) {
@@ -734,13 +761,12 @@ fun WikiScreen(
                     }
                 }
 
-                // Server-derived: an active or attention-needed import is still shown
-                // after the app is killed and reopened. Completed history stays in the
-                // queue dialog and must not look like an import is still running.
+                // Server-derived: an active or paused import is still shown after the app
+                // is killed and reopened. Finished and failed history lives in the queue
+                // dialog — an old failure must not pin a banner here forever (Web parity).
                 val hasActiveIngest = uiState.ingestLoading || uiState.activeIngestCount > 0
                 val hasPausedIngest = uiState.ingestJobs.any { it.status == "paused" }
-                val hasFailedIngest = uiState.ingestJobs.any { it.status == "failed" }
-                if (hasActiveIngest || hasPausedIngest || hasFailedIngest) {
+                if (hasActiveIngest || hasPausedIngest) {
                     Surface(
                         color = MaterialTheme.colorScheme.secondaryContainer,
                         modifier = Modifier
@@ -780,10 +806,8 @@ fun WikiScreen(
                                     )
                                     uiState.ingestProgress > 0 ->
                                         stringResource(R.string.ingest_running_progress, uiState.ingestProgress)
-                                    hasPausedIngest ->
+                                    hasPausedIngest && !hasActiveIngest ->
                                         stringResource(R.string.ingest_job_paused)
-                                    hasFailedIngest ->
-                                        stringResource(R.string.ingest_job_failed)
                                     else -> stringResource(R.string.ingest_running)
                                 },
                                 color = MaterialTheme.colorScheme.onSecondaryContainer,
@@ -831,35 +855,46 @@ fun WikiScreen(
                                 .fillMaxWidth()
                                 .padding(horizontal = 16.dp, vertical = 8.dp),
                         )
-                        uiState.pageContent != null -> Column(Modifier.weight(1f).fillMaxWidth()) {
-                            MarkdownViewer(
-                                markdown = uiState.pageContent!!,
-                                onWikiLinkClick = { slug -> wikiViewModel.selectPageBySlug(slug) },
-                                modifier = Modifier
+                        // Compose owns the scrolling (fling, reset per page); the TextView used to
+                        // scroll itself, drag-only. Backlinks close the article like on Web, and the
+                        // bottom padding keeps the last lines clear of the chat FAB.
+                        uiState.pageContent != null -> key(uiState.activePage?.slug) {
+                            Column(
+                                Modifier
                                     .weight(1f)
                                     .fillMaxWidth()
-                                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                            )
-                            if (uiState.backlinks.isNotEmpty()) {
-                                HorizontalDivider()
-                                Text(
-                                    text = stringResource(R.string.wiki_backlinks),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(start = 16.dp, top = 8.dp),
-                                )
-                                Row(
-                                    Modifier
+                                    .verticalScroll(rememberScrollState())
+                                    .padding(bottom = 88.dp),
+                            ) {
+                                MarkdownViewer(
+                                    markdown = uiState.pageContent!!,
+                                    onWikiLinkClick = { slug -> wikiViewModel.selectPageBySlug(slug) },
+                                    modifier = Modifier
                                         .fillMaxWidth()
-                                        .horizontalScroll(rememberScrollState())
                                         .padding(horizontal = 16.dp, vertical = 8.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                ) {
-                                    uiState.backlinks.forEach { slug ->
-                                        AssistChip(
-                                            onClick = { wikiViewModel.selectPageBySlug(slug) },
-                                            label = { Text(slug.removeSuffix(".md")) },
-                                        )
+                                )
+                                if (uiState.backlinks.isNotEmpty()) {
+                                    HorizontalDivider(Modifier.padding(top = 16.dp))
+                                    Text(
+                                        text = stringResource(R.string.wiki_backlinks),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(start = 16.dp, top = 8.dp),
+                                    )
+                                    Row(
+                                        Modifier
+                                            .fillMaxWidth()
+                                            .horizontalScroll(rememberScrollState())
+                                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    ) {
+                                        uiState.backlinks.forEach { slug ->
+                                            val title = pages.firstOrNull { it.slug == slug }?.title
+                                            AssistChip(
+                                                onClick = { wikiViewModel.selectPageBySlug(slug) },
+                                                label = { Text(title?.takeIf { it.isNotBlank() } ?: slug.removeSuffix(".md"), maxLines = 1) },
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -907,6 +942,31 @@ fun WikiScreen(
         )
     }
 
+    if (showSignOutConfirm) {
+        AlertDialog(
+            onDismissRequest = { showSignOutConfirm = false },
+            title = { Text(stringResource(R.string.auth_sign_out)) },
+            text = { Text(stringResource(R.string.auth_sign_out_confirm)) },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showSignOutConfirm = false
+                        wikiViewModel.signOut()
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError,
+                    ),
+                ) { Text(stringResource(R.string.auth_sign_out)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSignOutConfirm = false }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            },
+        )
+    }
+
     if (showMaintenanceConfirm) {
         AlertDialog(
             onDismissRequest = { showMaintenanceConfirm = false },
@@ -943,6 +1003,13 @@ fun WikiScreen(
             errorMessage = uiState.syncError,
             onDismissError = { wikiViewModel.clearSyncError() },
             synthesisSavedSlug = uiState.synthesisSavedSlug,
+            synthesisSaving = uiState.synthesisSaving,
+            onViewSynthesis = { slug ->
+                wikiViewModel.clearSynthesisSlug()
+                wikiViewModel.selectSearchResult(slug)
+                showChatSheet = false
+            },
+            onStop = { wikiViewModel.stopQuery() },
             profiles = uiState.profiles,
             selectedProfileId = uiState.selectedProfileId,
             onProfileSelected = { wikiViewModel.setSelectedProfile(it) },
@@ -1437,6 +1504,9 @@ private fun ChatBottomSheet(
     errorMessage: String?,
     onDismissError: () -> Unit,
     synthesisSavedSlug: String?,
+    synthesisSaving: Boolean,
+    onViewSynthesis: (String) -> Unit,
+    onStop: () -> Unit,
     profiles: List<LlmProfile>,
     selectedProfileId: String?,
     onProfileSelected: (String?) -> Unit,
@@ -1471,8 +1541,9 @@ private fun ChatBottomSheet(
             .take(6)
     } else emptyList()
 
-    LaunchedEffect(messages.size) {
-        if (messages.isNotEmpty()) listState.animateScrollToItem(messages.size - 1)
+    // Follow the answer while it streams in, not only when a new bubble appears
+    LaunchedEffect(messages.size, messages.lastOrNull()?.content?.length) {
+        if (messages.isNotEmpty()) listState.scrollToItem(messages.size + 1)
     }
 
     ModalBottomSheet(
@@ -1527,16 +1598,10 @@ private fun ChatBottomSheet(
                             allMessages = messages,
                             onPageClick = onPageClick,
                             onSaveSynthesis = onSaveSynthesis,
+                            synthesisSaving = synthesisSaving,
                             onExecuteProposal = { pi -> onExecuteProposal(messageIndex, pi) },
                             onDismissProposal = { pi -> onDismissProposal(messageIndex, pi) },
                         )
-                    }
-                    if (isLoading) {
-                        item {
-                            Box(Modifier.fillMaxWidth().padding(8.dp), contentAlignment = Alignment.Center) {
-                                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                            }
-                        }
                     }
                     item { Spacer(Modifier.height(4.dp)) }
                 }
@@ -1575,7 +1640,11 @@ private fun ChatBottomSheet(
                             stringResource(R.string.wiki_synthesis_saved),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.weight(1f),
                         )
+                        TextButton(onClick = { onViewSynthesis(it) }) {
+                            Text(stringResource(R.string.action_view))
+                        }
                         TextButton(onClick = onClearSynthesis) {
                             Text(stringResource(R.string.action_dismiss))
                         }
@@ -1779,7 +1848,18 @@ private fun ChatBottomSheet(
                         if (input.isNotBlank() && !isLoading) onSend(input)
                     }),
                 )
-                IconButton(
+                if (isLoading) {
+                    IconButton(
+                        onClick = onStop,
+                        modifier = Modifier.size(56.dp),
+                        colors = IconButtonDefaults.iconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                            contentColor = MaterialTheme.colorScheme.onSurface,
+                        ),
+                    ) {
+                        Icon(Icons.Default.Stop, contentDescription = stringResource(R.string.chat_stop))
+                    }
+                } else IconButton(
                     onClick = { if (input.isNotBlank() && !isLoading) onSend(input) },
                     enabled = input.isNotBlank() && !isLoading,
                     modifier = Modifier.size(56.dp),
@@ -1805,6 +1885,7 @@ private fun ChatBubble(
     allMessages: List<ChatMessage>,
     onPageClick: (String) -> Unit,
     onSaveSynthesis: (question: String, answer: String, slugs: List<String>) -> Unit,
+    synthesisSaving: Boolean = false,
     onExecuteProposal: (proposalIndex: Int) -> Unit = {},
     onDismissProposal: (proposalIndex: Int) -> Unit = {},
 ) {
@@ -1836,6 +1917,21 @@ private fun ChatBubble(
                     color = textColor,
                     modifier = Modifier.padding(12.dp),
                 )
+            } else if (message.isStreaming && message.content.isBlank()) {
+                // Waiting for the first words (tools may run for a while): say so,
+                // instead of an empty card and a detached spinner (Web: "thinking…").
+                Row(
+                    Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                    Text(
+                        stringResource(R.string.chat_thinking),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             } else {
                 MarkdownViewer(
                     markdown = message.content,
@@ -1900,12 +1996,23 @@ private fun ChatBubble(
             }
         }
         if (message.citedSlugs.isNotEmpty() && message.queryMode != QUERY_MODE_FAITHFUL) {
-            Text(
-                text = stringResource(R.string.wiki_sources, message.citedSlugs.joinToString(", ")),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
-            )
+            // Tappable citation chips, like the Web panel (was a plain comma list)
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 4.dp, vertical = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                message.citedSlugs.forEach { slug ->
+                    AssistChip(
+                        onClick = { onPageClick(slug) },
+                        label = { Text(slug.substringAfterLast('/').removeSuffix(".md"), maxLines = 1) },
+                    )
+                }
+            }
+        }
+        if (!isUser && !message.isStreaming && message.content.isNotBlank() && message.queryMode != QUERY_MODE_FAITHFUL) {
             val prevUser = allMessages
                 .take(allMessages.indexOf(message).coerceAtLeast(0))
                 .lastOrNull { it.role == "user" }
@@ -1914,6 +2021,7 @@ private fun ChatBubble(
                     onClick = {
                         onSaveSynthesis(prevUser.content, message.content, message.citedSlugs)
                     },
+                    enabled = !synthesisSaving,
                 ) {
                     Text(stringResource(R.string.query_file_back), style = MaterialTheme.typography.labelSmall)
                 }
@@ -2142,8 +2250,7 @@ private fun IngestQueueDialog(
                                 "analysis" -> stringResource(R.string.ingest_phase_analysis)
                                 "writing" -> stringResource(R.string.ingest_phase_writing)
                                 "review" -> stringResource(R.string.ingest_phase_review)
-                                "done" -> stringResource(R.string.ingest_phase_done)
-                                else -> null
+                                else -> null // "done" would just repeat the status
                             }
                             Column(Modifier.fillMaxWidth()) {
                                 Text(
@@ -2164,7 +2271,7 @@ private fun IngestQueueDialog(
                                 )
                                 if (job.touchedPages.isNotEmpty()) {
                                     Text(
-                                        stringResource(R.string.ingest_running_progress, job.touchedPages.size),
+                                        stringResource(R.string.ingest_touched_pages, job.touchedPages.size),
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )

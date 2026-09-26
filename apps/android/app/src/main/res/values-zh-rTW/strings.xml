@@ -103,10 +103,9 @@
     <string name="ingest_job_paused">已暫停</string>
     <string name="ingest_job_done">完成</string>
     <string name="ingest_job_failed">失敗</string>
-    <string name="ingest_phase_analysis">分析中</string>
-    <string name="ingest_phase_writing">寫入中</string>
-    <string name="ingest_phase_review">檢查中</string>
-    <string name="ingest_phase_done">已完成</string>
+    <string name="ingest_phase_analysis">分析</string>
+    <string name="ingest_phase_writing">寫入</string>
+    <string name="ingest_phase_review">複查</string>
     <string name="ingest_result_unchanged">內容沒有變更</string>
     <string name="ingest_pause">暫停</string>
     <string name="ingest_resume">繼續</string>
@@ -240,4 +239,9 @@
     <string name="error_op_lock">更新頁面鎖定失敗</string>
     <string name="error_op_synthesis">儲存整合頁失敗</string>
     <string name="ingest_running_batch">匯入中…%1$d 篇處理中，已更新 %2$d 個頁面 · 本批已完成 %3$d 篇 · 失敗 %4$d 篇 · 可關閉 App，任務會在背景繼續</string>
+    <string name="chat_thinking">思考中…</string>
+    <string name="chat_stop">停止</string>
+    <string name="action_view">查看</string>
+    <string name="auth_sign_out_confirm">確定要登出？這支手機上快取的頁面會被清除。</string>
+    <string name="ingest_touched_pages">已更新 %1$d 個頁面</string>
 </resources>

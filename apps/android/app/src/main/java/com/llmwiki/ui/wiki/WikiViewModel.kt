@@ -53,7 +53,6 @@ import io.ktor.http.ContentType
 import io.ktor.http.contentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.Headers
-import io.ktor.utils.io.readUTF8Line
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -72,6 +71,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.booleanOrNull
@@ -82,6 +82,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import io.ktor.utils.io.jvm.javaio.toByteReadChannel
+import io.ktor.utils.io.jvm.javaio.toInputStream
 import android.net.Uri
 import java.io.FilterInputStream
 import java.io.InputStream
@@ -110,11 +111,43 @@ internal fun isQueryRequestCurrent(
 ): Boolean = requestToken == latestRequestToken && currentWorkspaceId == requestWorkspaceId
 
 /**
+ * The Web API answers errors as `{error: "…"}` on most routes but `{error: {code, message}}`
+ * on ingest / re-ingest; either may carry non-string siblings (e.g. `jobId`). Returns null
+ * when no readable message is present (e.g. a zod field-error object).
+ */
+internal fun extractApiErrorMessage(raw: String): String? = runCatching {
+    val root = Json.parseToJsonElement(raw) as? JsonObject ?: return@runCatching null
+    val error = root["error"]
+    val text = when (error) {
+        is JsonPrimitive -> error.contentOrNull
+        is JsonObject -> (error["message"] as? JsonPrimitive)?.contentOrNull
+        else -> null
+    } ?: (root["message"] as? JsonPrimitive)?.contentOrNull
+    text?.takeIf { it.isNotBlank() }
+}.getOrNull()
+
+/**
+ * Which finished/failed imports belong to the batch still in flight: anything started
+ * within 30 minutes of the oldest running/pending job. Mirrors BATCH_LOOKBACK_MS in the
+ * Web shell, so an old failure is not reported forever as part of today's import.
+ */
+internal fun ingestBatchCounts(jobs: List<IngestJobRow>): Pair<Int, Int> {
+    val active = jobs.filter { it.status == "pending" || it.status == "running" }
+    if (active.isEmpty()) return 0 to 0
+    fun startedAt(job: IngestJobRow): Long? =
+        job.startedAt?.let { runCatching { java.time.OffsetDateTime.parse(it).toInstant().toEpochMilli() }.getOrNull() }
+    val since = (active.mapNotNull(::startedAt).minOrNull() ?: System.currentTimeMillis()) - 30 * 60 * 1000L
+    fun inBatch(job: IngestJobRow) = (startedAt(job) ?: Long.MIN_VALUE) >= since
+    return jobs.count { it.status == "done" && inBatch(it) } to jobs.count { it.status == "failed" && inBatch(it) }
+}
+
+/**
  * A deep reorganisation is cut off by the server's 300s invocation limit, so a
  * pass reports `more_work` and the client chains the next one. Keep in step with
  * the Web client's MAX_MAINTENANCE_PASSES.
  */
 private const val MAX_MAINTENANCE_PASSES = 6
+private const val MAX_PAGE_HISTORY = 50
 
 const val QUERY_MODE_STANDARD = "standard"
 const val QUERY_MODE_FAITHFUL = "faithful"
@@ -156,6 +189,7 @@ data class WikiUiState(
     val chatMessages: List<ChatMessage> = emptyList(),
     val chatLoading: Boolean = false,
     val synthesisSavedSlug: String? = null,
+    val synthesisSaving: Boolean = false,
     val signedOut: Boolean = false,
     val showSearch: Boolean = false,
     val searchQuery: String = "",
@@ -177,6 +211,8 @@ data class WikiUiState(
     val pageSaveLoading: Boolean = false,
     val syncLoading: Boolean = false,
     val backlinks: List<String> = emptyList(),
+    /** A previously viewed page in this workspace can be returned to with Back. */
+    val canGoBack: Boolean = false,
     val chatDraft: String = "",
     val sources: List<SourceListItem>? = null,
     val sourcesLoading: Boolean = false,
@@ -221,6 +257,9 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
     private var searchJob: Job? = null
     private var queryJob: Job? = null
     private var queryGeneration = 0L
+    private val pageHistory = ArrayDeque<Pair<String, String>>()
+    private var queryStreamRaw: StringBuilder? = null
+    private var queryStreamReader: java.io.Reader? = null
     private var pageRequestGeneration = 0L
     private var syncGeneration = 0L
     private var contentLoadGeneration = 0L
@@ -299,6 +338,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun switchWorkspace(ws: WorkspaceRow) {
+        pageHistory.clear()
         queryGeneration += 1
         pageRequestGeneration += 1
         queryJob?.cancel()
@@ -326,6 +366,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
         persistLastWorkspace(ws)
         loadIngestJobs()
         viewModelScope.launch {
+            selectDefaultPageIfNeeded(ws.id) // cached copy first, sync refreshes it
             syncPagesInternal(ws.id)
             selectDefaultPageIfNeeded(ws.id)
             SyncWorker.schedule(getApplication(), accountName, ws.id)
@@ -486,10 +527,16 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun selectPage(page: PageEntity) {
+    fun selectPage(page: PageEntity, recordHistory: Boolean = true) {
+        val previous = _uiState.value.activePage
+        if (recordHistory && previous != null && previous.workspaceId == page.workspaceId && previous.slug != page.slug) {
+            pageHistory.addLast(previous.workspaceId to previous.slug)
+            while (pageHistory.size > MAX_PAGE_HISTORY) pageHistory.removeFirst()
+        }
         pageRequestGeneration += 1
         _uiState.update {
             it.copy(
+                canGoBack = pageHistory.any { (ws, _) -> ws == page.workspaceId },
                 activePage = page,
                 pageContent = page.content,
                 contentLoading = page.content == null,
@@ -504,6 +551,20 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
         // page edited on the web stops showing its old copy until the next sync.
         loadContent(page)
         loadBacklinks(page)
+    }
+
+    /** System Back walks the page trail (Web: browser Back). Returns false when there is none. */
+    fun goBackPage(): Boolean {
+        val wsId = workspaceId.value ?: return false
+        while (pageHistory.isNotEmpty()) {
+            val (ws, slug) = pageHistory.removeLast()
+            if (ws != wsId) continue
+            val page = pages.value.firstOrNull { it.slug == slug } ?: continue
+            selectPage(page, recordHistory = false)
+            return true
+        }
+        _uiState.update { it.copy(canGoBack = false) }
+        return false
     }
 
     /** Pages whose [[wikilinks]] point at the given slug (mirrors the Web backlinks panel). */
@@ -755,7 +816,10 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                 AndroidHttpClient.instance.get(webApiUrl("/api/search?workspace_id=$wsId&q=${query.encodeUrl()}")) {
                     header("Authorization", "Bearer $accessToken")
                 }
-            } ?: return
+            } ?: run {
+                _uiState.update { it.copy(searchLoading = false, syncError = unauthorizedMessage()) }
+                return
+            }
             val text = response.bodyAsText()
 
             if (response.status.value !in 200..299) {
@@ -855,10 +919,12 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
         val userMsg = ChatMessage(role = "user", content = userText)
         val history = _uiState.value.chatMessages
         val newHistory = history + userMsg
-        val placeholder = ChatMessage(role = "assistant", content = "", isStreaming = true)
+        val queryMode = _uiState.value.selectedQueryMode
+        val placeholder = ChatMessage(role = "assistant", content = "", isStreaming = true, queryMode = queryMode)
         val taggedIds = _uiState.value.taggedWorkspaceIds
         val currentSlug = _uiState.value.activePage?.slug
-        val queryMode = _uiState.value.selectedQueryMode
+        queryStreamRaw = null
+        queryStreamReader = null
         _uiState.update {
             it.copy(
                 chatMessages = newHistory + placeholder,
@@ -925,12 +991,19 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                     return@launch
                 }
 
-                val channel = response.bodyAsChannel()
+                // Read characters as they arrive (not whole lines): a one-paragraph answer
+                // has no newline until the end, so line reads showed nothing until done.
+                // InputStreamReader keeps multi-byte UTF-8 characters split across chunks intact.
                 val raw = StringBuilder()
-                while (!channel.isClosedForRead) {
-                    val chunk = channel.readUTF8Line() ?: break
+                queryStreamRaw = raw
+                val reader = response.bodyAsChannel().toInputStream().reader(Charsets.UTF_8)
+                queryStreamReader = reader
+                val buffer = CharArray(1024)
+                while (true) {
+                    val read = withContext(Dispatchers.IO) { reader.read(buffer) }
+                    if (read < 0) break
                     if (!isCurrentQuery(queryToken, wsId)) return@launch
-                    raw.append(chunk).append("\n")
+                    raw.appendRange(buffer, 0, read)
                     // Hide any trailing NUL-delimited metadata block while streaming
                     val nulIdx = raw.indexOf('\u0000')
                     val displayText = if (nulIdx >= 0) raw.substring(0, nulIdx) else raw.toString()
@@ -977,6 +1050,29 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 }
             }
+        }
+    }
+
+    /** Stop streaming but keep what already arrived (Web parity: the Stop button). */
+    fun stopQuery() {
+        if (!_uiState.value.chatLoading) return
+        queryGeneration += 1
+        queryJob?.cancel()
+        runCatching { queryStreamReader?.close() }
+        val parsed = parseStreamMeta(queryStreamRaw?.toString().orEmpty())
+        _uiState.update { state ->
+            val last = state.chatMessages.lastOrNull()
+            val messages = when {
+                last == null || last.role != "assistant" || !last.isStreaming -> state.chatMessages
+                parsed.text.isBlank() -> state.chatMessages.dropLast(1)
+                else -> state.chatMessages.dropLast(1) + last.copy(
+                    content = parsed.text.trimEnd(),
+                    isStreaming = false,
+                    citedSlugs = parsed.citedSlugs,
+                    rawCitations = parsed.rawCitations,
+                )
+            }
+            state.copy(chatMessages = messages, chatLoading = false)
         }
     }
 
@@ -1257,13 +1353,14 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
     private fun applyIngestJobs(requestedWorkspaceId: String, jobs: List<IngestJobRow>) {
         if (workspaceId.value != requestedWorkspaceId) return
         val active = jobs.filter { it.status == "pending" || it.status == "running" }
+        val (batchDone, batchFailed) = ingestBatchCounts(jobs)
         _uiState.update {
             it.copy(
                 ingestJobs = jobs,
                 activeIngestCount = active.size,
                 activeIngestPages = active.sumOf { job -> job.touchedPages.size },
-                activeIngestDone = jobs.count { it.status == "done" },
-                activeIngestFailed = jobs.count { it.status == "failed" },
+                activeIngestDone = batchDone,
+                activeIngestFailed = batchFailed,
             )
         }
     }
@@ -1335,6 +1432,8 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
 
     fun saveSynthesis(question: String, answer: String, citedSlugs: List<String>) {
         val wsId = workspaceId.value ?: return
+        if (_uiState.value.synthesisSaving) return
+        _uiState.update { it.copy(synthesisSaving = true) }
         viewModelScope.launch {
             try {
                 val bodyJson = buildJsonObject {
@@ -1348,7 +1447,10 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                         contentType(ContentType.Application.Json)
                         setBody(bodyJson)
                     }
-                } ?: return@launch
+                } ?: run {
+                    _uiState.update { it.copy(syncError = unauthorizedMessage()) }
+                    return@launch
+                }
                 val text = response.bodyAsText()
 
                 if (response.status.value !in 200..299) {
@@ -1361,12 +1463,17 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                     return@launch
                 }
 
-                val slug = apiJson.decodeFromString<Map<String, String>>(text)["slug"]
+                val slug = (apiJson.parseToJsonElement(text) as? JsonObject)
+                    ?.get("slug")?.jsonPrimitive?.contentOrNull
                 if (slug != null) {
                     _uiState.update { it.copy(synthesisSavedSlug = slug, syncError = null) }
+                } else {
+                    _uiState.update { it.copy(syncError = nonJsonApiMessage(str(R.string.error_op_synthesis))) }
                 }
             } catch (e: Exception) {
                 _uiState.update { it.copy(syncError = e.toUserFacingMessage(str(R.string.error_op_synthesis))) }
+            } finally {
+                _uiState.update { it.copy(synthesisSaving = false) }
             }
         }
     }
@@ -1566,7 +1673,11 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                         contentType(ContentType.Application.Json)
                         setBody(requestBody)
                     }
-                } ?: return@launch
+                } ?: run {
+                    _uiState.update { it.copy(syncError = unauthorizedMessage()) }
+                    onDone(false)
+                    return@launch
+                }
                 val text = response.bodyAsText()
                 handleIngestResult(wsId, response.status.value, text, onDone)
             } catch (e: Exception) {
@@ -1614,7 +1725,11 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                         contentType(ContentType.Application.Json)
                         setBody(requestBody)
                     }
-                } ?: return@launch
+                } ?: run {
+                    _uiState.update { it.copy(syncError = unauthorizedMessage()) }
+                    onDone(false)
+                    return@launch
+                }
                 val text = response.bodyAsText()
                 handleIngestResult(wsId, response.status.value, text, onDone)
             } catch (e: Exception) {
@@ -1812,6 +1927,8 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
 
                 if (targetId != null) {
                     if (syncSelected || targetId != previousId) {
+                        // Show the cached index right away; the sync below refreshes it.
+                        if (preferredPageSlug.isNullOrBlank()) selectDefaultPageIfNeeded(targetId)
                         syncPagesInternal(targetId)
                         if (!preferredPageSlug.isNullOrBlank()) {
                             selectPageBySlugFromDb(targetId, preferredPageSlug)
@@ -1897,10 +2014,13 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                         loadContent(updatedPage)
                     } else {
                         _uiState.update { state ->
+                            val sameVersion = state.activePage?.version == updatedPage.version
                             state.copy(
                                 activePage = updatedPage,
-                                pageContent = if (state.activePage?.version == updatedPage.version) state.pageContent else updatedPage.content,
-                                contentLoading = state.activePage?.version != updatedPage.version && updatedPage.content == null,
+                                pageContent = if (sameVersion) state.pageContent else updatedPage.content,
+                                // Same version: a content load may still be in flight — keep its
+                                // spinner instead of flashing "no content" until it lands.
+                                contentLoading = if (sameVersion) state.contentLoading else updatedPage.content == null,
                                 syncError = null,
                             )
                         }
@@ -2008,14 +2128,12 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
     private fun parseApiError(raw: String, fallback: String): String {
         if (raw.isBlank()) return fallback
         if (isHtmlResponse(raw)) return nonJsonApiMessage(fallback)
-        return runCatching {
-            val error = apiJson.decodeFromString<Map<String, String>>(raw)["error"]
-                ?.takeIf { it.isNotBlank() }
-                ?: fallback
-            if (error == "Unauthorized") unauthorizedMessage() else error
-        }.getOrElse {
-            if (raw.trim().equals("Unauthorized", ignoreCase = true)) unauthorizedMessage() else raw
+        // Vercel's own failure page (e.g. FUNCTION_INVOCATION_TIMEOUT) is plain text.
+        if (raw.contains("FUNCTION_INVOCATION_TIMEOUT") || raw.contains("An error occurred with your deployment")) {
+            return str(R.string.error_network_timeout)
         }
+        val error = extractApiErrorMessage(raw) ?: raw.trim().takeIf { !isJsonObject(it) } ?: fallback
+        return if (error.equals("Unauthorized", ignoreCase = true)) unauthorizedMessage() else error
     }
 
     private fun isJsonObject(raw: String): Boolean =
