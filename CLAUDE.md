@@ -300,6 +300,12 @@ apps/android/app/src/main/java/com/llmwiki/
 - `themes.xml` 用 `Theme.AppCompat.DayNight.NoActionBar`，`values/` 淺色 windowBackground（#FAF9F7）、`values-night/` 深色（#0F1419）——避免淺色模式冷啟黑閃；AppCompat parent 不可換（`setApplicationLocales` 依賴）
 - Compose 主題已補 `surfaceContainer*` 五個 slot（`Color.kt` 由 Bg/Bg2 衍生）——否則 AlertDialog/DropdownMenu/ModalBottomSheet 會用 M3 預設紫調
 - 查詢失敗的錯誤必須傳進 `ChatBottomSheet` 內部顯示（sheet 全螢幕，Scaffold banner 會被蓋住）；`syncError` banner 有關閉鈕（`clearSyncError()`）
+- **返回鍵順序（v0.7.1+ 實機修正）**：抽屜 → 搜尋／行內編輯器 → 上一頁（`WikiViewModel.goBackPage()`，同工作區最多 50 筆）→ 離開 App。舊版抽屜開著按返回會直接跳出 App。`BackHandler` 後宣告者優先，順序不可亂。
+- Chat 串流一律以字元讀取（`InputStreamReader`），**不可用 `readUTF8Line()`**：一段沒有換行的回答會整段不顯示直到結束。等待第一個字時泡泡內顯示「思考中…」；送出鍵在串流中變停止鍵（`stopQuery()` 保留已收到的內容，Web 對齊）。
+- Web API 錯誤格式有 `{error:"…"}` 與 `{error:{code,message}}`（ingest / reingest）兩種，且可能夾非字串欄位（`jobId`）；一律走 `extractApiErrorMessage()`，不可再用 `Map<String,String>` 解，否則使用者看到原始 JSON。
+- 頁面內容由 Compose `verticalScroll` 捲動（TextView 自己捲只能拖、沒有慣性），反向連結放在文章末尾並顯示標題、底部留 88dp 給 FAB。
+- 匯入橫幅只在有 pending/running/paused 時顯示；「本批」完成／失敗數用與 Web 相同的 30 分鐘視窗（`ingestBatchCounts()`），舊的失敗不可永遠掛在畫面上。
+- 冷啟與切換工作區先顯示 Room 快取的 index，再背景同步。
 - Chat/設定選擇（主題/語言）用 `FilterChip`（含勾選 + TalkBack selected 語意），不要用僅變文字色的 OutlinedButton
 
 ## Graph View 注意事項
@@ -523,6 +529,17 @@ Conversation panel 輸入框左側的 `Bot` 按鈕是**多功能選單**：「�
 前端：Web 輸入框偵測結尾 `@xxx` 片段 → 浮動工作區選單（↑↓ + Enter / Tab 選取）→ 選中變成 chip；Android 同樣邏輯（chip 用 `AssistChip`）。送出後 chip 清空。
 系統 prompt 尾端由 server 追加「跨工作區能力說明」（`_schema/query.md` 客製化後仍會補上，確保工具能力永遠有被說明）。
 
+## 模型請求的時間上限（2026-09-26 實機追查，勿回退）
+
+症狀：手機問一句話，300 秒後出現 `FUNCTION_INVOCATION_TIMEOUT`，一個字都沒回；匯入也有 job 撐到 300 秒被砍。`[query] step` log 顯示第一步 8 秒就完成，第二步永遠沒回來。
+
+- **根因（本機以正式 query prompt ＋ 12 個真實工具重現）**：OpenRouter 的 `google/gemini-3.8-flash` 回了 response headers 後**整段串流不再送任何資料**——推理強度 `high` 每次都這樣、供應商預設值約三次兩次、`medium` 每次 4–22 秒完成。用簡化 prompt 測不出來，**量延遲一定要用正式 prompt 與工具集**。
+- `createLLMClient`（`lib/ai/client.ts`）統一處理，query / ingest / organize / 路由全部經過它：
+  - 每個請求 150s 上限，並可帶整個 invocation 的截止 signal（ingest 260s、organize 迴圈預算 +50s、query 105s）。
+  - **串流請求**：35 秒內沒有第一個 `data:` 事件就重送一次（OpenRouter 的 `: OPENROUTER PROCESSING` keep-alive 不算）。此時還沒有任何資料交給 AI SDK，重送對上層透明；AI SDK 不會重試我們自己 abort 的請求。
+  - **非串流請求不套用首筆資料計時**：`generateText` 的 body 要等整段答案完成才到，長頁面寫入本來就可能超過 35 秒，套用會被誤判重送。
+  - base URL 是 `openrouter.ai` 且請求沒指定推理強度時，預設 `reasoning: { effort: 'medium' }`。OpenAI 風格的 `reasoning_effort` 欄位 OpenRouter 會忽略（實測仍卡住）。
+- `/api/query`：70 秒後 `prepareStep` 改 `toolChoice: 'none'` 逼模型用已讀內容作答；105 秒 hard stop 並串流說明「逾時」，不再讓 Vercel 砍掉；每一步都印 `[query] step`（elapsedMs / tools / tokens）——慢的時候讀 log，不要猜。
 ## 開一頁的成本（2026-09-03 實測與修法）
 
 `GET /api/pages/[workspaceId]/[...slug]` 是全 App 最常打的請求，改版前 **1.6–3.4 秒**。它原本要做四件事：Supabase auth → 查 page row → **拿 Google access token** → **Drive metadata + 內容下載**。修法依效果排序：

@@ -312,6 +312,8 @@ Query API 文字串流結尾依序附加 `\x00CITATIONS\x00[...]`、`\x00ACTIONS
 - **Wiki 連結 alias fallback（Phase 15）**：`GET /api/pages/[...slug]` exact miss 時用 `canonicalWikiAlias`（`apps/web/lib/wiki/slug.ts`）做**唯一匹配**才 resolve（缺資料夾前綴/大小寫/`.md` 皆可對上），修 `[PAGE_NOT_FOUND]`；一次修所有 client、survives writePage 重寫。Graph 同樣把邊端點 alias 解析、解不到就濾掉（去幽靈節點）。真失連顯示 `wiki.linkedPageMissing` 友善訊息。
 - Web / Android 建立工作區 UI 不保留 description 欄位；Web `/w/create` 需提供返回 `/w` 的按鈕
 - 使用說明入口需在 Web top bar 與 Android drawer 同步提供，說明內容涵蓋工作區、匯入、對話、設定同步與 Drive 重授權
+- 返回鍵順序：抽屜 → 搜尋／編輯器 → 上一頁（`goBackPage()`）→ 離開 App。Chat 串流以字元讀取，不可用 `readUTF8Line()`；API 錯誤走 `extractApiErrorMessage()`（兩種 error 形狀）。
+- 模型請求時間上限集中在 `apps/web/lib/ai/client.ts`：串流 35 秒無 `data:` 重送一次、非串流不套用；OpenRouter 預設 `reasoning.effort = medium`（`high`／預設值會讓 gemini-3.8-flash 串流卡死）。詳見 `CLAUDE.md`「模型請求的時間上限」。
 
 ## 功能開發原則
 

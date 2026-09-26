@@ -2,6 +2,13 @@
 
 > 給下一個 AI Agent 的接手指南。架構與規範細節以 `CLAUDE.md` / `AGENTS.md` 為準，這裡只記「最近做了什麼、為什麼、還缺什麼」。
 
+## 2026-09-26 實機全面檢查（Pixel 6a ADB ＋ Web 手機寬度）
+
+- **對話逾時根因**：OpenRouter `gemini-3.8-flash` 在正式 prompt＋工具下常於 headers 後串流卡死（推理 `high` 必卡、預設值約 2/3）。`lib/ai/client.ts`：每請求 150s、串流 35s 無 `data:` 重送一次、OpenRouter 預設 `reasoning.effort=medium`、各流程帶 hard-stop signal；`/api/query` 70s 後強制作答、105s 收尾並說明逾時。修後實機 11.6 秒回答。
+- **Android**：返回鍵（抽屜→搜尋/編輯→上一頁→離開）、字元級串流、思考中狀態、停止鍵、可點引用 chip、綜合頁「查看」、錯誤 JSON 解析、匯入橫幅批次視窗、佇列文案、Compose 捲動＋反向連結標題、冷啟先顯示快取、頁面鎖定鍵、登出確認、設定卡片等寬。
+- **Web**：手機寬度側欄改覆蓋式抽屜（底部工具列）、對話全寬、頂列不溢出；匯入條計入 pending；刪除其他工作區卡片後刷新選單；佇列「完成·完成」去重。
+- 驗證：`bun test` 145 pass、`bun run typecheck` 5/5、Android unit tests 4 pass、release APK 裝到實機逐項操作。
+- 未做：Android 版號未升（未發行）；測試時在「AI」工作區新增了一頁綜合頁「Summarize this page in two sentences.」待使用者決定是否刪除。
 ## 2026-09-08 審查修復
 
 - 共用 wiki writer 改為先建立新 Drive 檔，再以 DB version / lock CAS 發布檔案 id；成功後才 trash 舊檔，明確衝突只 trash 自己的新檔，禁止把舊內容寫回共用檔案。
