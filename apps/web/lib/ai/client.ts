@@ -48,16 +48,36 @@ function isStreamingRequest(init: RequestInit | undefined): boolean {
   return typeof init?.body === 'string' && /"stream"\s*:\s*true/.test(init.body);
 }
 
+/**
+ * A stream that started and then went silent is as stuck as one that never started
+ * (observed: an ingest step hung ~150s mid-stream). A live stream keeps sending tokens.
+ */
+export const LLM_STREAM_IDLE_TIMEOUT_MS = 45_000;
+
 /** Re-wrap a partially read body: replay what was held back, then pipe the rest. */
-function resumeBody(held: Uint8Array[], reader: ReadableStreamDefaultReader<Uint8Array>): ReadableStream<Uint8Array> {
+function resumeBody(
+  held: Uint8Array[],
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  idleTimeoutMs = LLM_STREAM_IDLE_TIMEOUT_MS,
+): ReadableStream<Uint8Array> {
   return new ReadableStream<Uint8Array>({
     start(controller) {
       for (const chunk of held) controller.enqueue(chunk);
     },
     async pull(controller) {
-      const { done, value } = await reader.read();
-      if (done) controller.close();
-      else controller.enqueue(value);
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const idle = new Promise<'idle'>((resolve) => {
+        timer = setTimeout(() => resolve('idle'), idleTimeoutMs);
+      });
+      const next = await Promise.race([reader.read(), idle]).finally(() => clearTimeout(timer));
+      if (next === 'idle') {
+        console.warn('[llm] stream went silent mid-response', { idleMs: idleTimeoutMs });
+        await Promise.resolve(reader.cancel('stream idle')).catch(() => undefined);
+        controller.error(new FirstDataTimeoutError());
+        return;
+      }
+      if (next.done) controller.close();
+      else controller.enqueue(next.value);
     },
     cancel(reason) {
       return reader.cancel(reason);
@@ -76,6 +96,7 @@ export async function fetchWithLLMTimeouts(
   outer: AbortSignal | undefined,
   baseFetch: typeof fetch = fetch,
   firstDataTimeoutMs = LLM_FIRST_DATA_TIMEOUT_MS,
+  idleTimeoutMs = LLM_STREAM_IDLE_TIMEOUT_MS,
 ): Promise<Response> {
   const whole = AbortSignal.timeout(LLM_REQUEST_TIMEOUT_MS);
   const baseSignals = [whole, ...(init?.signal ? [init.signal] : []), ...(outer ? [outer] : [])];
@@ -105,7 +126,7 @@ export async function fetchWithLLMTimeouts(
       }
       const waitedMs = Date.now() - startedAt;
       if (waitedMs > 15_000) console.warn('[llm] slow first data', { waitedMs, attempt });
-      return new Response(resumeBody(held, reader), {
+      return new Response(resumeBody(held, reader, idleTimeoutMs), {
         status: response.status,
         statusText: response.statusText,
         headers: response.headers,

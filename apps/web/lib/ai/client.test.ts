@@ -39,6 +39,19 @@ describe('fetchWithLLMTimeouts', () => {
     expect(await response.text()).toBe(payload);
   });
 
+  test('errors a stream that goes silent after its first data', async () => {
+    const fake = (async () =>
+      new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('data: {"a":1}\n\n'));
+          },
+        }),
+      )) as unknown as typeof fetch;
+    const response = await fetchWithLLMTimeouts('https://x.test', STREAM_INIT, undefined, fake, 1_000, 30);
+    await expect(response.text()).rejects.toThrow('stalled');
+  });
+
   test('never cuts a non-streaming call short', async () => {
     const { fake, calls } = fakeFetch(
       () => new Promise((resolve) => setTimeout(() => resolve(new Response('{"done":true}')), 60)),

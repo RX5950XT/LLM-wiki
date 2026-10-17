@@ -36,7 +36,8 @@ export function nudgeForRemaining(remaining: readonly string[]): string {
   if (remaining.length === 0) return NUDGE_PROMPT;
   return `These planned pages have no completed writePage call yet: ${remaining.join(', ')}. Write every one of them now with writePage; do not answer with prose.`;
 }
-const MAX_WRITE_ATTEMPTS = 2;
+// Bounded by the time budget too; a stalled provider call costs one attempt, not the run.
+const MAX_WRITE_ATTEMPTS = 4;
 /**
  * Vercel kills the whole invocation at maxDuration = 300s, and a killed run
  * never writes its job row: the job sits in `running` until the 8-minute stale
@@ -102,6 +103,8 @@ export function publicIngestError(error: unknown): string {
   if (message === 'SUSPECTED_TRUNCATION') return message;
   if (message.startsWith('Ingest ran out of time')) return message;
   if (message === FIRST_DATA_TIMEOUT_MESSAGE) return message;
+  // A non-streaming call (plan/review) that hit the whole-request cap is the same stall.
+  if (error instanceof Error && error.name === 'TimeoutError') return FIRST_DATA_TIMEOUT_MESSAGE;
   if (message.startsWith('Ingest review incomplete')) return 'Ingest review incomplete';
   if (message.startsWith('Invalid ingest target page slug')) return 'Ingest plan contains an invalid page target';
   if (message.startsWith('Ingest plan exceeds')) return 'Ingest plan contains too many page targets';
