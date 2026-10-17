@@ -395,6 +395,17 @@ export async function runIngestPipeline(ctx: IngestContext): Promise<string[]> {
           tools,
           stopWhen: [stepCountIs(30), () => Date.now() > deadline],
           onStepFinish: async (step) => {
+            // Where a slow write spends its time (model vs. failing tools) — read it, don't guess.
+            console.info('[ingest] step', {
+              jobId: ctx.jobId,
+              elapsedMs: PIPELINE_BUDGET_MS - (deadline - Date.now()),
+              finishReason: step.finishReason,
+              tools: (step.toolResults ?? []).map((r) => {
+                const out = r.output as { ok?: boolean; slug?: string; error?: unknown };
+                return `${r.toolName}:${out?.slug ?? ''}:${out?.ok === false ? `fail ${JSON.stringify(out.error ?? '').slice(0, 120)}` : 'ok'}`;
+              }),
+              outputTokens: step.usage.outputTokens,
+            });
             let changed = false;
             for (const toolResult of step.toolResults ?? []) {
               if (toolResult.toolName !== 'writePage') continue;
@@ -415,6 +426,7 @@ export async function runIngestPipeline(ctx: IngestContext): Promise<string[]> {
         lastWriteError = null;
         if (unwrittenTargets().length === 0) break;
       } catch (error) {
+        console.warn('[ingest] write attempt failed', { jobId: ctx.jobId, attempt, error: error instanceof Error ? error.message : error });
         lastWriteError = error;
         if (attempt + 1 >= MAX_WRITE_ATTEMPTS) throw error;
       }
