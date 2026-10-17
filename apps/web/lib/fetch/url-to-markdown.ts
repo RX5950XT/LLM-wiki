@@ -3,7 +3,7 @@ import dns from 'dns';
 import { lookup } from 'dns/promises';
 import { Agent, fetch as undiciFetch } from 'undici';
 import { Readability } from '@mozilla/readability';
-import { JSDOM } from 'jsdom';
+import { JSDOM, VirtualConsole } from 'jsdom';
 import TurndownService from 'turndown';
 
 const turndown = new TurndownService({
@@ -168,7 +168,8 @@ export async function urlToMarkdown(url: string): Promise<FetchedArticle> {
   }
 
   const html = await readResponseBodyWithLimit(response, MAX_URL_RESPONSE_BYTES);
-  const dom = new JSDOM(html, { url });
+  // A bare VirtualConsole drops jsdom's noise (e.g. unparseable site CSS); only the text is used.
+  const dom = new JSDOM(html, { url, virtualConsole: new VirtualConsole() });
   const reader = new Readability(dom.window.document);
   const article = reader.parse();
 
