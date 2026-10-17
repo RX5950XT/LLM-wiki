@@ -501,6 +501,7 @@ export async function POST(request: NextRequest) {
         sourceUrl = input.url;
       } catch (error) {
         const failure = toPublicUrlFetchFailure(error);
+        console.warn('[ingest] url fetch failed:', error instanceof Error ? error.message : error);
         return errorResponse(
           failure.status,
           failure.code,
@@ -802,7 +803,14 @@ export async function GET(request: NextRequest) {
       .limit(50);
     if (jobsError) throw new Error(`workspace ingest jobs lookup failed: ${jobsError.message}`);
     const jobs = (rows ?? []) as JobRow[];
-    const sourceIds = [...new Set(jobs.map((job) => job.source_id))];
+    // Nothing else starts a job queued behind a busy workspace; Android only polls this list, never job_id.
+    const busy = new Set(jobs.filter((job) => job.status === 'running').map((job) => job.workspace_id));
+    for (const job of [...jobs].reverse()) {
+      if (job.status !== 'pending' || busy.has(job.workspace_id)) continue;
+      busy.add(job.workspace_id);
+      schedulePendingJob(job.id, user.id, locale);
+    }
+    const sourceIds =[...new Set(jobs.map((job) => job.source_id))];
     const sourceMap = new Map<string, { id: string; title: string | null; mime_type: string | null }>();
     if (sourceIds.length > 0) {
       const { data: sources, error: sourcesError } = await supabase

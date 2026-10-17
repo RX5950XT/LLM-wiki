@@ -228,5 +228,8 @@ export function toPublicUrlFetchFailure(error: unknown): PublicUrlFetchFailure {
   if (/too large|exceeds limit/i.test(message)) {
     return { status: 413, code: 'SOURCE_URL_TOO_LARGE', message: 'The URL content is too large to import.' };
   }
-  return { status: 422, code: 'SOURCE_URL_UNREADABLE', message: 'Unable to read content from this URL.' };
+  // Sites behind bot protection (e.g. Cloudflare) often refuse datacenter IPs; the status tells the user retrying won't help.
+  const httpStatus = /HTTP (\d{3})/.exec(message)?.[1];
+  const reason = httpStatus ? `The site refused the request (HTTP ${httpStatus}).` : 'Unable to read content from this URL.';
+  return { status: 422, code: 'SOURCE_URL_UNREADABLE', message: `${reason} Paste the article text instead.` };
 }

@@ -38,6 +38,7 @@ describe('toPublicUrlFetchFailure', () => {
     expect(failure.code).toBe('SOURCE_URL_UNREADABLE');
     expect(failure.message).not.toContain('secret.example');
     expect(failure.message).not.toContain('abc');
+    expect(failure.message).toContain('HTTP 502');
   });
 
   it('keeps SSRF and size failures actionable without echoing the URL', () => {
