@@ -407,6 +407,7 @@ Web（`pollIngestJob`，3s 間隔）與 Android（`WikiViewModel.pollIngestJob`�
 
 - **兩階段與可恢復 queue**：`analysis → writing → review` 記錄 `checkpoint`；job 支援 `pending/running/paused/done/failed`、pause/resume/retry 與 `attemptToken` fencing。來源以 SHA256 去重，未變更回報 `unchanged`。
 - **Queue stale-list invariant（勿回退）**：active job UI 必須以 server `GET /api/ingest?workspace_id=...` 先 stale sweep 後回傳的清單為準；Web／Android 不可直接查 `ingest_jobs`，也不可把 DB 的 `running` row 直接當成仍在執行。
+- **排隊中的 job 由清單查詢啟動（2026-10-18 實機修正，勿回退）**：工作區忙碌時新匯入只會建成 `pending`，伺服器不會在前一筆跑完後自動接下一筆。舊版只有 `GET ?job_id=` 會啟動它，而 Android 只輪詢 `GET ?workspace_id=`，所以手機連送兩篇時第二篇永遠卡在 pending。現在清單查詢會替「沒有 running job 的工作區」啟動最早的 pending（claim 是原子的，重複觸發無害）。
 - **安全寫入**：ingest LLM 只拿 plan allowlist 內的 `read/list/search/write`；`writePageForWorkspace` 用 DB version + `locked_by_human` CAS 保護，衝突回傳結構化錯誤並做 Drive 補償。
 - **多格式解析**：`document-parser.ts` 支援 PDF、DOCX、PPTX、EPUB、純文字/Markdown 與 PNG/JPEG/WebP/GIF；輸入、解壓與 PDF 資源皆有 2 MiB/資源上限，圖片可由 profile 產生描述。
 - **Faithful Query**：`query_mode=faithful` 只讀 raw source，不注入 wiki/context、不提供 actions/file-back；citation 由實際讀取產生，模型輸出的 NUL 不會變成 metadata。
@@ -538,6 +539,7 @@ Conversation panel 輸入框左側的 `Bot` 按鈕是**多功能選單**：「�
   - 每個請求 150s 上限，並可帶整個 invocation 的截止 signal（ingest 260s、organize 迴圈預算 +50s、query 105s）。
   - **串流請求**：35 秒內沒有第一個 `data:` 事件就重送一次（OpenRouter 的 `: OPENROUTER PROCESSING` keep-alive 不算）。此時還沒有任何資料交給 AI SDK，重送對上層透明；AI SDK 不會重試我們自己 abort 的請求。
   - **非串流請求不套用首筆資料計時**：`generateText` 的 body 要等整段答案完成才到，長頁面寫入本來就可能超過 35 秒，套用會被誤判重送。
+  - **因此 ingest 寫入迴圈改用 `streamText`（2026-10-18）**：用 `generateText` 時，卡住的請求會整整燒掉 150 秒只換來一步（實測：一個 514 token 的 readPage 花 149.7 秒），續做永遠做不完。串流後卡住會被偵測並重送；兩次都沒資料時錯誤訊息是 `FIRST_DATA_TIMEOUT_MESSAGE`（會顯示在 job row），不再是空字串造成的「Ingest failed」。每一步都印 `[ingest] step`。
   - base URL 是 `openrouter.ai` 且請求沒指定推理強度時，預設 `reasoning: { effort: 'medium' }`。OpenAI 風格的 `reasoning_effort` 欄位 OpenRouter 會忽略（實測仍卡住）。
 - `/api/query`：70 秒後 `prepareStep` 改 `toolChoice: 'none'` 逼模型用已讀內容作答；105 秒 hard stop 並串流說明「逾時」，不再讓 Vercel 砍掉；每一步都印 `[query] step`（elapsedMs / tools / tokens）——慢的時候讀 log，不要猜。
 ## 開一頁的成本（2026-09-03 實測與修法）
