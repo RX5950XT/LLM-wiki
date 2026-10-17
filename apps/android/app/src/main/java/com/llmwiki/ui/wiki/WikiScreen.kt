@@ -386,11 +386,16 @@ fun WikiScreen(
                             Modifier.fillMaxSize().padding(32.dp),
                             contentAlignment = Alignment.Center,
                         ) {
-                            Text(
-                                stringResource(R.string.wiki_no_pages),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+                            // An empty cache during the first sync is not an empty wiki.
+                            if (uiState.syncLoading) {
+                                CircularProgressIndicator()
+                            } else {
+                                Text(
+                                    stringResource(R.string.wiki_no_pages),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
                         }
                     } else {
                         val pinnedSlugs = setOf("index.md", "log.md")
