@@ -28,6 +28,9 @@ function claimDb(result: { data: unknown; error: { code?: string; message: strin
         select() {
           return builder;
         },
+        or() {
+          return builder;
+        },
         maybeSingle: async () => result,
       };
       return builder;
@@ -94,6 +97,9 @@ describe('pending ingest CAS', () => {
       select: (...columns: string[]) => QueryBuilder;
       update: (values: Record<string, unknown>) => QueryBuilder;
       eq: (column: string, value: unknown) => QueryBuilder;
+      or: () => QueryBuilder;
+      in: () => QueryBuilder;
+      is: () => QueryBuilder;
       maybeSingle: () => Promise<QueryResult>;
     };
     const supabase = {
@@ -104,6 +110,9 @@ describe('pending ingest CAS', () => {
           select() { return builder; },
           update() { operation = 'update'; return builder; },
           eq(column: string, value: unknown) { filters.push([column, value]); return builder; },
+          or() { return builder; },
+          in() { return builder; },
+          is() { return builder; },
           maybeSingle: async () => {
             if (table === 'workspaces') return { data: workspace, error: null };
             if (table === 'sources') return { data: source, error: null };
@@ -154,6 +163,9 @@ describe('ingest failure handling', () => {
         const builder = {
           select() { return builder; },
           eq() { return builder; },
+          or() { return builder; },
+          in() { return builder; },
+          is() { return builder; },
           maybeSingle: async () => ({ data: null, error: null }),
           update(values: Record<string, unknown>) {
             updates.push(values);
@@ -243,12 +255,18 @@ describe('background source bounds', () => {
       select: () => MockBuilder;
       update: () => MockBuilder;
       eq: () => MockBuilder;
+      or: () => MockBuilder;
+      in: () => MockBuilder;
+      is: () => MockBuilder;
       maybeSingle: () => Promise<{ data: unknown; error: null }>;
     };
     const builder: MockBuilder = {
       select() { return builder; },
       update() { updating = true; return builder; },
       eq() { return builder; },
+      or() { return builder; },
+      in() { return builder; },
+      is() { return builder; },
       maybeSingle: async () => ({ data: null, error: null }),
     };
     const supabase = {

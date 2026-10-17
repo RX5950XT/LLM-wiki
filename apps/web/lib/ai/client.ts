@@ -99,10 +99,14 @@ export async function fetchWithLLMTimeouts(
   idleTimeoutMs = LLM_STREAM_IDLE_TIMEOUT_MS,
 ): Promise<Response> {
   const whole = AbortSignal.timeout(LLM_REQUEST_TIMEOUT_MS);
-  const baseSignals = [whole, ...(init?.signal ? [init.signal] : []), ...(outer ? [outer] : [])];
+  const callerSignals = init?.signal ? [init.signal] : [];
   if (!isStreamingRequest(init)) {
-    return baseFetch(input, { ...init, signal: AbortSignal.any(baseSignals) });
+    return baseFetch(input, { ...init, signal: AbortSignal.any([whole, ...callerSignals, ...(outer ? [outer] : [])]) });
   }
+  // A live stream is not cut at 150s: stalls are caught by the first-data and idle
+  // timeouts, and the invocation deadline (`outer`) bounds the total. Writing a
+  // dozen pages in one step can legitimately stream longer than 150s.
+  const baseSignals = [...callerSignals, outer ?? whole];
 
   for (let attempt = 1; ; attempt += 1) {
     const gate = new AbortController();

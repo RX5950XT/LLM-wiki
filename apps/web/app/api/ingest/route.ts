@@ -865,8 +865,8 @@ export async function PATCH(request: NextRequest) {
 
     const values: Record<string, unknown> = { status: transition.status };
     if (parsed.data.action === 'resume' || parsed.data.action === 'retry') {
+      // finished_at stays: it tells the claim that the previous runner has stopped.
       values.error = null;
-      values.finished_at = null;
     }
     const { data: updated, error } = await supabase
       .from('ingest_jobs')

@@ -98,6 +98,8 @@ function isUniqueViolation(error: { code?: string } | null | undefined): boolean
   return error?.code === '23505';
 }
 
+const RUNNER_LIFETIME_MS = 300_000;
+
 /** Atomically claim one pending row. A competing workspace run leaves it pending. */
 export async function claimPendingIngestJob(
   supabase: SupabaseClient,
@@ -116,6 +118,9 @@ export async function claimPendingIngestJob(
     .eq('id', jobId)
     .eq('status', 'pending')
     .eq('attempt_count', expectedAttemptCount)
+    // A runner paused mid-run may still be finishing its step. Claim only once it has
+    // stopped (finished_at set) or can no longer be alive (Vercel's 300s limit).
+    .or(`finished_at.not.is.null,started_at.is.null,started_at.lt."${new Date(Date.now() - RUNNER_LIFETIME_MS).toISOString()}"`)
     .select('id, attempt_count')
     .maybeSingle();
 
@@ -231,6 +236,20 @@ async function resolveProfile(
 
 const INVOCATION_GUARD_MS = 280_000;
 export const INVOCATION_GUARD_MESSAGE = 'Ingest ran out of time. Retry to continue from here.';
+
+/** Record that this attempt's runner stopped after a pause, so a resumed job may be claimed. */
+async function markAttemptStopped(supabase: SupabaseClient, jobId: string, attemptToken: number): Promise<void> {
+  const { error } = await supabase
+    .from('ingest_jobs')
+    .update({ finished_at: new Date().toISOString() })
+    .eq('id', jobId)
+    .eq('attempt_count', attemptToken)
+    .in('status', ['paused', 'pending'])
+    .is('finished_at', null)
+    .select('id')
+    .maybeSingle();
+  if (error) console.warn('[ingest] stop marker failed', { jobId, error: error.message });
+}
 
 export async function markFailedIfActive(
   supabase: SupabaseClient,
@@ -392,6 +411,8 @@ export async function runPendingIngestJob(
     await markFailedIfActive(supabase, options.jobId, workspace.id, claim.attemptCount!, error);
     const failed = await loadJob(supabase, options.jobId);
     return { claimed: true, status: failed?.status ?? 'failed', reason: 'claimed' };
+  } finally {
+    await markAttemptStopped(supabase, options.jobId, claim.attemptCount!);
   }
 }
 
