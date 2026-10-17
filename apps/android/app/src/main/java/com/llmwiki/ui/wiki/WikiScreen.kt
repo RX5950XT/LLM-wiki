@@ -830,6 +830,11 @@ fun WikiScreen(
                     )
                 } else {
                     when {
+                        // First sync after login: an empty cache is not an empty wiki.
+                        uiState.activePage == null && pages.isEmpty() && uiState.syncLoading -> Box(
+                            Modifier.weight(1f).fillMaxWidth(),
+                            contentAlignment = Alignment.Center,
+                        ) { CircularProgressIndicator() }
                         uiState.activePage == null -> Box(
                             Modifier.weight(1f).fillMaxWidth(),
                             contentAlignment = Alignment.Center,

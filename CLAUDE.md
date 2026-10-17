@@ -290,6 +290,8 @@ apps/android/app/src/main/java/com/llmwiki/
 - `ModalNavigationDrawer` 的 `gesturesEnabled` 必須設為 `drawerState.isOpen`，而非 `true`；Drawer 關閉時保留橫向手勢會與頁面垂直捲動產生競爭，導致上下滑動卡頓
 - WikiScreen 的對話框開關、`inlineEditorPageSlug`、`inlineEditorValue`（`TextFieldValue.Saver`）、ingest 草稿一律用 `rememberSaveable`——旋轉/行程死亡不可丟失未儲存文字
 - `BackHandler` 已接管搜尋模式與行內編輯器；系統返回鍵先關閉它們，不會直接退出 App
+- **`MainActivity` 必須是 `launchMode="singleTask"`（2026-10-18 實機修正，勿移除）**：預設 standard 模式下每次「分享」都會疊一個新的 MainActivity，`onNewIntent` 從未被呼叫；新畫面是全新 ViewModel——對話紀錄消失、所選模型回到預設（匯入因此用錯模型），按返回又回到舊畫面。
+- 首次登入、Room 快取還是空的時候，`syncLoading` 期間顯示轉圈，不可顯示「點 + 匯入你的第一個來源」（空快取不等於空 wiki）。
 - `MainActivity` 的 `ExternalEvent` 含 `token`（nanoTime）；NavGraph 必須把 `shareUrlEvent?.token` / `authReturnEvent?.token` 傳進 WikiScreen 並作為 `LaunchedEffect` key——否則分享同一個 URL 第二次不會觸發
 - `LaunchRoute` 查 workspaces 失敗（離線）時導向 `wiki` 而非 `workspace-create`；`workspace-create` 只保留給「成功查詢且真的沒有工作區」
 - 離線冷啟：`AppPreferencesRepository.setLastWorkspace()` 持久化最後使用的 workspace（account + WorkspaceRow JSON），`refreshWorkspaces()` 失敗時還原它並顯示 Room 快取頁面清單，不再出現空白畫面
