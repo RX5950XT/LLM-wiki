@@ -548,6 +548,12 @@ Conversation panel 輸入框左側的 `Bot` 按鈕是**多功能選單**：「�
 - **匯入錯誤由伺服器依語言翻譯（`lib/ai/ingest-error-i18n.ts`）**：DB 存英文原文，`GET/PATCH /api/ingest` 回應與網址抓取失敗訊息依 `x-llm-wiki-locale` / `NEXT_LOCALE` 翻成中文，Web 與 Android 不各自維護翻譯。新增錯誤訊息時要同步補對照表；未知訊息原樣傳出。
   - base URL 是 `openrouter.ai` 且請求沒指定推理強度時，預設 `reasoning: { effort: 'medium' }`。OpenAI 風格的 `reasoning_effort` 欄位 OpenRouter 會忽略（實測仍卡住）。
 - `/api/query`：70 秒後 `prepareStep` 改 `toolChoice: 'none'` 逼模型用已讀內容作答；105 秒 hard stop 並串流說明「逾時」，不再讓 Vercel 砍掉；每一步都印 `[query] step`（elapsedMs / tools / tokens）——慢的時候讀 log，不要猜。
+## 預設模型：Claude Haiku 5.5（2026-10-18 實機比較）
+
+production 預設 profile 已從 `google/gemini-3.8-flash` 換成 `anthropic/claude-haiku-5.5`（同一把 OpenRouter 金鑰；Gemini 與 `openai/gpt-6-luna` profile 保留可切換）。同一題對話：Haiku 16 秒、Luna 20 秒、Gemini 73.5 秒（第一步就等 57 秒）；匯入 9KB 文章 Haiku 一輪 163 秒寫完 14 頁，Gemini 常卡住要靠重送撐。價格 Haiku/Luna $0.1/$0.5 vs Gemini $0.825/$4.125（每百萬 token）。OpenRouter 公開 endpoint 統計中 Gemini 的 Google 端點 24h 可用率僅 74%。
+- **換預設模型要連 `workspaces.default_profile_id` 一起改**：舊工作區直接綁定 profile，只改 `is_default` 這些工作區仍用舊模型。
+- **Drive API 一律有 30 秒逾時**（`createDriveClient`）：沒有逾時的 Drive 請求會無視 abort 永遠卡住。
+
 ## 開一頁的成本（2026-09-03 實測與修法）
 
 `GET /api/pages/[workspaceId]/[...slug]` 是全 App 最常打的請求，改版前 **1.6–3.4 秒**。它原本要做四件事：Supabase auth → 查 page row → **拿 Google access token** → **Drive metadata + 內容下載**。修法依效果排序：
