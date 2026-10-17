@@ -2,7 +2,7 @@ import { createHash } from 'crypto';
 import { APICallError, stepCountIs, streamText, type ModelMessage } from 'ai';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { drive_v3 } from 'googleapis';
-import { createLLMClient } from './client';
+import { createLLMClient, FIRST_DATA_TIMEOUT_MESSAGE } from './client';
 import { buildWikiTools } from './tools';
 import {
   buildIngestWritePrompt,
@@ -101,6 +101,7 @@ export function publicIngestError(error: unknown): string {
   if (message === 'The model wrote no pages for this source.') return message;
   if (message === 'SUSPECTED_TRUNCATION') return message;
   if (message.startsWith('Ingest ran out of time')) return message;
+  if (message === FIRST_DATA_TIMEOUT_MESSAGE) return message;
   if (message.startsWith('Ingest review incomplete')) return 'Ingest review incomplete';
   if (message.startsWith('Invalid ingest target page slug')) return 'Ingest plan contains an invalid page target';
   if (message.startsWith('Ingest plan exceeds')) return 'Ingest plan contains too many page targets';

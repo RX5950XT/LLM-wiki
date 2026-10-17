@@ -35,7 +35,14 @@ interface LLMClientOptions {
   signal?: AbortSignal;
 }
 
-class FirstDataTimeoutError extends Error {}
+export const FIRST_DATA_TIMEOUT_MESSAGE = 'Model provider sent no response (stalled). Retry later or switch the model.';
+
+class FirstDataTimeoutError extends Error {
+  constructor() {
+    super(FIRST_DATA_TIMEOUT_MESSAGE);
+    this.name = 'FirstDataTimeoutError';
+  }
+}
 
 function isStreamingRequest(init: RequestInit | undefined): boolean {
   return typeof init?.body === 'string' && /"stream"\s*:\s*true/.test(init.body);
