@@ -75,6 +75,11 @@ export interface IngestContext {
   /** Cooperative cancellation checked between stages and after tool steps. */
   pauseRequested?: () => boolean | Promise<boolean>;
   signal?: AbortSignal;
+  /**
+   * When the Vercel invocation began. Vercel's 300s clock starts at the request,
+   * not here: a POST that spent 150s routing left the pipeline too little time.
+   */
+  startedAt?: number;
 }
 
 interface StoredJob {
@@ -341,8 +346,9 @@ async function loadCurrentPages(
  * independently so the next invocation resumes from the saved plan.
  */
 export async function runIngestPipeline(ctx: IngestContext): Promise<string[]> {
-  const deadline = Date.now() + PIPELINE_BUDGET_MS;
-  const hardStop = AbortSignal.timeout(PIPELINE_HARD_STOP_MS);
+  const startedAt = ctx.startedAt ?? Date.now();
+  const deadline = startedAt + PIPELINE_BUDGET_MS;
+  const hardStop = AbortSignal.timeout(Math.max(0, startedAt + PIPELINE_HARD_STOP_MS - Date.now()));
   const job = await loadJob(ctx);
   const sourceId = ctx.sourceId ?? job.source_id;
   const sourceSha256 = hashSource(ctx.sourceContent);

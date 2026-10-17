@@ -377,10 +377,10 @@ async function trashBestEffort(
   }
 }
 
-function schedulePendingJob(jobId: string, ownerId: string, locale: string): void {
+function schedulePendingJob(jobId: string, ownerId: string, locale: string, startedAt?: number): void {
   after(async () => {
     try {
-      await runPendingIngestJob({ jobId, ownerId, locale });
+      await runPendingIngestJob({ jobId, ownerId, locale, startedAt });
     } catch (error) {
       console.error('[ingest] unable to start pending job', { jobId, error });
     }
@@ -405,6 +405,7 @@ function publicJob(job: JobRow, locale: UiLocale) {
 }
 
 export async function POST(request: NextRequest) {
+  const startedAt = Date.now();
   const locale = resolveUiLocaleFromRequest(request);
   const { supabase, user } = await getRequestUser(request);
   if (!user) return errorResponse(401, 'UNAUTHORIZED', 'Unauthorized');
@@ -651,7 +652,7 @@ export async function POST(request: NextRequest) {
             );
           }
           const job = await insertPendingJob(supabase, workspace.id, racedSource.id, profile.id, sourceSha256);
-          schedulePendingJob(job.id, user.id, locale);
+          schedulePendingJob(job.id, user.id, locale, startedAt);
           return NextResponse.json({ jobId: job.id, status: job.status, result: job.result }, { status: 202 });
         }
       }
@@ -673,7 +674,7 @@ export async function POST(request: NextRequest) {
       throw error;
     }
 
-    schedulePendingJob(job.id, user.id, locale);
+    schedulePendingJob(job.id, user.id, locale, startedAt);
     return NextResponse.json(
       {
         jobId: job.id,

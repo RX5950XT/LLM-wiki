@@ -74,6 +74,8 @@ export interface RunPendingIngestJobOptions {
   ownerId: string;
   locale?: string | null;
   dependencies?: IngestRunnerDependencies;
+  /** When the invocation began; the pipeline's time budget counts from here. */
+  startedAt?: number;
 }
 
 export interface ClaimPendingResult {
@@ -255,6 +257,7 @@ async function runClaimedJob(
   ownerId: string,
   locale: string | null | undefined,
   dependencies: IngestRunnerDependencies,
+  startedAt?: number,
 ): Promise<void> {
   if (job.status !== 'running') return;
   const workspace = await loadWorkspace(supabase, job.workspace_id, ownerId);
@@ -302,6 +305,7 @@ async function runClaimedJob(
     jobId: job.id,
     sourceId: source.id,
     attemptToken: job.attempt_count,
+    startedAt,
     pauseRequested: async () => {
       const { data, error } = await supabase
         .from('ingest_jobs')
@@ -349,7 +353,7 @@ export async function runPendingIngestJob(
         reason: current ? 'claimed' : 'not_found',
       };
     }
-    await runClaimedJob(supabase, claimed, options.ownerId, options.locale, dependencies);
+    await runClaimedJob(supabase, claimed, options.ownerId, options.locale, dependencies, options.startedAt);
     const completed = await loadJob(supabase, initial.id);
     return { claimed: true, status: completed?.status ?? 'done', reason: 'claimed' };
   } catch (error) {

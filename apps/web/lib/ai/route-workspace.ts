@@ -31,6 +31,12 @@ const TITLES_PER_WORKSPACE = 40;
  */
 const ROUTING_ATTEMPTS = 2;
 const RETRY_DELAY_MS = 1_500;
+/**
+ * The reply is one line, normally back in seconds. Without a cap a stalled call
+ * waited out the 150s request timeout inside the POST, and the ingest that
+ * followed was killed at Vercel's 300s limit (job stuck in `running`).
+ */
+const ROUTING_TIMEOUT_MS = 20_000;
 
 export interface RoutableWorkspace {
   id: string;
@@ -171,6 +177,7 @@ export async function routeToWorkspace(
       system:
         'You file incoming content into the knowledge workspace where it belongs. Answer with a single line and nothing else.',
       prompt,
+      abortSignal: AbortSignal.timeout(ROUTING_TIMEOUT_MS),
     })
       .then((result) => result.text)
       // Swallowed silently, this failure looks exactly like "the AI filed it here" —
