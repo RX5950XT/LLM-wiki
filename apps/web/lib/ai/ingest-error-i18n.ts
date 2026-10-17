@@ -7,6 +7,7 @@ import { FIRST_DATA_TIMEOUT_MESSAGE } from './client';
  */
 const ZH_TW: Array<[RegExp, (match: RegExpMatchArray) => string]> = [
   [/^Ingest ran out of time after (\d+) of (\d+) planned pages\./, (m) => `匯入時間用完：已完成 ${m[1]}/${m[2]} 頁，按「重試」會從這裡接著做。`],
+  [/^Ingest ran out of time\. Retry to continue from here\.$/, () => '匯入時間用完，按「重試」會從已完成的頁面接著做。'],
   [/^The site refused the request \(HTTP (\d+)\)\./, (m) => `網站拒絕了伺服器的讀取（HTTP ${m[1]}），請改為直接貼上文章內容。`],
   [/^Unable to read content from this URL\./, () => '無法讀取這個網址的內容，請改為直接貼上文章內容。'],
   [/^This URL cannot be imported\.$/, () => '這個網址不允許匯入。'],

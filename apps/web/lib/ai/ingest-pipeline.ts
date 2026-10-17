@@ -449,8 +449,21 @@ export async function runIngestPipeline(ctx: IngestContext): Promise<string[]> {
         let streamError: unknown = null;
         const result = streamText({
           model,
+          abortSignal: hardStop,
           onError: ({ error }) => {
             streamError = error;
+          },
+          // Record each page the moment its write commits: a model that writes 11 pages in one
+          // step would otherwise lose the whole record if the invocation dies before the step ends.
+          onChunk: async ({ chunk }) => {
+            if (chunk.type !== 'tool-result' || chunk.toolName !== 'writePage') return;
+            const output = chunk.output as { ok?: boolean; slug?: string; result?: string };
+            if (!output?.ok || !output.slug) return;
+            if (output.result !== 'unchanged') wroteUpdatedPage = true;
+            if (touched.has(output.slug)) return;
+            touched.add(output.slug);
+            checkpoint = { ...checkpoint, plan, written_pages: [...touched] };
+            await saveCheckpoint(ctx, 'writing', checkpoint);
           },
           system: ctx.systemPrompt,
           messages,
@@ -468,19 +481,6 @@ export async function runIngestPipeline(ctx: IngestContext): Promise<string[]> {
               }),
               outputTokens: step.usage.outputTokens,
             });
-            let changed = false;
-            for (const toolResult of step.toolResults ?? []) {
-              if (toolResult.toolName !== 'writePage') continue;
-              const output = toolResult.output as { ok?: boolean; slug?: string; result?: string };
-              if (!output.ok || !output.slug) continue;
-              if (!touched.has(output.slug)) changed = true;
-              touched.add(output.slug);
-              if (output.result !== 'unchanged') wroteUpdatedPage = true;
-            }
-            if (changed) {
-              checkpoint = { ...checkpoint, plan, written_pages: [...touched] };
-              await saveCheckpoint(ctx, 'writing', checkpoint);
-            }
             if (await isPaused(ctx)) pauseAfterStep = true;
           },
         });

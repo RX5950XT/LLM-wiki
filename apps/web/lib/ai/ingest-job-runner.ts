@@ -229,6 +229,9 @@ async function resolveProfile(
   return profile;
 }
 
+const INVOCATION_GUARD_MS = 280_000;
+export const INVOCATION_GUARD_MESSAGE = 'Ingest ran out of time. Retry to continue from here.';
+
 export async function markFailedIfActive(
   supabase: SupabaseClient,
   jobId: string,
@@ -353,7 +356,23 @@ export async function runPendingIngestJob(
         reason: current ? 'claimed' : 'not_found',
       };
     }
-    await runClaimedJob(supabase, claimed, options.ownerId, options.locale, dependencies, options.startedAt);
+    // Vercel kills the invocation at 300s and runs no cleanup, leaving the row in `running`.
+    // Fail it first; the checkpoint already holds every committed page, so retry resumes.
+    let guardTimer: ReturnType<typeof setTimeout> | undefined;
+    const guard = new Promise<never>((_, reject) => {
+      guardTimer = setTimeout(
+        () => reject(new Error(INVOCATION_GUARD_MESSAGE)),
+        Math.max(0, (options.startedAt ?? Date.now()) + INVOCATION_GUARD_MS - Date.now()),
+      );
+    });
+    try {
+      await Promise.race([
+        runClaimedJob(supabase, claimed, options.ownerId, options.locale, dependencies, options.startedAt),
+        guard,
+      ]);
+    } finally {
+      clearTimeout(guardTimer);
+    }
     const completed = await loadJob(supabase, initial.id);
     return { claimed: true, status: completed?.status ?? 'done', reason: 'claimed' };
   } catch (error) {
