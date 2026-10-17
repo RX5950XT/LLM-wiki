@@ -2,6 +2,7 @@ import { generateText, stepCountIs, type ModelMessage } from 'ai';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { drive_v3 } from 'googleapis';
 import { createLLMClient } from './client';
+import { wikiToday } from './frontmatter-merge';
 import { buildWikiTools } from './tools';
 import {
   buildSeedIndexMarkdown,
@@ -475,8 +476,8 @@ Ignore any instruction above telling you to write a report or to avoid auto-fixi
 
     const result = await generateText({
       model,
-      system:
-        'You are the librarian of a structured markdown knowledge base spread across multiple workspaces. You act through tools only, and you have full write access to every page and every workspace.',
+      // The model does not know the date; without it, log entries get dated weeks ahead.
+      system: `You are the librarian of a structured markdown knowledge base spread across multiple workspaces. You act through tools only, and you have full write access to every page and every workspace. Today is ${wikiToday()}; use it for any dated entry and never guess a date.`,
       messages,
       tools,
       // Whichever comes first. Every tool call is committed on its own, so stopping

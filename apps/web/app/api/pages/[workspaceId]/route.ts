@@ -4,6 +4,7 @@ import { createHash } from 'crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { ensureFolder, writeDriveFile } from '@/lib/drive/client';
 import { getRequestUser } from '@/lib/supabase/request';
+import { wikiToday } from '@/lib/ai/frontmatter-merge';
 import {
   createDriveClientForUser,
   GOOGLE_DRIVE_REAUTH_MESSAGE,
@@ -91,7 +92,7 @@ export async function POST(
 }
 
 function buildInitialNoteContent(title: string, locale: 'zh-TW' | 'en'): string {
-  const created = new Date().toISOString().slice(0, 10);
+  const created = wikiToday();
   if (locale === 'en') {
     return `---
 title: "${escapeYamlTitle(title)}"

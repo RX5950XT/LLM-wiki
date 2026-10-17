@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { findFile } from '@/lib/drive/client';
 import { writePageForWorkspace } from '@/lib/ai/tools';
+import { wikiToday } from '@/lib/ai/frontmatter-merge';
 import { getRequestUser } from '@/lib/supabase/request';
 import {
   createDriveClientForUser,
@@ -106,7 +107,7 @@ export async function POST(
     citationLinks,
     '',
     `---`,
-    `*Saved from LLM Wiki query — ${now.toLocaleDateString()}*`,
+    `*Saved from LLM Wiki query — ${wikiToday(now)}*`,
   ]
     .filter((l) => l !== null)
     .join('\n');

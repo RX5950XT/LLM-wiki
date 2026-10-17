@@ -9,6 +9,7 @@ import {
   isGoogleDriveAuthError,
 } from '@/lib/google/drive-auth';
 import { createLLMClient } from '@/lib/ai/client';
+import { wikiToday } from '@/lib/ai/frontmatter-merge';
 import { buildWikiTools, type ActionProposal } from '@/lib/ai/tools';
 import {
   buildSourceTools,
@@ -330,6 +331,8 @@ export async function POST(request: NextRequest) {
     ].join('\n');
     systemPrompt += `\n${capabilityNote}`;
   }
+  // The model does not know the date; it guessed weeks ahead in pages and log entries.
+  systemPrompt += `\n\nToday is ${wikiToday()} (Asia/Taipei). Use it for any date you write; never guess one.`;
 
   console.info('[query] context ready', { elapsedMs: Date.now() - startedAt });
   const result = streamText({
