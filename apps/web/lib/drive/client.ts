@@ -3,6 +3,8 @@ import type { drive_v3 } from 'googleapis';
 import { getRequiredEnv } from '@/lib/env';
 import { DriveReadError } from '@/lib/drive/errors';
 
+const DRIVE_REQUEST_TIMEOUT_MS = 30_000;
+
 /** Build a Drive v3 client authenticated with a short-lived access token. */
 export function createDriveClient(accessToken: string): drive_v3.Drive {
   const auth = new google.auth.OAuth2(
@@ -10,7 +12,9 @@ export function createDriveClient(accessToken: string): drive_v3.Drive {
     getRequiredEnv('GOOGLE_OAUTH_CLIENT_SECRET'),
   );
   auth.setCredentials({ access_token: accessToken });
-  return google.drive({ version: 'v3', auth });
+  // A Drive request with no timeout can hang forever and ignores abort signals (observed:
+  // an ingest step stuck after its last page until Vercel killed the invocation).
+  return google.drive({ version: 'v3', auth, timeout: DRIVE_REQUEST_TIMEOUT_MS });
 }
 
 export interface GoogleAccessToken {

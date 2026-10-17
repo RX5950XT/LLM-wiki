@@ -435,6 +435,7 @@ export async function runIngestPipeline(ctx: IngestContext): Promise<string[]> {
       },
     ];
     let lastWriteError: unknown = null;
+    const toolStartedAt = new Map<string, number>();
     const plannedTargets = plan.target_pages;
     const unwrittenTargets = () => plannedTargets.filter((slug) => !touched.has(slug));
 
@@ -456,6 +457,11 @@ export async function runIngestPipeline(ctx: IngestContext): Promise<string[]> {
           // Record each page the moment its write commits: a model that writes 11 pages in one
           // step would otherwise lose the whole record if the invocation dies before the step ends.
           onChunk: async ({ chunk }) => {
+            if (chunk.type === 'tool-call') toolStartedAt.set(chunk.toolCallId, Date.now());
+            if (chunk.type === 'tool-result') {
+              const tookMs = Date.now() - (toolStartedAt.get(chunk.toolCallId) ?? Date.now());
+              if (tookMs > 15_000) console.warn('[ingest] slow tool', { jobId: ctx.jobId, tool: chunk.toolName, tookMs });
+            }
             if (chunk.type !== 'tool-result' || chunk.toolName !== 'writePage') return;
             const output = chunk.output as { ok?: boolean; slug?: string; result?: string };
             if (!output?.ok || !output.slug) return;
