@@ -22,7 +22,9 @@ import {
   transitionIngestJob,
 } from '@/lib/ai/ingest-job-state';
 import { resolveUiLocaleFromRequest } from '@/lib/i18n/ui-locale';
+import type { UiLocale } from '@llm-wiki/drive-schema';
 import { toPublicUrlFetchFailure, urlToMarkdown } from '@/lib/fetch/url-to-markdown';
+import { localizeIngestError } from '@/lib/ai/ingest-error-i18n';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   extractDocument,
@@ -385,14 +387,14 @@ function schedulePendingJob(jobId: string, ownerId: string, locale: string): voi
   });
 }
 
-function publicJob(job: JobRow) {
+function publicJob(job: JobRow, locale: UiLocale) {
   return {
     id: job.id,
     status: job.status,
     phase: job.phase,
     result: job.result,
     attempt_count: job.attempt_count,
-    error: job.error,
+    error: localizeIngestError(job.error, locale),
     touched_pages: job.touched_pages ?? [],
     source_id: job.source_id,
     workspace_id: job.workspace_id,
@@ -505,7 +507,7 @@ export async function POST(request: NextRequest) {
         return errorResponse(
           failure.status,
           failure.code,
-          failure.message,
+          localizeIngestError(failure.message, locale) ?? failure.message,
         );
       }
       sourceKind = 'url';
@@ -777,7 +779,7 @@ export async function GET(request: NextRequest) {
       if (!job) return errorResponse(404, INGEST_JOB_ERROR_CODES.notFound, 'Job not found');
       if (isStaleRunning(job.status, job.updated_at)) job = await updateStaleJob(supabase, job, user.id);
       if (job.status === 'pending') schedulePendingJob(job.id, user.id, locale);
-      return NextResponse.json({ jobId: job.id, ...publicJob(job) });
+      return NextResponse.json({ jobId: job.id, ...publicJob(job, locale) });
     }
 
     const parsedWorkspaceId = z.string().uuid().safeParse(workspaceIdRaw);
@@ -828,7 +830,7 @@ export async function GET(request: NextRequest) {
       jobs: jobs.map((job) => {
         const source = sourceMap.get(job.source_id) ?? null;
         return {
-          ...publicJob(job),
+          ...publicJob(job, locale),
           source,
           source_title: source?.title ?? null,
           source_mime_type: source?.mime_type ?? null,
@@ -882,7 +884,7 @@ export async function PATCH(request: NextRequest) {
       schedulePendingJob(result.id, user.id, locale);
     }
     return NextResponse.json(
-      { jobId: result.id, ...publicJob(result) },
+      { jobId: result.id, ...publicJob(result, locale) },
       { status: parsed.data.action === 'pause' ? 200 : 202 },
     );
   } catch (error) {

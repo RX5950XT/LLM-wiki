@@ -807,16 +807,17 @@ export async function writePageForWorkspace(
   let contentToWrite = content_md;
   let frontmatter: Record<string, unknown> = {};
   let previousContent: string | null = null;
+  const today = new Date().toISOString().slice(0, 10);
   if (existing) {
     previousContent = await readDriveFile(deps.drive, existing.drive_file_id);
-    const merged = mergePageFrontmatter(previousContent, content_md, sourceId);
+    const merged = mergePageFrontmatter(previousContent, content_md, sourceId, today);
     if (hasSuspiciousShortening(previousContent, merged.content)) {
       return { error: 'SUSPECTED_TRUNCATION' as const };
     }
     contentToWrite = merged.content;
     frontmatter = merged.frontmatter;
   } else {
-    const merged = mergePageFrontmatter('', content_md, sourceId);
+    const merged = mergePageFrontmatter('', content_md, sourceId, today);
     contentToWrite = merged.content;
     frontmatter = merged.frontmatter;
   }

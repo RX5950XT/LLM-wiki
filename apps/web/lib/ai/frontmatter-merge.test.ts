@@ -7,6 +7,16 @@ import {
 } from './frontmatter-merge';
 
 describe('mergePageFrontmatter', () => {
+  it('stamps dates from the server, not the model', () => {
+    const proposed = '---\ncreated: 2026-11-28\nupdated: 2026-11-28\n---\nBody.';
+    const fresh = mergePageFrontmatter('', proposed, undefined, '2026-10-17');
+    expect(fresh.frontmatter).toMatchObject({ created: '2026-10-17', updated: '2026-10-17' });
+    const kept = mergePageFrontmatter('---\ncreated: 2026-07-14\n---\nOld.', proposed, undefined, '2026-10-17');
+    expect(kept.frontmatter).toMatchObject({ created: '2026-07-14', updated: '2026-10-17' });
+    const untouched = mergePageFrontmatter('', '---\ntitle: "T"\n---\nBody.', undefined, '2026-10-17');
+    expect(untouched.frontmatter).not.toHaveProperty('updated');
+  });
+
   it('unions protected lists and keeps unknown old blocks', () => {
     const current = `---
 title: "Existing"

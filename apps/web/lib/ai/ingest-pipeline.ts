@@ -292,6 +292,46 @@ async function auditWrittenPages(
   return { audit, issues };
 }
 
+const MAX_PRELOADED_PAGE_CHARS = 16_000;
+const MAX_PRELOADED_TOTAL_CHARS = 80_000;
+
+/**
+ * Current content of the planned pages that already exist, so the model can rewrite
+ * them without a readPage step each. Oversized or unreadable pages are left to readPage.
+ */
+async function loadCurrentPages(
+  ctx: IngestContext,
+  slugs: readonly string[],
+): Promise<Array<{ slug: string; content: string }>> {
+  if (slugs.length === 0) return [];
+  const { data, error } = await ctx.supabase
+    .from('pages')
+    .select('slug, drive_file_id')
+    .eq('workspace_id', ctx.workspaceId)
+    .in('slug', [...slugs]);
+  if (error) console.warn('[ingest] preload lookup failed', { error: error.message });
+  if (error || !data) return [];
+  const pages = await Promise.all(
+    (data as Array<{ slug: string; drive_file_id: string | null }>)
+      .filter((row) => row.drive_file_id)
+      .map(async (row) => {
+        try {
+          return { slug: row.slug, content: await readDriveFile(ctx.drive, row.drive_file_id!) };
+        } catch (readError) {
+          console.warn('[ingest] preload read failed', { slug: row.slug, error: readError });
+          return null;
+        }
+      }),
+  );
+  let total = 0;
+  return pages.filter((page): page is { slug: string; content: string } => {
+    if (!page || page.content.length > MAX_PRELOADED_PAGE_CHARS) return false;
+    if (total + page.content.length > MAX_PRELOADED_TOTAL_CHARS) return false;
+    total += page.content.length;
+    return true;
+  });
+}
+
 /**
  * Two-stage, resumable source compilation. The job row is the checkpoint and
  * attemptToken fences every status/checkpoint write; each page write commits
@@ -376,7 +416,13 @@ export async function runIngestPipeline(ctx: IngestContext): Promise<string[]> {
     const messages: ModelMessage[] = [
       {
         role: 'user',
-        content: buildIngestWritePrompt(ctx.sourceTitle, ctx.sourceContent, plan, [...touched]),
+        content: buildIngestWritePrompt(
+          ctx.sourceTitle,
+          ctx.sourceContent,
+          plan,
+          [...touched],
+          await loadCurrentPages(ctx, plan.target_pages.filter((slug) => !touched.has(slug))),
+        ),
       },
     ];
     let lastWriteError: unknown = null;

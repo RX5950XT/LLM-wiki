@@ -1294,6 +1294,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                 val response = sendAuthorizedRequest { accessToken ->
                     AndroidHttpClient.instance.patch(webApiUrl("/api/ingest")) {
                         header("Authorization", "Bearer $accessToken")
+                        header("x-llm-wiki-locale", currentUiLocale())
                         contentType(ContentType.Application.Json)
                         setBody(body)
                     }
@@ -1341,6 +1342,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
         val response = sendAuthorizedRequest { accessToken ->
             AndroidHttpClient.instance.get(webApiUrl("/api/ingest?workspace_id=$wsId")) {
                 header("Authorization", "Bearer $accessToken")
+                header("x-llm-wiki-locale", currentUiLocale())
             }
         } ?: throw IllegalStateException(unauthorizedMessage())
         val text = response.bodyAsText()

@@ -157,6 +157,7 @@ function buildFrontmatter(
   oldBlocks: FrontmatterBlock[],
   newBlocks: FrontmatterBlock[],
   sourceId?: string,
+  today?: string,
 ): { blocks: string[]; frontmatter: Record<string, unknown> } {
   const oldMap = blockMap(oldBlocks);
   const newMap = blockMap(newBlocks);
@@ -177,6 +178,14 @@ function buildFrontmatter(
       continue;
     }
 
+    // The model does not know today's date (it wrote created: <a month ahead>); the server does.
+    if (today && (key === 'updated' || key === 'created')) {
+      const kept = key === 'created' ? oldBlock?.value : undefined;
+      const value = typeof kept === 'string' && kept <= today ? kept : today;
+      output.push(...formatKnownBlock(key, value));
+      frontmatter[key] = value;
+      continue;
+    }
     const block = newBlock ?? oldBlock;
     if (!block) continue;
     output.push(...block.lines);
@@ -203,10 +212,11 @@ export function mergePageFrontmatter(
   currentContent: string,
   proposedContent: string,
   sourceId?: string,
+  today?: string,
 ): FrontmatterMergeResult {
   const current = splitDocument(currentContent);
   const proposed = splitDocument(proposedContent);
-  const { blocks, frontmatter } = buildFrontmatter(current.blocks, proposed.blocks, sourceId);
+  const { blocks, frontmatter } = buildFrontmatter(current.blocks, proposed.blocks, sourceId, today);
 
   if (blocks.length === 0) {
     return {
