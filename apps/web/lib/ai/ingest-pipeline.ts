@@ -438,12 +438,18 @@ export async function runIngestPipeline(ctx: IngestContext): Promise<string[]> {
     const toolStartedAt = new Map<string, number>();
     const plannedTargets = plan.target_pages;
     const unwrittenTargets = () => plannedTargets.filter((slug) => !touched.has(slug));
+    // index.md / log.md are not plan targets, so a model that stopped after the targets left the
+    // new pages unindexed and the import unlogged. Nudge for them too, but never fail the job on them.
+    const unwrittenWrites = () => [
+      ...unwrittenTargets(),
+      ...['index.md', 'log.md'].filter((slug) => !touched.has(slug)),
+    ];
 
     for (let attempt = 0; attempt < MAX_WRITE_ATTEMPTS; attempt += 1) {
       // A review checkpoint means writing already finished; a retry only re-runs the review.
       if (Date.now() > deadline || checkpoint.review) break;
       if (attempt > 0) {
-        messages.push({ role: 'user', content: nudgeForRemaining(unwrittenTargets()) });
+        messages.push({ role: 'user', content: nudgeForRemaining(unwrittenWrites()) });
       }
       try {
         // Streaming, not generateText: only a stream lets createLLMClient re-send a provider call that
@@ -501,7 +507,7 @@ export async function runIngestPipeline(ctx: IngestContext): Promise<string[]> {
         if (streamError) throw streamError;
         messages.push(...(await result.response).messages);
         lastWriteError = null;
-        if (unwrittenTargets().length === 0) break;
+        if (unwrittenWrites().length === 0) break;
       } catch (error) {
         console.warn('[ingest] write attempt failed', { jobId: ctx.jobId, attempt, error: error instanceof Error ? error.message : error });
         lastWriteError = error;

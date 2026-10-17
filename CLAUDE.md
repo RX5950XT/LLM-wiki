@@ -550,6 +550,7 @@ Conversation panel 輸入框左側的 `Bot` 按鈕是**多功能選單**：「�
 - **時間預算從「請求開始」算，不是從 pipeline 開始算（`startedAt`，2026-10-18）**：Vercel 的 300 秒從 POST 進來就開始計。實測自動路由那一次 `generateText` 卡了 150 秒，pipeline 才開始又自己算 210/260 秒，結果被砍、job 停在 `running`。POST 把 `startedAt` 一路傳進 `runPendingIngestJob` → pipeline；路由呼叫另有 20 秒上限（`ROUTING_TIMEOUT_MS`，超時就照「未判斷」放回目前工作區）。
 - **`consumeStream()` 必須帶 `onError`（勿回退）**：串流在中途被 150 秒上限切斷時，AI SDK 不呼叫 `streamText` 的 `onError`、`consumeStream()` 預設吞掉 AbortError，`result.response` 則**永遠不 resolve**——寫入迴圈卡在那裡，預算與 hard stop 全失效，直到 Vercel 砍掉。已用 MockLanguageModel 重現。
 - **模型不知道今天幾號，所有會寫日期的提示都要給（`wikiToday()`，`lib/ai/frontmatter-merge.ts`）**：frontmatter 由伺服器蓋，但 log.md 內文的 `[YYYY-MM-DD]` 是模型寫的，實測寫成晚一個多月。ingest 寫入提示、維護 pipeline 與 `/api/query` 的 system prompt 都帶台灣日期；伺服器自己產生的日期（synthesis 頁尾、筆記 created）也一律用 `wikiToday()`，不要用 UTC 的 `toISOString()` 或伺服器 locale 的 `toLocaleDateString()`。2026-10-18 已把 5 個工作區 log.md 共 19 筆錯誤日期改回實際匯入完成日。
+- **寫入迴圈也要等 index.md / log.md（`unwrittenWrites`）**：兩者不是 plan target，舊版目標頁寫完就結束；實測模型寫完 9 頁就停，新頁沒進索引、日誌沒有這筆。現在缺這兩頁會繼續 nudge，但只缺它們不會讓 job 失敗。
 - **匯入錯誤由伺服器依語言翻譯（`lib/ai/ingest-error-i18n.ts`）**：DB 存英文原文，`GET/PATCH /api/ingest` 回應與網址抓取失敗訊息依 `x-llm-wiki-locale` / `NEXT_LOCALE` 翻成中文，Web 與 Android 不各自維護翻譯。新增錯誤訊息時要同步補對照表；未知訊息原樣傳出。
   - base URL 是 `openrouter.ai` 且請求沒指定推理強度時，預設 `reasoning: { effort: 'medium' }`。OpenAI 風格的 `reasoning_effort` 欄位 OpenRouter 會忽略（實測仍卡住）。
 - `/api/query`：70 秒後 `prepareStep` 改 `toolChoice: 'none'` 逼模型用已讀內容作答；105 秒 hard stop 並串流說明「逾時」，不再讓 Vercel 砍掉；每一步都印 `[query] step`（elapsedMs / tools / tokens）——慢的時候讀 log，不要猜。
