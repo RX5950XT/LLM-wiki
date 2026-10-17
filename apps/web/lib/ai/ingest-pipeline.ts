@@ -1,5 +1,5 @@
 import { createHash } from 'crypto';
-import { APICallError, generateText, stepCountIs, type ModelMessage } from 'ai';
+import { APICallError, stepCountIs, streamText, type ModelMessage } from 'ai';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { drive_v3 } from 'googleapis';
 import { createLLMClient } from './client';
@@ -388,8 +388,14 @@ export async function runIngestPipeline(ctx: IngestContext): Promise<string[]> {
         messages.push({ role: 'user', content: nudgeForRemaining(unwrittenTargets()) });
       }
       try {
-        const result = await generateText({
+        // Streaming, not generateText: only a stream lets createLLMClient re-send a provider call that
+        // sends nothing (a non-stream call that stalls burns 150s on one tiny step, then the budget).
+        let streamError: unknown = null;
+        const result = streamText({
           model,
+          onError: ({ error }) => {
+            streamError = error;
+          },
           system: ctx.systemPrompt,
           messages,
           tools,
@@ -422,7 +428,9 @@ export async function runIngestPipeline(ctx: IngestContext): Promise<string[]> {
             if (await isPaused(ctx)) pauseAfterStep = true;
           },
         });
-        messages.push(...result.response.messages);
+        await result.consumeStream();
+        if (streamError) throw streamError;
+        messages.push(...(await result.response).messages);
         lastWriteError = null;
         if (unwrittenTargets().length === 0) break;
       } catch (error) {
