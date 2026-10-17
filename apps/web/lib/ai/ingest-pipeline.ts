@@ -440,7 +440,8 @@ export async function runIngestPipeline(ctx: IngestContext): Promise<string[]> {
     const unwrittenTargets = () => plannedTargets.filter((slug) => !touched.has(slug));
 
     for (let attempt = 0; attempt < MAX_WRITE_ATTEMPTS; attempt += 1) {
-      if (Date.now() > deadline) break;
+      // A review checkpoint means writing already finished; a retry only re-runs the review.
+      if (Date.now() > deadline || checkpoint.review) break;
       if (attempt > 0) {
         messages.push({ role: 'user', content: nudgeForRemaining(unwrittenTargets()) });
       }
@@ -525,15 +526,9 @@ export async function runIngestPipeline(ctx: IngestContext): Promise<string[]> {
       throw error;
     }
 
-    if (checkpoint.review) {
-      // A retry after a crash may already have a review checkpoint. An incomplete
-      // review is a failed ingest, never a path to a false done status.
-      if (!checkpoint.review.complete) {
-        const error = new Error(`Ingest review incomplete: ${checkpoint.review.issues.join('; ')}`);
-        await markFailed(ctx, error, checkpoint, 'review');
-        throw error;
-      }
-    } else {
+    // A retry keeps a passed review; an incomplete one is re-checked (the pages may have
+    // landed since), and still fails rather than reaching a false done status.
+    if (!checkpoint.review?.complete) {
       await saveCheckpoint(ctx, 'review', checkpoint);
       if (await isPaused(ctx)) return markPaused(ctx, 'review', checkpoint);
       const pageAudit = await auditWrittenPages(ctx, sourceId, plan, [...touched]);
@@ -555,7 +550,9 @@ export async function runIngestPipeline(ctx: IngestContext): Promise<string[]> {
               .map((issue) => issue.replace('Missing planned page: ', '')),
           ]),
           issues: uniqueSlugs([...review.issues, ...pageAudit.issues]),
-          complete: review.complete && pageAudit.issues.length === 0,
+          // Whether the pages landed is checked by code; the model's content quibbles are kept in
+          // `issues` but must not fail an ingest whose every planned page exists with its source.
+          complete: pageAudit.issues.length === 0,
         },
       };
       await saveCheckpoint(ctx, 'review', checkpoint);

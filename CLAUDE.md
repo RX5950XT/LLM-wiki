@@ -545,6 +545,8 @@ Conversation panel 輸入框左側的 `Bot` 按鈕是**多功能選單**：「�
   - **串流中途沉默也算卡住（2026-10-18）**：資料開始傳之後停住，舊版要等 150 秒上限才斷。`resumeBody` 現在 45 秒（`LLM_STREAM_IDLE_TIMEOUT_MS`）沒有新資料就切斷並印 `[llm] stream went silent mid-response`；ingest 寫入最多試 4 次（仍受 210s 預算）。非串流呼叫（plan / review）撞到 150 秒上限時，job 錯誤也顯示成 `FIRST_DATA_TIMEOUT_MESSAGE`。
   - **寫入前先預讀計畫中的舊頁面（`loadCurrentPages`）**：每一步都會重送整份來源，舊頁面若要先 readPage 再 writePage，步數加倍，長文章一輪只能補 1–2 頁。現在把還沒寫的既有頁內容（單頁 16k、合計 80k 字元內）直接放進寫入 prompt。實測：4 篇文章（含 36KB 長文）全部一輪完成，每篇 3–4 分鐘。
 - **頁面日期由伺服器蓋（`mergePageFrontmatter` 的 `today`，勿回退）**：模型不知道今天幾號，實測寫出比實際晚一個月的 `created`。`writePageForWorkspace` 傳入台灣時區（Asia/Taipei）的今天：`updated` 一律今天；`created` 沿用舊頁的值（比今天晚的視為捏造，改今天），新頁為今天。頁面本來沒有這兩個欄位就不加。
+- **複查是否通過由程式判斷（2026-10-18）**：計畫頁面都存在且 frontmatter 有這個來源就算完成；複查模型的內容意見（說法不一致、細節未驗證）只記在 `review.issues`，不可讓整篇失敗（Haiku 實測寫完 9 頁仍被自己的複查判失敗）。重試時已寫完的 job 只重跑複查、不重寫。
+- **lease 被新 attempt 取代就停（`IngestLeaseLostError` 不重試）**：舊版會繼續重試寫入，兩輪同時寫同一頁、互相把對方的 Drive 檔丟進垃圾桶，複查讀到 `DRIVE_FILE_TRASHED`。
 - **匯入錯誤由伺服器依語言翻譯（`lib/ai/ingest-error-i18n.ts`）**：DB 存英文原文，`GET/PATCH /api/ingest` 回應與網址抓取失敗訊息依 `x-llm-wiki-locale` / `NEXT_LOCALE` 翻成中文，Web 與 Android 不各自維護翻譯。新增錯誤訊息時要同步補對照表；未知訊息原樣傳出。
   - base URL 是 `openrouter.ai` 且請求沒指定推理強度時，預設 `reasoning: { effort: 'medium' }`。OpenAI 風格的 `reasoning_effort` 欄位 OpenRouter 會忽略（實測仍卡住）。
 - `/api/query`：70 秒後 `prepareStep` 改 `toolChoice: 'none'` 逼模型用已讀內容作答；105 秒 hard stop 並串流說明「逾時」，不再讓 Vercel 砍掉；每一步都印 `[query] step`（elapsedMs / tools / tokens）——慢的時候讀 log，不要猜。
