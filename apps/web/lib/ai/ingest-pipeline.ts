@@ -484,7 +484,13 @@ export async function runIngestPipeline(ctx: IngestContext): Promise<string[]> {
             if (await isPaused(ctx)) pauseAfterStep = true;
           },
         });
-        await result.consumeStream();
+        // A stream aborted mid-response (request timeout) skips onError and leaves
+        // `result.response` pending forever; consumeStream swallows it unless asked.
+        await result.consumeStream({
+          onError: (error) => {
+            streamError = error;
+          },
+        });
         if (streamError) throw streamError;
         messages.push(...(await result.response).messages);
         lastWriteError = null;
