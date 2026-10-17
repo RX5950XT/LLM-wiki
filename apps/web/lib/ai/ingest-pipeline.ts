@@ -504,7 +504,8 @@ export async function runIngestPipeline(ctx: IngestContext): Promise<string[]> {
       } catch (error) {
         console.warn('[ingest] write attempt failed', { jobId: ctx.jobId, attempt, error: error instanceof Error ? error.message : error });
         lastWriteError = error;
-        if (attempt + 1 >= MAX_WRITE_ATTEMPTS) throw error;
+        // A newer attempt owns the job now; writing on would race it page by page.
+        if (error instanceof IngestLeaseLostError || attempt + 1 >= MAX_WRITE_ATTEMPTS) throw error;
       }
     }
 
