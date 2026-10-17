@@ -807,7 +807,8 @@ export async function writePageForWorkspace(
   let contentToWrite = content_md;
   let frontmatter: Record<string, unknown> = {};
   let previousContent: string | null = null;
-  const today = new Date().toISOString().slice(0, 10);
+  // shortcut: the wiki's day is Taiwan's day (the app's users); switch to a per-user time zone if that changes.
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
   if (existing) {
     previousContent = await readDriveFile(deps.drive, existing.drive_file_id);
     const merged = mergePageFrontmatter(previousContent, content_md, sourceId, today);
