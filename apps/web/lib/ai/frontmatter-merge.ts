@@ -1,3 +1,8 @@
+// shortcut: the wiki's day is Taiwan's day (the app's users); switch to a per-user time zone if that changes.
+export function wikiToday(now = new Date()): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(now);
+}
+
 export type FrontmatterValue =
   | string
   | number

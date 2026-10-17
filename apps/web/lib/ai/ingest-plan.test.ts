@@ -45,6 +45,7 @@ describe('ingest plan contract', () => {
     const writePrompt = buildIngestWritePrompt('Source', 'raw text', PLAN, ['entities/ada.md']);
     expect(writePrompt).toContain('entities/ada.md');
     expect(writePrompt).toContain('writePage');
+    expect(buildIngestWritePrompt('S', 'raw', PLAN, [], [], '2026-10-18')).toContain('Today is 2026-10-18');
 
     const reviewPrompt = buildIngestReviewPrompt('Source', PLAN, ['entities/ada.md'], [
       { slug: 'entities/ada.md', exists: true, source_present: true, body_preview: 'body' },
