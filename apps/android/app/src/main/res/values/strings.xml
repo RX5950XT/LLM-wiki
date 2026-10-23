@@ -119,6 +119,11 @@
     <string name="graph_insights_empty">No graph data yet</string>
     <string name="graph_view_title">Knowledge graph</string>
     <string name="graph_orphans">%1$d pages · %2$d unlinked</string>
+    <string name="graph_legend_entity">Entity</string>
+    <string name="graph_legend_concept">Concept</string>
+    <string name="graph_legend_summary">Summary</string>
+    <string name="graph_legend_synthesis">Synthesis</string>
+    <string name="graph_legend_other">Other</string>
     <string name="wiki_tools">Tools</string>
     <string name="wiki_page_actions">Page actions</string>
     <string name="wiki_lock_page">Lock page</string>

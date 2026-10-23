@@ -6,6 +6,13 @@ import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -13,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -30,6 +38,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
@@ -55,16 +64,37 @@ import kotlin.math.sqrt
 private class GraphNode(val slug: String, val label: String, val kind: String, val degree: Int, var x: Float, var y: Float)
 
 // Mirrors KIND_COLOR / KIND_COLOR_DARK in apps/web/components/wiki/graph-view.tsx
-private fun kindColor(kind: String, dark: Boolean): Color {
+private val KIND_GROUPS = listOf("entity", "concept", "summary", "synthesis", "other")
+
+private fun kindGroup(kind: String): String {
     val k = kind.lowercase()
     return when {
-        k.startsWith("entit") -> if (dark) Color(0xFF8FC9F5) else Color(0xFF4EA8DE)
-        k.startsWith("concept") -> if (dark) Color(0xFF75E4D8) else Color(0xFF2EC4B6)
-        k.startsWith("summar") -> if (dark) Color(0xFFB1B9FF) else Color(0xFF7B8ED8)
-        k.startsWith("synthes") -> if (dark) Color(0xFFFFD18A) else Color(0xFFE8A33D)
-        else -> if (dark) Color(0xFFC4CCD5) else Color(0xFF8B9095)
+        k.startsWith("entit") -> "entity"
+        k.startsWith("concept") -> "concept"
+        k.startsWith("summar") -> "summary"
+        k.startsWith("synthes") -> "synthesis"
+        else -> "other"
     }
 }
+
+private fun kindColor(kind: String, dark: Boolean): Color = when (kindGroup(kind)) {
+    "entity" -> if (dark) Color(0xFF8FC9F5) else Color(0xFF4EA8DE)
+    "concept" -> if (dark) Color(0xFF75E4D8) else Color(0xFF2EC4B6)
+    "summary" -> if (dark) Color(0xFFB1B9FF) else Color(0xFF7B8ED8)
+    "synthesis" -> if (dark) Color(0xFFFFD18A) else Color(0xFFE8A33D)
+    else -> if (dark) Color(0xFFC4CCD5) else Color(0xFF8B9095)
+}
+
+@Composable
+private fun kindLabel(group: String): String = stringResource(
+    when (group) {
+        "entity" -> R.string.graph_legend_entity
+        "concept" -> R.string.graph_legend_concept
+        "summary" -> R.string.graph_legend_summary
+        "synthesis" -> R.string.graph_legend_synthesis
+        else -> R.string.graph_legend_other
+    },
+)
 
 private fun nodeRadius(degree: Int): Float = min(3f + sqrt(degree.toFloat()) * 1.6f, 12f)
 
@@ -181,6 +211,9 @@ private fun GraphCanvas(pages: List<PageEntity>, edges: List<Pair<String, String
     val bySlug = remember(laidOut) { laidOut.associateBy { it.slug } }
     val labelled = remember(laidOut) { laidOut.sortedByDescending { it.degree }.take(8).map { it.slug }.toSet() }
     val orphanCount = laidOut.count { it.degree == 0 }
+    var hiddenKinds by remember { mutableStateOf(emptySet<String>()) }
+    // Legend and filter are the same control, like Web: the colour key is the switch.
+    val visible = laidOut.filter { kindGroup(it.kind) !in hiddenKinds }
 
     Column(Modifier.fillMaxSize()) {
         Text(
@@ -189,21 +222,43 @@ private fun GraphCanvas(pages: List<PageEntity>, edges: List<Pair<String, String
             color = labelColor,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
         )
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            KIND_GROUPS.forEach { group ->
+                val on = group !in hiddenKinds
+                val color = kindColor(group, dark)
+                FilterChip(
+                    selected = on,
+                    onClick = { hiddenKinds = if (on) hiddenKinds + group else hiddenKinds - group },
+                    label = { Text(kindLabel(group)) },
+                    leadingIcon = {
+                        Box(
+                            Modifier.size(10.dp).border(1.dp, color, CircleShape)
+                                .background(if (on) color else Color.Transparent, CircleShape),
+                        )
+                    },
+                    modifier = Modifier.alpha(if (on) 1f else 0.6f),
+                )
+            }
+        }
         Canvas(
             Modifier
-                .fillMaxSize()
+                .weight(1f)
+                .fillMaxWidth()
                 .pointerInput(Unit) {
                     detectTransformGestures { _, panChange, zoomChange, _ ->
                         zoom = (zoom * zoomChange).coerceIn(0.3f, 6f)
                         pan += panChange
                     }
                 }
-                .pointerInput(laidOut) {
+                .pointerInput(laidOut, hiddenKinds) {
                     detectTapGestures { tap ->
                         val fit = fitScale(laidOut, size.width.toFloat(), size.height.toFloat())
                         val s = fit * zoom
                         val cx = size.width / 2f + pan.x; val cy = size.height / 2f + pan.y
-                        val hit = laidOut.minByOrNull { n ->
+                        val hit = visible.minByOrNull { n ->
                             val px = cx + n.x * s - tap.x; val py = cy + n.y * s - tap.y
                             px * px + py * py
                         } ?: return@detectTapGestures
@@ -220,9 +275,10 @@ private fun GraphCanvas(pages: List<PageEntity>, edges: List<Pair<String, String
             fun radius(n: GraphNode) = max(nodeRadius(n.degree) * s * 1.2f, minR)
             edges.forEach { (a, b) ->
                 val na = bySlug[a] ?: return@forEach; val nb = bySlug[b] ?: return@forEach
+                if (kindGroup(na.kind) in hiddenKinds || kindGroup(nb.kind) in hiddenKinds) return@forEach
                 drawLine(edgeColor, pos(na), pos(nb), strokeWidth = 1.dp.toPx())
             }
-            laidOut.forEach { n ->
+            visible.forEach { n ->
                 val r = radius(n)
                 val color = kindColor(n.kind, dark)
                 // Orphans are hollow: an unlinked page is a finding, not noise (same as Web)
@@ -231,7 +287,7 @@ private fun GraphCanvas(pages: List<PageEntity>, edges: List<Pair<String, String
             }
             // Hubs label first; a label that would overlap one already drawn is skipped.
             val taken = ArrayList<Rect>()
-            laidOut.sortedByDescending { it.degree }.forEach { n ->
+            visible.sortedByDescending { it.degree }.forEach { n ->
                 if (zoom < 1.5f && n.slug !in labelled) return@forEach
                 val p = pos(n)
                 val layout = measurer.measure(n.label.take(24), TextStyle(fontSize = 11.sp, color = labelColor))
