@@ -7,6 +7,24 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Column
@@ -21,12 +39,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DragIndicator
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -73,9 +86,10 @@ internal fun WorkspaceMenuList(
     currentId: String?,
     onSelect: (WorkspaceRow) -> Unit,
     onMove: (WorkspaceRow, Int) -> Unit,
-    onRename: (WorkspaceRow) -> Unit,
+    onRename: (WorkspaceRow, String) -> Unit,
     onDelete: (WorkspaceRow) -> Unit,
 ) {
+    var editingId by remember { mutableStateOf<String?>(null) }
     val rowPx = with(LocalDensity.current) { RowHeight.toPx() }
     val haptic = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
@@ -133,10 +147,16 @@ internal fun WorkspaceMenuList(
                     name = workspace.name,
                     selected = workspace.id == currentId,
                     dragging = isDragging,
+                    editing = workspace.id == editingId,
                     onClick = {
                         if (suppressClick) suppressClick = false else onSelect(workspace)
                     },
-                    onRename = { onRename(workspace) },
+                    onStartRename = { editingId = workspace.id },
+                    onCommitRename = { newName ->
+                        editingId = null
+                        onRename(workspace, newName)
+                    },
+                    onCancelRename = { editingId = null },
                     onDelete = { onDelete(workspace) },
                     modifier = Modifier
                         .zIndex(if (isDragging) 1f else 0f)
@@ -152,7 +172,8 @@ internal fun WorkspaceMenuList(
                                 if (index < workspaces.lastIndex) add(CustomAccessibilityAction(moveDown) { onMove(workspace, index + 1); true })
                             }
                         }
-                        .pointerInput(workspace.id) {
+                        .pointerInput(workspace.id, editingId) {
+                            if (editingId != null) return@pointerInput // no dragging while a name is being edited
                             detectDragGesturesAfterLongPress(
                                 onDragStart = {
                                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -181,12 +202,14 @@ private fun WorkspaceMenuRow(
     name: String,
     selected: Boolean,
     dragging: Boolean,
+    editing: Boolean,
     onClick: () -> Unit,
-    onRename: () -> Unit,
+    onStartRename: () -> Unit,
+    onCommitRename: (String) -> Unit,
+    onCancelRename: () -> Unit,
     onDelete: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var showActions by remember { mutableStateOf(false) }
     val colors = MaterialTheme.colorScheme
     val background = when {
         dragging -> colors.surfaceContainerHighest
@@ -200,7 +223,8 @@ private fun WorkspaceMenuRow(
             .padding(horizontal = 6.dp)
             .clip(RoundedCornerShape(12.dp))
             .background(background)
-            .clickable(onClick = onClick)
+            .clickable(enabled = !editing, onClick = onClick)
+            .semantics { this.selected = selected }
             .padding(start = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -211,43 +235,67 @@ private fun WorkspaceMenuRow(
             modifier = Modifier.size(20.dp),
         )
         Spacer(Modifier.width(10.dp))
-        Text(
-            name,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            style = MaterialTheme.typography.bodyLarge,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-            color = if (selected) colors.primary else colors.onSurface,
-            modifier = Modifier.weight(1f),
-        )
-        if (selected) {
-            Icon(
-                Icons.Default.Check,
-                contentDescription = stringResource(R.string.wiki_current_workspace),
-                tint = colors.primary,
-                modifier = Modifier.size(18.dp),
-            )
-        }
-        IconButton(onClick = { showActions = true }) {
-            Icon(
-                Icons.Default.MoreVert,
-                contentDescription = stringResource(R.string.workspace_actions),
-                tint = colors.onSurfaceVariant,
-                modifier = Modifier.size(20.dp),
-            )
-            DropdownMenu(expanded = showActions, onDismissRequest = { showActions = false }) {
-                DropdownMenuItem(
-                    text = { Text(stringResource(R.string.workspace_rename_title)) },
-                    leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
-                    onClick = { showActions = false; onRename() },
-                )
-                DropdownMenuItem(
-                    text = { Text(stringResource(R.string.workspace_delete_title), color = colors.error) },
-                    leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = colors.error) },
-                    onClick = { showActions = false; onDelete() },
-                )
+        if (editing) {
+            // Explorer-style: whole name selected, so typing replaces it
+            var value by remember(name) { mutableStateOf(TextFieldValue(name, TextRange(0, name.length))) }
+            val commit = {
+                val trimmed = value.text.trim()
+                if (trimmed.isEmpty() || trimmed == name) onCancelRename() else onCommitRename(trimmed)
             }
+            InlineNameField(value, { value = it }, commit, Modifier.weight(1f))
+            ActionIcon(Icons.Default.Check, stringResource(R.string.action_save), colors.primary, commit)
+            ActionIcon(Icons.Default.Close, stringResource(R.string.action_cancel), colors.onSurfaceVariant, onCancelRename)
+        } else {
+            Text(
+                name,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                color = if (selected) colors.primary else colors.onSurface,
+                modifier = Modifier.weight(1f),
+            )
+            ActionIcon(Icons.Outlined.Edit, stringResource(R.string.workspace_rename_title), colors.onSurfaceVariant, onStartRename)
+            ActionIcon(Icons.Outlined.Delete, stringResource(R.string.workspace_delete_title), colors.onSurfaceVariant, onDelete)
         }
+    }
+}
+
+/** The workspace name as an in-place text field, focused with the keyboard up. */
+@Composable
+private fun InlineNameField(
+    value: TextFieldValue,
+    onValueChange: (TextFieldValue) -> Unit,
+    onDone: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val focus = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
+    val colors = MaterialTheme.colorScheme
+    LaunchedEffect(Unit) {
+        focus.requestFocus()
+        keyboard?.show()
+    }
+    BasicTextField(
+        value = value,
+        onValueChange = onValueChange,
+        singleLine = true,
+        textStyle = MaterialTheme.typography.bodyLarge.copy(color = colors.onSurface),
+        cursorBrush = SolidColor(colors.primary),
+        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+        keyboardActions = KeyboardActions(onDone = { onDone() }),
+        modifier = modifier
+            .focusRequester(focus)
+            .border(1.5.dp, colors.primary, RoundedCornerShape(8.dp))
+            .background(colors.surface, RoundedCornerShape(8.dp))
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+    )
+}
+
+@Composable
+private fun ActionIcon(icon: ImageVector, label: String, tint: Color, onClick: () -> Unit) {
+    IconButton(onClick = onClick, modifier = Modifier.size(44.dp)) {
+        Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(20.dp))
     }
 }
 

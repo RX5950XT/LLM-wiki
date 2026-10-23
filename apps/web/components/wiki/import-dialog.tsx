@@ -530,7 +530,7 @@ export function ImportDialog({
       <div
         ref={dialogRef}
         tabIndex={-1}
-        className="relative flex max-h-[90vh] w-full max-w-xl flex-col gap-4 overflow-y-auto rounded-xl border p-5 shadow-2xl"
+        className="relative flex max-h-[90vh] w-full max-w-xl flex-col gap-4 overflow-y-auto rounded-2xl border p-5 shadow-2xl"
         style={{ background: 'var(--bg)', borderColor: 'var(--border)' }}
       >
         <div className="flex items-center justify-between gap-3">

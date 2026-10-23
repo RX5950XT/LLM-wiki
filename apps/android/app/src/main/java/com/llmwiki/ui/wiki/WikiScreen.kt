@@ -105,6 +105,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.layout.onSizeChanged
@@ -185,7 +188,6 @@ fun WikiScreen(
     var showGraphDialog by rememberSaveable { mutableStateOf(false) }
     var showMaintenanceConfirm by rememberSaveable { mutableStateOf(false) }
     var showSignOutConfirm by rememberSaveable { mutableStateOf(false) }
-    var renameWorkspace by remember { mutableStateOf<WorkspaceRow?>(null) }
     var deleteWorkspace by remember { mutableStateOf<WorkspaceRow?>(null) }
     var inlineEditorPageSlug by rememberSaveable { mutableStateOf<String?>(null) }
     var inlineEditorValue by rememberSaveable(stateSaver = TextFieldValue.Saver) {
@@ -360,10 +362,7 @@ fun WikiScreen(
                                 scope.launch { drawerState.close() }
                             },
                             onMove = { workspace, toIndex -> wikiViewModel.moveWorkspace(workspace, toIndex) },
-                            onRename = { workspace ->
-                                showWorkspaceMenu = false
-                                renameWorkspace = workspace
-                            },
+                            onRename = { workspace, newName -> wikiViewModel.renameWorkspace(workspace, newName) },
                             onDelete = { workspace ->
                                 showWorkspaceMenu = false
                                 deleteWorkspace = workspace
@@ -574,10 +573,14 @@ fun WikiScreen(
                                 value = uiState.searchQuery,
                                 onValueChange = { wikiViewModel.updateSearchQuery(it) },
                                 placeholder = { Text(stringResource(R.string.wiki_search_placeholder)) },
+                                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                                 modifier = Modifier
                                     .fillMaxWidth()
+                                    .padding(end = 4.dp)
                                     .focusRequester(searchFocusRequester),
                                 singleLine = true,
+                                shape = CircleShape,
+                                colors = softFieldColors(),
                                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                                 keyboardActions = KeyboardActions(onSearch = {}),
                             )
@@ -1157,18 +1160,6 @@ fun WikiScreen(
         )
     }
 
-    renameWorkspace?.let { workspace ->
-        WorkspaceRenameDialog(
-            workspace = workspace,
-            isLoading = uiState.workspaceActionLoading,
-            onDismiss = { renameWorkspace = null },
-            onConfirm = { newName ->
-                wikiViewModel.renameWorkspace(workspace, newName)
-                renameWorkspace = null
-            },
-        )
-    }
-
     deleteWorkspace?.let { workspace ->
         WorkspaceDeleteDialog(
             workspace = workspace,
@@ -1180,43 +1171,6 @@ fun WikiScreen(
             },
         )
     }
-}
-
-@Composable
-private fun WorkspaceRenameDialog(
-    workspace: WorkspaceRow,
-    isLoading: Boolean,
-    onDismiss: () -> Unit,
-    onConfirm: (String) -> Unit,
-) {
-    var name by remember(workspace.id) { mutableStateOf(workspace.name) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.workspace_rename_title)) },
-        text = {
-            OutlinedTextField(
-                value = name,
-                onValueChange = { name = it },
-                label = { Text(stringResource(R.string.workspace_name)) },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
-        },
-        confirmButton = {
-            Button(
-                onClick = { onConfirm(name) },
-                enabled = name.trim().isNotBlank() && !isLoading,
-            ) {
-                Text(stringResource(R.string.action_save))
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.action_cancel))
-            }
-        },
-    )
 }
 
 @Composable
@@ -1610,16 +1564,18 @@ private fun ChatBottomSheet(
 
             Row(
                 Modifier.fillMaxWidth().padding(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                // Bottom-aligned so the buttons stay put when the input grows to several lines
+                verticalAlignment = Alignment.Bottom,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 // Action menu: import content/file + model selection
-                Box {
+                Box(Modifier.padding(vertical = 4.dp)) {
                     IconButton(
                         onClick = { showActionMenu = true },
-                        modifier = Modifier.size(56.dp),
+                        modifier = Modifier.size(48.dp),
                         colors = IconButtonDefaults.iconButtonColors(
-                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                            contentColor = MaterialTheme.colorScheme.primary,
                         ),
                     ) {
                         Icon(
@@ -1744,6 +1700,8 @@ private fun ChatBottomSheet(
                     placeholder = { Text(stringResource(R.string.wiki_chat_input_hint)) },
                     modifier = Modifier.weight(1f).heightIn(min = 56.dp),
                     maxLines = 4,
+                    shape = RoundedCornerShape(28.dp),
+                    colors = softFieldColors(),
                     keyboardOptions = KeyboardOptions(
                         capitalization = KeyboardCapitalization.Sentences,
                         imeAction = ImeAction.Send,
@@ -1755,7 +1713,7 @@ private fun ChatBottomSheet(
                 if (isLoading) {
                     IconButton(
                         onClick = onStop,
-                        modifier = Modifier.size(56.dp),
+                        modifier = Modifier.padding(vertical = 4.dp).size(48.dp),
                         colors = IconButtonDefaults.iconButtonColors(
                             containerColor = MaterialTheme.colorScheme.surfaceVariant,
                             contentColor = MaterialTheme.colorScheme.onSurface,
@@ -1766,7 +1724,7 @@ private fun ChatBottomSheet(
                 } else IconButton(
                     onClick = { if (input.isNotBlank() && !isLoading) onSend(input) },
                     enabled = input.isNotBlank() && !isLoading,
-                    modifier = Modifier.size(56.dp),
+                    modifier = Modifier.padding(vertical = 4.dp).size(48.dp),
                     colors = IconButtonDefaults.iconButtonColors(
                         containerColor = MaterialTheme.colorScheme.primary,
                         contentColor = MaterialTheme.colorScheme.onPrimary,
@@ -2549,3 +2507,11 @@ private fun openExternalUrl(context: android.content.Context, raw: String) {
     if (!isSafeExternalUrl(raw)) return
     runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(raw.trim()))) }
 }
+
+/** Filled, borderless field: a soft surface with an accent outline only while focused. */
+@Composable
+private fun softFieldColors() = OutlinedTextFieldDefaults.colors(
+    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+    unfocusedBorderColor = Color.Transparent,
+)

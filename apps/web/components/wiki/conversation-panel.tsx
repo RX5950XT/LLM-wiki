@@ -747,11 +747,10 @@ export function ConversationPanel({
               type="button"
               onClick={() => setShowActionMenu((s) => !s)}
               disabled={isLoading}
-              className="flex min-h-11 min-w-11 h-full items-center gap-1 rounded-md border px-2.5 py-2 text-xs font-medium transition-all duration-100 hover:opacity-70 active:scale-95 focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-40"
+              className="flex h-11 w-11 items-center justify-center rounded-full transition-all duration-100 hover:opacity-80 active:scale-95 focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-40"
               style={{
-                background: 'var(--bg-2)',
-                borderColor: 'var(--border)',
-                color: 'var(--fg)',
+                background: 'var(--surface-secondary)',
+                color: 'var(--color-accent)',
               }}
               title={t('query.actionMenu')}
               aria-label={t('query.actionMenu')}
@@ -764,7 +763,7 @@ export function ConversationPanel({
             {showActionMenu && (
               <div
                 id="query-action-menu"
-                className="absolute bottom-full left-0 z-50 mb-1 w-60 overflow-hidden rounded-lg border shadow-lg"
+                className="absolute bottom-full left-0 z-50 mb-1 w-60 overflow-hidden rounded-2xl border shadow-lg"
                 style={{
                   background: 'var(--bg-2)',
                   borderColor: 'var(--border)',
@@ -871,7 +870,7 @@ export function ConversationPanel({
           {/* @-mention workspace dropdown */}
           {mentionQuery !== null && mentionCandidates.length > 0 && (
             <div
-              className="absolute bottom-full left-12 z-50 mb-1 w-56 overflow-hidden rounded-lg border shadow-lg"
+              className="absolute bottom-full left-12 z-50 mb-1 w-56 overflow-hidden rounded-2xl border shadow-lg"
               style={{ background: 'var(--bg-2)', borderColor: 'var(--border)' }}
               role="listbox"
             >
@@ -924,10 +923,10 @@ export function ConversationPanel({
               }
             }}
             placeholder={t('query.placeholder')}
-            className="min-w-0 flex-1 rounded-xl border px-3 py-2 text-sm outline-none"
+            className="h-11 min-w-0 flex-1 rounded-full border px-4 text-sm outline-none focus:border-[var(--color-accent)]"
             style={{
-              background: 'var(--bg-2)',
-              borderColor: 'var(--border)',
+              background: 'var(--surface-secondary)',
+              borderColor: 'transparent',
               color: 'var(--fg)',
             }}
             disabled={driveReconnectPending}
@@ -936,8 +935,8 @@ export function ConversationPanel({
             <button
               type="button"
               onClick={stopStreaming}
-                className="min-h-11 min-w-11 rounded-md p-2 focus-visible:outline-2 focus-visible:outline-offset-2"
-              style={{ background: 'var(--bg-2)', color: 'var(--fg)', border: '1px solid var(--border)' }}
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full focus-visible:outline-2 focus-visible:outline-offset-2"
+              style={{ background: 'var(--surface-secondary)', color: 'var(--fg)' }}
               aria-label={t('query.stop')}
               title={t('query.stop')}
             >
@@ -949,7 +948,7 @@ export function ConversationPanel({
               disabled={driveReconnectPending || !input.trim()}
               aria-label={t('query.send')}
               title={t('query.send')}
-              className="min-h-11 min-w-11 rounded-md p-2 focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-50"
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-50"
               style={{ background: 'var(--color-accent)', color: 'var(--on-accent)' }}
             >
               <Send size={16} />

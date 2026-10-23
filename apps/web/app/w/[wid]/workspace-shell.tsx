@@ -978,7 +978,7 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
                   onClick={() => setShowWsMenu(false)}
                 />
                 <div
-                  className="animate-dropdown absolute left-0 top-full z-50 mt-2 w-64 overflow-hidden rounded-xl border shadow-lg"
+                  className="animate-dropdown absolute left-0 top-full z-50 mt-2 w-64 overflow-hidden rounded-2xl border shadow-lg"
                   style={{ background: 'var(--bg-2)', borderColor: 'var(--border)' }}
                 >
                   {workspaceList.map((ws, wsIndex) => {
@@ -1098,7 +1098,7 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
 
             {showSearch && (
               <div
-                className="fixed left-3 right-3 top-16 z-50 overflow-hidden rounded-xl border shadow-lg md:absolute md:left-auto md:right-0 md:top-full md:mt-2 md:w-80"
+                className="fixed left-3 right-3 top-16 z-50 overflow-hidden rounded-2xl border shadow-lg md:absolute md:left-auto md:right-0 md:top-full md:mt-2 md:w-80"
                 style={{ background: 'var(--bg-2)', borderColor: 'var(--border)' }}
               >
                 <div className="px-3 py-2">
@@ -1126,8 +1126,8 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
                       }
                     }}
                     placeholder={t('query.searchWiki')}
-                    className="w-full rounded-md border px-3 py-1.5 text-sm outline-none"
-                    style={{ background: 'var(--bg)', borderColor: 'var(--border)', color: 'var(--fg)' }}
+                    className="w-full rounded-full border px-4 py-2 text-sm outline-none focus:border-[var(--color-accent)]"
+                    style={{ background: 'var(--surface-secondary)', borderColor: 'transparent', color: 'var(--fg)' }}
                   />
                 </div>
                 {searchLoading && (
@@ -1210,7 +1210,7 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
             {showTools && (
               <div
                 id="workspace-tools"
-                className="absolute right-0 top-full z-50 mt-2 w-60 rounded-xl border p-1.5 shadow-lg"
+                className="absolute right-0 top-full z-50 mt-2 w-60 rounded-2xl border p-1.5 shadow-lg"
                 style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
                 onClick={(event) => {
                   if ((event.target as Element).closest('button, a')) setShowTools(false);
@@ -1529,7 +1529,7 @@ function WorkspaceRenameDialog({
           event.preventDefault();
           onSubmit(name);
         }}
-        className="relative w-full max-w-sm space-y-4 rounded-xl border p-5 shadow-2xl"
+        className="relative w-full max-w-sm space-y-4 rounded-2xl border p-5 shadow-2xl"
         style={{ background: 'var(--bg)', borderColor: 'var(--border)', color: 'var(--fg)' }}
       >
         <h2 id="ws-rename-title" className="text-base font-semibold">{t('workspace.renameWorkspace')}</h2>
@@ -1578,7 +1578,7 @@ function WorkspaceDeleteDialog({
   return (
     <ModalShell labelId="ws-delete-title" onClose={onClose}>
       <section
-        className="relative w-full max-w-sm space-y-4 rounded-xl border p-5 shadow-2xl"
+        className="relative w-full max-w-sm space-y-4 rounded-2xl border p-5 shadow-2xl"
         style={{ background: 'var(--bg)', borderColor: 'var(--border)', color: 'var(--fg)' }}
       >
         <h2 id="ws-delete-title" className="text-base font-semibold">{t('workspace.deleteWorkspace')}</h2>

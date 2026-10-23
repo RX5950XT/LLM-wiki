@@ -555,7 +555,7 @@ export function GraphView({ workspaceId, activePage, onNodeClick, refreshKey = 0
 
   const graphErrorNotice = (
     <div
-      className="flex max-w-[min(22rem,calc(100vw-1.5rem))] items-center justify-between gap-2 rounded-xl border px-3 py-2 text-xs shadow-lg"
+      className="flex max-w-[min(22rem,calc(100vw-1.5rem))] items-center justify-between gap-2 rounded-2xl border px-3 py-2 text-xs shadow-lg"
       style={{ background: 'var(--bg-2)', borderColor: 'var(--border)', color: 'var(--fg)' }}
       role="alert"
     >
@@ -705,7 +705,7 @@ export function GraphView({ workspaceId, activePage, onNodeClick, refreshKey = 0
           <section
             id="graph-insights-panel"
             aria-label={t('insights')}
-            className="w-[min(25rem,calc(100vw-1.5rem))] max-h-[min(70vh,34rem)] overflow-y-auto rounded-xl border p-3 text-xs shadow-lg"
+            className="w-[min(25rem,calc(100vw-1.5rem))] max-h-[min(70vh,34rem)] overflow-y-auto rounded-2xl border p-3 text-xs shadow-lg"
             style={{ background: 'var(--bg-2)', borderColor: 'var(--border)', color: 'var(--fg)' }}
           >
             <div className="flex items-center justify-between gap-2">

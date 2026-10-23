@@ -45,7 +45,7 @@ export function HelpDialog({ open, onClose }: HelpDialogProps) {
         role="dialog"
         aria-modal="true"
         aria-labelledby="wiki-help-title"
-        className="relative max-h-[85vh] w-full max-w-xl overflow-hidden rounded-xl border shadow-2xl"
+        className="relative max-h-[85vh] w-full max-w-xl overflow-hidden rounded-2xl border shadow-2xl"
         style={{ background: 'var(--bg)', borderColor: 'var(--border)', color: 'var(--fg)' }}
       >
         <header

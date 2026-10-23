@@ -234,7 +234,7 @@ export function SourcesDialog({
       <div
         ref={dialogRef}
         tabIndex={-1}
-        className="relative flex max-h-[80vh] w-full max-w-lg flex-col rounded-lg border shadow-lg"
+        className="relative flex max-h-[80vh] w-full max-w-lg flex-col rounded-2xl border shadow-lg"
         style={{ background: 'var(--bg)', borderColor: 'var(--border)' }}
       >
         <div
