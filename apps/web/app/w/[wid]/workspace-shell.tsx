@@ -3,7 +3,7 @@
 import { useState, useCallback, useRef, useEffect, useMemo, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { PanelLeft, PanelRight, Ellipsis, GitFork, ChevronDown, LogOut, Plus, Settings, Search, Loader2, HelpCircle, Pencil, Trash2, GripVertical, Library, Wrench, CheckCircle2, AlertCircle, X } from 'lucide-react';
+import { PanelLeft, PanelRight, Ellipsis, GitFork, ChevronDown, LogOut, Plus, Settings, Search, Loader2, HelpCircle, Pencil, Trash2, GripVertical, Library, Wrench, CheckCircle2, AlertCircle, X, Check } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import { PageTree } from '@/components/wiki/page-tree';
 import { PageViewer } from '@/components/wiki/page-viewer';
@@ -957,7 +957,7 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
           {/* Workspace switcher */}
           <div className="relative min-w-0">
             <button
-              onClick={() => setShowWsMenu((o) => !o)}
+              onClick={() => { setShowWsMenu((o) => !o); setRenamingWorkspace(null); }}
               className="flex min-h-11 w-full min-w-0 max-w-[260px] items-center justify-between gap-2 rounded-lg px-2 text-sm font-medium hover:bg-[var(--bg-2)] md:min-w-[180px]"
               style={{ color: 'var(--fg)' }}
               aria-expanded={showWsMenu}
@@ -975,7 +975,7 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
               <>
                 <div
                   className="fixed inset-0 z-40"
-                  onClick={() => setShowWsMenu(false)}
+                  onClick={() => { setShowWsMenu(false); setRenamingWorkspace(null); }}
                 />
                 <div
                   className="animate-dropdown absolute left-0 top-full z-50 mt-2 w-64 overflow-hidden rounded-2xl border shadow-lg"
@@ -1018,6 +1018,7 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
                         style={{ color: 'var(--fg-muted)', touchAction: 'none' }}
                         aria-label={t('workspace.reorderWorkspace')}
                         title={t('workspace.reorderWorkspace')}
+                        disabled={renamingWorkspace?.id === ws.id}
                         onPointerDown={(e) => startWorkspaceDrag(e, ws, wsIndex)}
                         onPointerMove={moveWorkspaceDrag}
                         onPointerUp={endWorkspaceDrag}
@@ -1025,6 +1026,16 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
                       >
                         <GripVertical size={13} />
                       </button>
+                      {renamingWorkspace?.id === ws.id ? (
+                        <InlineRenameField
+                          workspace={ws}
+                          loading={workspaceActionLoading}
+                          error={workspaceActionError}
+                          onSubmit={(name) => renameWorkspace(ws, name)}
+                          onCancel={() => { setRenamingWorkspace(null); setWorkspaceActionError(null); }}
+                        />
+                      ) : (
+                      <>
                       <button
                         type="button"
                         onClick={() => router.push(`/w/${ws.id}`)}
@@ -1041,7 +1052,6 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
                       <button
                         type="button"
                         onClick={() => {
-                          setShowWsMenu(false);
                           setWorkspaceActionError(null);
                           setRenamingWorkspace(ws);
                         }}
@@ -1066,6 +1076,8 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
                       >
                         <Trash2 size={13} />
                       </button>
+                      </>
+                      )}
                     </div>
                     );
                   })}
@@ -1428,15 +1440,6 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
         )}
       </div>      <HelpDialog open={showHelp} onClose={() => setShowHelp(false)} />
       {showSources && <SourcesDialog workspaceId={workspaceId} onClose={() => setShowSources(false)} />}
-      {renamingWorkspace && (
-        <WorkspaceRenameDialog
-          workspace={renamingWorkspace}
-          loading={workspaceActionLoading}
-          error={workspaceActionError}
-          onClose={() => setRenamingWorkspace(null)}
-          onSubmit={(name) => renameWorkspace(renamingWorkspace, name)}
-        />
-      )}
       {deletingWorkspace && (
         <WorkspaceDeleteDialog
           workspace={deletingWorkspace}
@@ -1506,57 +1509,88 @@ function ModalShell({
   );
 }
 
-function WorkspaceRenameDialog({
+/** Explorer-style rename: the row's name becomes the input, all text selected. */
+function InlineRenameField({
   workspace,
   loading,
   error,
-  onClose,
   onSubmit,
+  onCancel,
 }: {
   workspace: WorkspaceEntry;
   loading: boolean;
   error: string | null;
-  onClose: () => void;
   onSubmit: (name: string) => void;
+  onCancel: () => void;
 }) {
   const t = useTranslations();
   const [name, setName] = useState(workspace.name);
+  // Keeps the save that blur triggers from also firing after Enter / ✓ / ✕
+  const settled = useRef(false);
+  const submit = () => {
+    if (settled.current || loading) return;
+    settled.current = true;
+    onSubmit(name);
+  };
+  const cancel = () => {
+    settled.current = true;
+    onCancel();
+  };
+
+  useEffect(() => {
+    if (error) settled.current = false;
+  }, [error]);
 
   return (
-    <ModalShell labelId="ws-rename-title" onClose={onClose}>
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          onSubmit(name);
-        }}
-        className="relative w-full max-w-sm space-y-4 rounded-2xl border p-5 shadow-2xl"
-        style={{ background: 'var(--bg)', borderColor: 'var(--border)', color: 'var(--fg)' }}
-      >
-        <h2 id="ws-rename-title" className="text-base font-semibold">{t('workspace.renameWorkspace')}</h2>
+    <div className="min-w-0 flex-1">
+      <div className="flex items-center gap-1">
         <input
           value={name}
           onChange={(event) => setName(event.target.value)}
+          onFocus={(event) => event.currentTarget.select()}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') { event.preventDefault(); submit(); }
+            if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); cancel(); }
+          }}
+          onBlur={submit}
           maxLength={100}
-          className="w-full rounded-md border px-3 py-2 text-sm outline-none"
-          style={{ background: 'var(--bg-2)', borderColor: 'var(--border)', color: 'var(--fg)' }}
+          disabled={loading}
           autoFocus
+          aria-label={t('workspace.renameWorkspace')}
+          className="min-w-0 flex-1 rounded-lg border-[1.5px] px-2 py-1 text-sm font-medium outline-none"
+          style={{ background: 'var(--bg)', borderColor: 'var(--color-accent)', color: 'var(--fg)' }}
         />
-        {error && <p className="text-xs" style={{ color: 'oklch(65% 0.18 30)' }}>{error}</p>}
-        <div className="flex justify-end gap-2">
-          <button type="button" onClick={onClose} className="rounded-md px-3 py-2 text-sm" style={{ color: 'var(--fg-muted)' }}>
-            {t('common.cancel')}
-          </button>
-          <button
-            type="submit"
-            disabled={loading || !name.trim()}
-            className="rounded-md px-3 py-2 text-sm font-medium disabled:opacity-50"
-            style={{ background: 'var(--color-accent)', color: 'var(--on-accent)' }}
-          >
-            {t('common.save')}
-          </button>
-        </div>
-      </form>
-    </ModalShell>
+        {loading ? (
+          <Loader2 size={14} className="mx-1 animate-spin" style={{ color: 'var(--fg-muted)' }} />
+        ) : (
+          <>
+            <button
+              type="button"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={submit}
+              className="rounded p-1 transition-opacity hover:opacity-70"
+              style={{ color: 'var(--color-accent)' }}
+              aria-label={t('common.save')}
+              title={t('common.save')}
+            >
+              <Check size={14} />
+            </button>
+            <button
+              type="button"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={cancel}
+              className="rounded p-1 transition-opacity hover:opacity-70"
+              style={{ color: 'var(--fg-muted)' }}
+              aria-label={t('common.cancel')}
+              title={t('common.cancel')}
+            >
+              <X size={14} />
+            </button>
+          </>
+        )}
+      </div>
+      {error && <p className="mt-1 text-[11px]" style={{ color: 'oklch(65% 0.18 30)' }} role="alert">{error}</p>}
+    </div>
   );
 }
 

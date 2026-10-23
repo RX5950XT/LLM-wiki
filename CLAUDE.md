@@ -466,7 +466,7 @@ Conversation panel 輸入框左側的 `Bot` 按鈕是**多功能選單**：「�
 - `workspaces.sort_order`（migration `0005_workspace_sort_order.sql`）提供持久化自訂排序
 - Web 工作區選單的拖曳改用 **pointer events + FLIP 動畫**（Phase 14）：按住把手 → `setPointerCapture`，拖曳項用 `translateY(dy)` 跟手 + 提升 z-index/陰影，其他項依即時目標 index 位移一個 row 高度並帶 `transform 150ms ease-out` 過渡（「推開」效果），放開才 commit 順序。`prefers-reduced-motion` 時關閉過渡。**不要退回 HTML5 drag-and-drop**（無跟手回饋、觸控不支援）
 - 排序落庫仍走 `/api/workspaces/reorder`（樂觀更新 + 失敗 rollback）
-- Android 工作區選單（`ui/wiki/WorkspaceMenu.kt`）：寬度跟切換按鈕一致；**長按任一列即可上下拖曳**（`detectDragGesturesAfterLongPress`，其他列讓位、放開彈回定位後才呼叫 `moveWorkspace(ws, toIndex)`），走同一套排序 API 同步 Web / 手機順序。長按放開會漏一次 click 給 `clickable`，`suppressClick` 擋掉它，否則拖完會誤切換工作區。上移／下移改為 TalkBack custom actions。每列直接顯示鉛筆／垃圾桶（無「⋮」）；鉛筆＝檔案總管式行內改名（名稱變輸入框、全選、自動彈鍵盤，鍵盤完成或 ✓ 儲存、✕ 取消），刪除仍走確認對話框。圓角統一由 `Theme.kt` 的 `AppShapes` 提供（選單／輸入框 12–16dp），Web 浮層與對話框同為 `rounded-2xl`
+- Android 工作區選單（`ui/wiki/WorkspaceMenu.kt`）：寬度跟切換按鈕一致；**長按任一列即可上下拖曳**（`detectDragGesturesAfterLongPress`，其他列讓位、放開彈回定位後才呼叫 `moveWorkspace(ws, toIndex)`），走同一套排序 API 同步 Web / 手機順序。長按放開會漏一次 click 給 `clickable`，`suppressClick` 擋掉它，否則拖完會誤切換工作區。上移／下移改為 TalkBack custom actions。每列直接顯示鉛筆／垃圾桶（無「⋮」）；鉛筆＝檔案總管式行內改名（名稱變輸入框、全選、自動彈鍵盤，鍵盤完成或 ✓ 儲存、✕ 取消；Web 同為行內改名：Enter／✓／點別處儲存，Esc／✕ 取消，`InlineRenameField`），刪除仍走確認對話框。圓角統一由 `Theme.kt` 的 `AppShapes` 提供（選單／輸入框 12–16dp），Web 浮層與對話框同為 `rounded-2xl`
 - Web 端任何首頁導頁、登入回跳或工作區列表查詢，若遇到 production 尚未套用 `sort_order` / schema cache 未刷新，必須 fallback 至 `created_at`，不可誤顯示「建立工作區」
 - 若 production 出現「拖曳後又跳回原順序」，先查 `workspaces.sort_order` 是否存在；缺欄位時只執行 idempotent 的 `0005_workspace_sort_order.sql` 修 schema，不要用整批 `db push` 硬套舊 migration history
 

@@ -10,7 +10,7 @@ const Icon = () => React.createElement('span');
 const iconNames = [
   'PanelLeft', 'PanelRight', 'Ellipsis', 'GitFork', 'ChevronDown', 'LogOut', 'Plus', 'Settings', 'Search',
   'Loader2', 'HelpCircle', 'Pencil', 'Trash2', 'GripVertical', 'Library', 'Wrench',
-  'CheckCircle2', 'AlertCircle', 'X',
+  'CheckCircle2', 'AlertCircle', 'X', 'Check',
 ];
 
 mock.module('next/link', () => ({
