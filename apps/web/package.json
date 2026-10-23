@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@ai-sdk/openai": "3.0.119",
     "@ai-sdk/openai-compatible": "^1.0.0",
     "@llm-wiki/drive-schema": "workspace:*",
     "@llm-wiki/prompts": "workspace:*",

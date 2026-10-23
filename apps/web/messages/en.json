@@ -228,7 +228,14 @@
     "apiKeyKeepHint": "Leave blank to keep current key",
     "saveFailed": "Failed to save profile",
     "confirmDeleteProfile": "Delete this LLM profile? Workspaces bound to it will fall back to the default profile.",
-    "deleteProfileFailed": "Failed to delete profile"
+    "deleteProfileFailed": "Failed to delete profile",
+    "chatgptBody": "Sign in with your ChatGPT account so chat uses your ChatGPT plan's usage instead of an API key.",
+    "chatgptSignIn": "Sign in with ChatGPT",
+    "chatgptEnterCode": "Sign in to ChatGPT in the new tab and enter this code:",
+    "chatgptWaiting": "Waiting for you to finish signing in…",
+    "chatgptCancel": "Cancel",
+    "chatgptDone": "ChatGPT connected. Pick “ChatGPT” in the model menu.",
+    "chatgptFailed": "ChatGPT sign-in failed"
   },
   "help": {
     "title": "Help",

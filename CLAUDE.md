@@ -563,6 +563,14 @@ production 預設 profile 已從 `google/gemini-3.8-flash` 換成 `anthropic/cla
 - **換預設模型要連 `workspaces.default_profile_id` 一起改**：舊工作區直接綁定 profile，只改 `is_default` 這些工作區仍用舊模型。
 - **Drive API 一律有 30 秒逾時**（`createDriveClient`）：沒有逾時的 Drive 請求會無視 abort 永遠卡住。
 
+## ChatGPT 登入（用 ChatGPT 方案額度，2026-10-24）
+
+- 設定頁「使用 ChatGPT 登入」（Web `components/settings/chatgpt-login.tsx`、Android `SettingsScreen` 的 `ChatGPTLoginCard`）→ `POST /api/settings/chatgpt`（`start` / `poll`）。走 Codex CLI 同一個 OAuth client（`app_EMoamEEZ73f0CkXaXp7hrann`）的 **device code 流程**：Codex 的 redirect 固定是 localhost，Vercel 收不到，只能用 `auth.openai.com/codex/device` 輸入代碼。`device_auth_id` 只放在綁 user id 的加密 handle 裡，不給 client。
+- 登入後建立（或更新既有的）一個 `llm_profiles` 列：`base_url = https://chatgpt.com/backend-api/codex`（這就是「ChatGPT profile」的判斷依據，`isChatGPTProfile`），`api_key_encrypted` 存加密的 `{access_token, refresh_token, account_id, expires_at}` JSON。不需要 migration。
+- `createLLMClient` 遇到 ChatGPT profile 改走 `lib/ai/chatgpt.ts`：`@ai-sdk/openai` Responses API ＋ 自訂 fetch。Codex 後端只收**無狀態串流**請求，所以 fetch 會把 system/developer 訊息搬到 `instructions`、強制 `store:false` / `stream:true`、拿掉 `max_output_tokens`；非串流呼叫（plan/review/路由的 `generateText`）由 `response.completed` 事件組回 JSON。middleware 設 `providerOptions.openai.store=false`，否則多步工具迴圈會送後端沒存過的 `item_reference`（**勿移除**）。
+- access token 到期前 5 分鐘自動 refresh，refresh 前先重讀 DB（別的 instance 可能已輪替 refresh token），新 token 用 admin client 寫回。refresh 失敗＝請使用者重新登入。
+- 模型：登入時讀 `/models` 取第一個可見模型，讀不到用 `gpt-6-luna`；可在設定檔編輯改名稱/模型（ChatGPT profile 不顯示 base URL / 金鑰欄位）。
+
 ## 開一頁的成本（2026-09-03 實測與修法）
 
 `GET /api/pages/[workspaceId]/[...slug]` 是全 App 最常打的請求，改版前 **1.6–3.4 秒**。它原本要做四件事：Supabase auth → 查 page row → **拿 Google access token** → **Drive metadata + 內容下載**。修法依效果排序：

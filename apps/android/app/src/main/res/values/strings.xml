@@ -173,6 +173,13 @@
     <string name="settings_unknown_account">Unknown account</string>
     <string name="settings_llm_profiles">LLM Profiles</string>
     <string name="settings_add_profile">Add profile</string>
+    <string name="settings_chatgpt_body">Sign in with your ChatGPT account so chat uses the usage included in your ChatGPT plan instead of an API key.</string>
+    <string name="settings_chatgpt_sign_in">Sign in with ChatGPT</string>
+    <string name="settings_chatgpt_enter_code">Sign in to ChatGPT in the browser and enter this code:</string>
+    <string name="settings_chatgpt_open">Open sign-in page</string>
+    <string name="settings_chatgpt_waiting">Waiting for you to finish signing in…</string>
+    <string name="settings_chatgpt_done">ChatGPT connected. Pick “ChatGPT” in the model menu.</string>
+    <string name="settings_chatgpt_failed">ChatGPT sign-in failed</string>
     <string name="settings_no_profiles">No profiles yet. Add one to use a custom LLM.</string>
     <string name="settings_theme">Appearance</string>
     <string name="settings_theme_light">Light</string>

@@ -2,6 +2,7 @@ import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import type { LanguageModel } from 'ai';
 import { decryptApiKey } from '@/lib/crypto/api-key';
 import type { LLMProfile } from '@llm-wiki/shared-types';
+import { createChatGPTModel, isChatGPTProfile } from './chatgpt';
 
 /**
  * No single provider request may outlive this. Without it a hung upstream call
@@ -170,6 +171,9 @@ function isOpenRouter(baseUrl: string): boolean {
  * The api_key_encrypted field holds the AES-256-GCM ciphertext (\\x hex format).
  */
 export function createLLMClient(profile: LLMProfile, options: LLMClientOptions = {}): LanguageModel {
+  if (isChatGPTProfile(profile)) {
+    return createChatGPTModel(profile, (input, init) => fetchWithLLMTimeouts(input, init, options.signal));
+  }
   const apiKey = decryptApiKey(profile.api_key_encrypted);
 
   // Encrypted column wins; the legacy plaintext jsonb only serves rows

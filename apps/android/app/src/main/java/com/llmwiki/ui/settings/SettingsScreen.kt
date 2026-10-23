@@ -54,6 +54,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -91,6 +92,7 @@ fun SettingsScreen(
     var profileToEdit by remember { mutableStateOf<LlmProfile?>(null) }
     var profileToDelete by remember { mutableStateOf<LlmProfile?>(null) }
     var expandedRuleSlug by remember { mutableStateOf<String?>(null) }
+    val uriHandler = LocalUriHandler.current
 
     Scaffold(
         topBar = {
@@ -153,6 +155,15 @@ fun SettingsScreen(
                                 Text(stringResource(R.string.settings_add_profile))
                             }
                         }
+
+                        ChatGPTLoginCard(
+                            userCode = uiState.chatgptUserCode,
+                            url = uiState.chatgptUrl,
+                            busy = uiState.chatgptBusy,
+                            connected = uiState.chatgptConnected,
+                            onStart = { settingsViewModel.startChatGPTLogin { uriHandler.openUri(it) } },
+                            onCancel = settingsViewModel::cancelChatGPTLogin,
+                        )
 
                         when {
                             uiState.loading -> Box(
@@ -390,6 +401,56 @@ private fun RuleEditorCard(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ChatGPTLoginCard(
+    userCode: String?,
+    url: String?,
+    busy: Boolean,
+    connected: Boolean,
+    onStart: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    val uriHandler = LocalUriHandler.current
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                stringResource(R.string.settings_chatgpt_body),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (userCode != null && url != null) {
+                Text(stringResource(R.string.settings_chatgpt_enter_code), style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    userCode,
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = { uriHandler.openUri(url) }) {
+                        Text(stringResource(R.string.settings_chatgpt_open))
+                    }
+                    TextButton(onClick = onCancel) { Text(stringResource(R.string.action_cancel)) }
+                }
+                Text(
+                    stringResource(R.string.settings_chatgpt_waiting),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                Button(onClick = onStart, enabled = !busy) {
+                    Text(stringResource(R.string.settings_chatgpt_sign_in))
+                }
+            }
+            if (connected) {
+                Text(stringResource(R.string.settings_chatgpt_done), style = MaterialTheme.typography.bodySmall)
             }
         }
     }

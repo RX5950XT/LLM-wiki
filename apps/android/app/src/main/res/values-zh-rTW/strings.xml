@@ -173,6 +173,13 @@
     <string name="settings_unknown_account">未知帳號</string>
     <string name="settings_llm_profiles">LLM 設定檔</string>
     <string name="settings_add_profile">新增設定檔</string>
+    <string name="settings_chatgpt_body">用 ChatGPT 帳號登入後，對話會使用你的 ChatGPT 方案額度，不必另外準備 API 金鑰。</string>
+    <string name="settings_chatgpt_sign_in">使用 ChatGPT 登入</string>
+    <string name="settings_chatgpt_enter_code">在瀏覽器登入 ChatGPT，並輸入下面這組代碼：</string>
+    <string name="settings_chatgpt_open">開啟登入頁</string>
+    <string name="settings_chatgpt_waiting">等待你在 ChatGPT 完成登入…</string>
+    <string name="settings_chatgpt_done">已連結 ChatGPT，可在模型選單選用「ChatGPT」。</string>
+    <string name="settings_chatgpt_failed">ChatGPT 登入失敗</string>
     <string name="settings_no_profiles">尚無設定檔。新增一個以使用自訂 LLM。</string>
     <string name="settings_theme">外觀主題</string>
     <string name="settings_theme_light">淺色</string>

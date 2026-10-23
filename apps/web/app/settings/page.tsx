@@ -6,6 +6,7 @@ import { ArrowLeft } from 'lucide-react';
 import { createClient } from '@/lib/supabase/server';
 import { ProfileList } from '@/components/settings/profile-list';
 import { ProfileForm } from '@/components/settings/profile-form';
+import { ChatGPTLogin } from '@/components/settings/chatgpt-login';
 import { LocaleSwitcher } from '@/components/settings/locale-switcher';
 import { AiPermissions } from '@/components/settings/ai-permissions';
 import { RulesPanel } from '@/components/settings/rules-panel';
@@ -130,6 +131,7 @@ export default async function SettingsPage() {
             {t('settings.llmProfiles')}
           </h2>
           <ProfileList profiles={profiles ?? []} />
+          <ChatGPTLogin />
           <ProfileForm />
         </section>
 

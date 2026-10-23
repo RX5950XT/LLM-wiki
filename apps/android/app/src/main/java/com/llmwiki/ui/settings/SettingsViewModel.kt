@@ -31,6 +31,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.booleanOrNull
@@ -55,6 +57,11 @@ data class SettingsUiState(
     /** Whether AI destructive actions need an in-chat confirmation (auth user_metadata) */
     val aiConfirmDestructive: Boolean = true,
     val aiPermissionSaving: Boolean = false,
+    /** Device-code ChatGPT sign-in in progress: the code the user types at [chatgptUrl]. */
+    val chatgptUserCode: String? = null,
+    val chatgptUrl: String? = null,
+    val chatgptBusy: Boolean = false,
+    val chatgptConnected: Boolean = false,
 )
 
 private val settingsJson = Json { ignoreUnknownKeys = true }
@@ -408,6 +415,74 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             }
         }
     }
+
+    private var chatgptJob: Job? = null
+
+    /** Same device-code flow as Web: `start` → show code → `poll` until the profile exists. */
+    fun startChatGPTLogin(onOpenUrl: (String) -> Unit) {
+        chatgptJob?.cancel()
+        chatgptJob = viewModelScope.launch {
+            settingsState.update { it.copy(chatgptBusy = true, chatgptConnected = false, error = null) }
+            try {
+                val start = postChatGPT(buildJsonObject { put("action", "start") }.toString())
+                    ?: return@launch
+                val handle = start["handle"]?.jsonPrimitive?.contentOrNull
+                val code = start["user_code"]?.jsonPrimitive?.contentOrNull
+                val url = start["verification_url"]?.jsonPrimitive?.contentOrNull
+                if (handle == null || code == null || url == null) {
+                    settingsState.update { it.copy(error = chatgptFailed()) }
+                    return@launch
+                }
+                val interval = (start["interval"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: 5L).coerceAtLeast(2L)
+                settingsState.update { it.copy(chatgptUserCode = code, chatgptUrl = url) }
+                onOpenUrl(url)
+                val pollBody = buildJsonObject { put("action", "poll"); put("handle", handle) }.toString()
+                while (true) {
+                    delay(interval * 1000)
+                    val poll = postChatGPT(pollBody) ?: return@launch
+                    if (poll["status"]?.jsonPrimitive?.contentOrNull == "done") {
+                        settingsState.update { it.copy(chatgptConnected = true) }
+                        loadProfiles()
+                        return@launch
+                    }
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                settingsState.update { it.copy(error = e.toUserFacingMessage(chatgptFailed())) }
+            } finally {
+                settingsState.update { it.copy(chatgptBusy = false, chatgptUserCode = null, chatgptUrl = null) }
+            }
+        }
+    }
+
+    fun cancelChatGPTLogin() {
+        chatgptJob?.cancel()
+    }
+
+    /** JSON object on 2xx; otherwise records the error and returns null. */
+    private suspend fun postChatGPT(bodyJson: String): kotlinx.serialization.json.JsonObject? {
+        val response = sendAuthorizedRequest { token ->
+            AndroidHttpClient.instance.post(webApiUrl("/api/settings/chatgpt")) {
+                header("Authorization", "Bearer $token")
+                contentType(ContentType.Application.Json)
+                setBody(bodyJson)
+            }
+        }
+        if (response == null) {
+            settingsState.update { it.copy(error = unauthorizedMessage()) }
+            return null
+        }
+        val text = response.bodyAsText()
+        if (response.status.value !in 200..299 || !isJsonObject(text)) {
+            settingsState.update { it.copy(error = parseApiError(text, chatgptFailed())) }
+            return null
+        }
+        return settingsJson.parseToJsonElement(text).jsonObject
+    }
+
+    private fun chatgptFailed(): String =
+        getApplication<Application>().getString(R.string.settings_chatgpt_failed)
 
     private fun parseApiError(raw: String, fallback: String): String {
         if (raw.isBlank()) return fallback

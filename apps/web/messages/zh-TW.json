@@ -228,7 +228,14 @@
     "apiKeyKeepHint": "留空保留原金鑰",
     "saveFailed": "儲存設定檔失敗",
     "confirmDeleteProfile": "確定要刪除此 LLM 設定檔嗎？綁定此設定檔的工作區將改用預設設定。",
-    "deleteProfileFailed": "刪除設定檔失敗"
+    "deleteProfileFailed": "刪除設定檔失敗",
+    "chatgptBody": "用 ChatGPT 帳號登入後，對話會使用你的 ChatGPT 方案額度，不必另外準備 API 金鑰。",
+    "chatgptSignIn": "使用 ChatGPT 登入",
+    "chatgptEnterCode": "在新分頁登入 ChatGPT，並輸入下面這組代碼：",
+    "chatgptWaiting": "等待你在 ChatGPT 完成登入…",
+    "chatgptCancel": "取消",
+    "chatgptDone": "已連結 ChatGPT，可在模型選單選用「ChatGPT」。",
+    "chatgptFailed": "ChatGPT 登入失敗"
   },
   "help": {
     "title": "使用說明",

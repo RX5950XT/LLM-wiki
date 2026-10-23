@@ -32,6 +32,8 @@ export function ProfileForm({
   const tCommon = useTranslations('common');
   const router = useRouter();
   const isEdit = Boolean(profile);
+  // ChatGPT sign-in profiles hold OAuth tokens, not a key: only name/model are editable.
+  const isChatGPT = profile?.base_url.replace(/\/+$/, '') === 'https://chatgpt.com/backend-api/codex';
   const [open, setOpen] = useState(isEdit);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -58,6 +60,7 @@ export function ProfileForm({
       if (isEdit) {
         payload.id = profile!.id;
         if (!fields.api_key) delete payload.api_key;
+        if (isChatGPT) delete payload.base_url;
       }
       const res = await fetch('/api/settings/profiles', {
         method: isEdit ? 'PATCH' : 'POST',
@@ -127,7 +130,7 @@ export function ProfileForm({
           </h3>
 
           {/* Provider presets */}
-          <div className="flex flex-wrap gap-2">
+          {!isChatGPT && <div className="flex flex-wrap gap-2">
             {PROVIDER_PRESETS.map((p) => (
               <button
                 key={p.label}
@@ -139,14 +142,14 @@ export function ProfileForm({
                 {p.label}
               </button>
             ))}
-          </div>
+          </div>}
 
           {[
             { key: 'name' as const, label: t('profileName'), type: 'text', required: true },
             { key: 'base_url' as const, label: t('baseUrl'), type: 'url', required: true },
             { key: 'api_key' as const, label: t('apiKey'), type: 'password', required: !isEdit },
             { key: 'model' as const, label: t('model'), type: 'text', required: true },
-          ].map(({ key, label, type, required }) => (
+          ].filter(({ key }) => !isChatGPT || key === 'name' || key === 'model').map(({ key, label, type, required }) => (
             <div key={key} className="space-y-1.5">
               <label className="text-xs font-medium" style={{ color: 'var(--fg-muted)' }}>
                 {label}
