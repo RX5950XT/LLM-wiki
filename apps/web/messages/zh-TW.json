@@ -234,8 +234,10 @@
     "chatgptEnterCode": "在新分頁登入 ChatGPT，並輸入下面這組代碼：",
     "chatgptWaiting": "等待你在 ChatGPT 完成登入…",
     "chatgptCancel": "取消",
-    "chatgptDone": "已連結 ChatGPT，可在模型選單選用「ChatGPT」。",
-    "chatgptFailed": "ChatGPT 登入失敗"
+    "chatgptFailed": "ChatGPT 登入失敗",
+    "chatgptSignedInAs": "已登入 ChatGPT：",
+    "chatgptSignInAgain": "換帳號或重新登入",
+    "chatgptExpired": "ChatGPT 登入已失效，請重新登入。"
   },
   "help": {
     "title": "使用說明",

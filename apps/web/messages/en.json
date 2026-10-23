@@ -234,8 +234,10 @@
     "chatgptEnterCode": "Sign in to ChatGPT in the new tab and enter this code:",
     "chatgptWaiting": "Waiting for you to finish signing in…",
     "chatgptCancel": "Cancel",
-    "chatgptDone": "ChatGPT connected. Pick “ChatGPT” in the model menu.",
-    "chatgptFailed": "ChatGPT sign-in failed"
+    "chatgptFailed": "ChatGPT sign-in failed",
+    "chatgptSignedInAs": "Signed in to ChatGPT as",
+    "chatgptSignInAgain": "Switch account or sign in again",
+    "chatgptExpired": "Your ChatGPT sign-in has expired. Sign in again."
   },
   "help": {
     "title": "Help",

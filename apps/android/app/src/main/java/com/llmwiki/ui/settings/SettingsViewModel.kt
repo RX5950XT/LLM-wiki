@@ -62,6 +62,14 @@ data class SettingsUiState(
     val chatgptUrl: String? = null,
     val chatgptBusy: Boolean = false,
     val chatgptConnected: Boolean = false,
+    /** Signed-in ChatGPT profile (GET /api/settings/chatgpt) */
+    val chatgptProfileId: String? = null,
+    val chatgptEmail: String? = null,
+    val chatgptPlan: String? = null,
+    val chatgptModel: String? = null,
+    val chatgptModels: List<String> = emptyList(),
+    val chatgptExpired: Boolean = false,
+    val chatgptModelSaving: Boolean = false,
 )
 
 private val settingsJson = Json { ignoreUnknownKeys = true }
@@ -99,6 +107,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     init {
         loadProfiles()
+        loadChatGPTStatus()
     }
 
     fun loadProfiles() {
@@ -441,8 +450,8 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                     delay(interval * 1000)
                     val poll = postChatGPT(pollBody) ?: return@launch
                     if (poll["status"]?.jsonPrimitive?.contentOrNull == "done") {
-                        settingsState.update { it.copy(chatgptConnected = true) }
                         loadProfiles()
+                        loadChatGPTStatus()
                         return@launch
                     }
                 }
@@ -453,6 +462,62 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             } finally {
                 settingsState.update { it.copy(chatgptBusy = false, chatgptUserCode = null, chatgptUrl = null) }
             }
+        }
+    }
+
+    fun loadChatGPTStatus() {
+        viewModelScope.launch {
+            val response = runCatching {
+                sendAuthorizedRequest { token ->
+                    AndroidHttpClient.instance.get(webApiUrl("/api/settings/chatgpt")) {
+                        header("Authorization", "Bearer $token")
+                    }
+                }
+            }.getOrNull() ?: return@launch
+            val text = response.bodyAsText()
+            if (response.status.value !in 200..299 || !isJsonObject(text)) return@launch
+            val json = settingsJson.parseToJsonElement(text).jsonObject
+            fun str(key: String) = json[key]?.jsonPrimitive?.contentOrNull
+            val models = (json["models"] as? kotlinx.serialization.json.JsonArray)
+                ?.mapNotNull { it.jsonPrimitive.contentOrNull }
+                .orEmpty()
+            settingsState.update {
+                it.copy(
+                    chatgptConnected = json["connected"]?.jsonPrimitive?.booleanOrNull == true,
+                    chatgptProfileId = str("profile_id"),
+                    chatgptEmail = str("email"),
+                    chatgptPlan = str("plan"),
+                    chatgptModel = str("model"),
+                    chatgptModels = models,
+                    chatgptExpired = str("error") != null,
+                )
+            }
+        }
+    }
+
+    fun setChatGPTModel(model: String) {
+        val profileId = settingsState.value.chatgptProfileId ?: return
+        if (model == settingsState.value.chatgptModel) return
+        viewModelScope.launch {
+            settingsState.update { it.copy(chatgptModelSaving = true, error = null) }
+            val ok = runCatching {
+                val body = buildJsonObject { put("id", profileId); put("model", model) }.toString()
+                sendAuthorizedRequest { token ->
+                    AndroidHttpClient.instance.patch(webApiUrl("/api/settings/profiles")) {
+                        header("Authorization", "Bearer $token")
+                        contentType(ContentType.Application.Json)
+                        setBody(body)
+                    }
+                }?.let { it.status.value in 200..299 && isJsonObject(it.bodyAsText()) } == true
+            }.getOrDefault(false)
+            settingsState.update {
+                it.copy(
+                    chatgptModelSaving = false,
+                    chatgptModel = if (ok) model else it.chatgptModel,
+                    error = if (ok) it.error else getApplication<Application>().getString(R.string.settings_chatgpt_model_failed),
+                )
+            }
+            if (ok) loadProfiles()
         }
     }
 

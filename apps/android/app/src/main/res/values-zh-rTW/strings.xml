@@ -178,8 +178,12 @@
     <string name="settings_chatgpt_enter_code">在瀏覽器登入 ChatGPT，並輸入下面這組代碼：</string>
     <string name="settings_chatgpt_open">開啟登入頁</string>
     <string name="settings_chatgpt_waiting">等待你在 ChatGPT 完成登入…</string>
-    <string name="settings_chatgpt_done">已連結 ChatGPT，可在模型選單選用「ChatGPT」。</string>
     <string name="settings_chatgpt_failed">ChatGPT 登入失敗</string>
+    <string name="settings_chatgpt_signed_in_as">已登入 ChatGPT：%1$s</string>
+    <string name="settings_chatgpt_model">模型：%1$s</string>
+    <string name="settings_chatgpt_sign_in_again">換帳號或重新登入</string>
+    <string name="settings_chatgpt_expired">ChatGPT 登入已失效，請重新登入。</string>
+    <string name="settings_chatgpt_model_failed">無法切換模型</string>
     <string name="settings_no_profiles">尚無設定檔。新增一個以使用自訂 LLM。</string>
     <string name="settings_theme">外觀主題</string>
     <string name="settings_theme_light">淺色</string>

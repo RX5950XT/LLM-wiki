@@ -4,6 +4,7 @@ import {
   CHATGPT_BASE_URL,
   ChatGPTAuthError,
   encryptTokens,
+  getChatGPTAccount,
   listChatGPTModels,
   pollDeviceCode,
   requestDeviceCode,
@@ -13,6 +14,38 @@ import { getRequestUser } from '@/lib/supabase/request';
 
 /** Used only when the ChatGPT model catalog cannot be read. */
 const FALLBACK_MODEL = 'gpt-6-luna';
+
+/** The signed-in ChatGPT profile, its account and the models it can switch to. */
+export async function GET(request: NextRequest) {
+  const { supabase, user } = await getRequestUser(request);
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const { data: profile } = await supabase
+    .from('llm_profiles')
+    .select('id, model, api_key_encrypted')
+    .eq('owner_id', user.id)
+    .eq('base_url', CHATGPT_BASE_URL)
+    .limit(1)
+    .maybeSingle();
+  if (!profile) return NextResponse.json({ connected: false });
+
+  try {
+    const account = await getChatGPTAccount(profile);
+    const models = account.models.includes(profile.model) ? account.models : [profile.model, ...account.models];
+    return NextResponse.json({
+      connected: true,
+      profile_id: profile.id,
+      model: profile.model,
+      email: account.email,
+      plan: account.plan,
+      models,
+    });
+  } catch (err) {
+    // Expired / revoked sign-in: show it as signed out with the reason, so the user can sign in again.
+    const message = err instanceof ChatGPTAuthError ? err.message : 'ChatGPT sign-in check failed';
+    return NextResponse.json({ connected: false, profile_id: profile.id, error: message });
+  }
+}
 
 const BodySchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('start') }),

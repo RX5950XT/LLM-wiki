@@ -60,9 +60,9 @@ describe('toCodexRequestBody', () => {
 
 describe('tokensFromResponse', () => {
   test('reads the account id from the id token and keeps the old refresh token when omitted', () => {
-    const idToken = jwt({ 'https://api.openai.com/auth': { chatgpt_account_id: 'acct-9' } });
+    const idToken = jwt({ email: 'me@example.com', 'https://api.openai.com/auth': { chatgpt_account_id: 'acct-9' } });
     const first = tokensFromResponse({ access_token: 'a', refresh_token: 'r', id_token: idToken, expires_in: 60 });
-    expect(first.account_id).toBe('acct-9');
+    expect(first).toMatchObject({ account_id: 'acct-9', email: 'me@example.com' });
     const next = tokensFromResponse({ access_token: 'b', expires_in: 60 }, first);
     expect(next).toMatchObject({ access_token: 'b', refresh_token: 'r', account_id: 'acct-9' });
   });

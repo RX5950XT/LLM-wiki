@@ -23,6 +23,8 @@ export interface ChatGPTTokens {
   account_id: string;
   /** epoch ms */
   expires_at: number;
+  /** Signed-in ChatGPT account, from the id token (older rows: read from the access token). */
+  email?: string;
 }
 
 export interface DeviceCode {
@@ -63,6 +65,18 @@ function accountIdFrom(...jwts: (string | undefined)[]): string | null {
   return null;
 }
 
+/** Codex reads the email from the top-level claim, then the `https://api.openai.com/profile` claim. */
+function emailFrom(...jwts: (string | undefined)[]): string | undefined {
+  for (const jwt of jwts) {
+    if (!jwt) continue;
+    const claims = decodeJwtPayload(jwt);
+    const profile = claims['https://api.openai.com/profile'] as Record<string, unknown> | undefined;
+    const email = typeof claims.email === 'string' ? claims.email : profile?.email;
+    if (typeof email === 'string' && email) return email;
+  }
+  return undefined;
+}
+
 /** Turn an /oauth/token response into stored tokens; `previous` covers fields a refresh may omit. */
 export function tokensFromResponse(json: unknown, previous?: ChatGPTTokens): ChatGPTTokens {
   const body = (json ?? {}) as Record<string, unknown>;
@@ -80,7 +94,8 @@ export function tokensFromResponse(json: unknown, previous?: ChatGPTTokens): Cha
       : typeof exp === 'number'
         ? exp * 1000
         : Date.now() + 60 * 60_000;
-  return { access_token: access, refresh_token: refresh, account_id: accountId, expires_at: expiresAt };
+  const email = emailFrom(idToken, access) ?? previous?.email;
+  return { access_token: access, refresh_token: refresh, account_id: accountId, expires_at: expiresAt, ...(email ? { email } : {}) };
 }
 
 async function authPost(path: string, body: string, contentType: string): Promise<Response> {
@@ -261,6 +276,24 @@ async function freshTokens(profileId: string, current: ChatGPTTokens): Promise<C
   })().finally(() => refreshing.delete(profileId));
   refreshing.set(profileId, run);
   return run;
+}
+
+export interface ChatGPTAccount {
+  email: string | null;
+  /** e.g. "plus", "pro" — from the token's auth claim */
+  plan: string | null;
+  models: string[];
+}
+
+/** Who is signed in and which models their plan offers (refreshes the token if needed). */
+export async function getChatGPTAccount(profile: { id: string; api_key_encrypted: string }): Promise<ChatGPTAccount> {
+  const tokens = await freshTokens(profile.id, decryptTokens(profile.api_key_encrypted));
+  const auth = decodeJwtPayload(tokens.access_token)['https://api.openai.com/auth'] as Record<string, unknown> | undefined;
+  return {
+    email: tokens.email ?? emailFrom(tokens.access_token) ?? null,
+    plan: typeof auth?.chatgpt_plan_type === 'string' ? auth.chatgpt_plan_type : null,
+    models: await listChatGPTModels(tokens),
+  };
 }
 
 export function createChatGPTModel(

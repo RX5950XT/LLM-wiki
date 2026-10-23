@@ -32,6 +32,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -161,8 +163,15 @@ fun SettingsScreen(
                             url = uiState.chatgptUrl,
                             busy = uiState.chatgptBusy,
                             connected = uiState.chatgptConnected,
+                            email = uiState.chatgptEmail,
+                            plan = uiState.chatgptPlan,
+                            model = uiState.chatgptModel,
+                            models = uiState.chatgptModels,
+                            expired = uiState.chatgptExpired,
+                            modelSaving = uiState.chatgptModelSaving,
                             onStart = { settingsViewModel.startChatGPTLogin { uriHandler.openUri(it) } },
                             onCancel = settingsViewModel::cancelChatGPTLogin,
+                            onSelectModel = settingsViewModel::setChatGPTModel,
                         )
 
                         when {
@@ -412,20 +421,23 @@ private fun ChatGPTLoginCard(
     url: String?,
     busy: Boolean,
     connected: Boolean,
+    email: String?,
+    plan: String?,
+    model: String?,
+    models: List<String>,
+    expired: Boolean,
+    modelSaving: Boolean,
     onStart: () -> Unit,
     onCancel: () -> Unit,
+    onSelectModel: (String) -> Unit,
 ) {
     val uriHandler = LocalUriHandler.current
+    var modelMenuOpen by remember { mutableStateOf(false) }
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text(
-                stringResource(R.string.settings_chatgpt_body),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
             if (userCode != null && url != null) {
                 Text(stringResource(R.string.settings_chatgpt_enter_code), style = MaterialTheme.typography.bodyMedium)
                 Text(
@@ -444,13 +456,50 @@ private fun ChatGPTLoginCard(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            } else if (connected) {
+                Text(
+                    stringResource(R.string.settings_chatgpt_signed_in_as, email ?: "ChatGPT") +
+                        (plan?.let { " · ${it.uppercase()}" } ?: ""),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                )
+                Box {
+                    OutlinedButton(
+                        onClick = { modelMenuOpen = true },
+                        enabled = !modelSaving && models.isNotEmpty(),
+                        modifier = Modifier.heightIn(min = 44.dp),
+                    ) {
+                        Text(stringResource(R.string.settings_chatgpt_model, model.orEmpty()))
+                    }
+                    DropdownMenu(expanded = modelMenuOpen, onDismissRequest = { modelMenuOpen = false }) {
+                        models.forEach { option ->
+                            DropdownMenuItem(
+                                text = { Text(option) },
+                                leadingIcon = if (option == model) {
+                                    { Icon(Icons.Default.Check, contentDescription = null) }
+                                } else {
+                                    null
+                                },
+                                onClick = {
+                                    modelMenuOpen = false
+                                    onSelectModel(option)
+                                },
+                            )
+                        }
+                    }
+                }
+                TextButton(onClick = onStart, enabled = !busy) {
+                    Text(stringResource(R.string.settings_chatgpt_sign_in_again))
+                }
             } else {
+                Text(
+                    stringResource(if (expired) R.string.settings_chatgpt_expired else R.string.settings_chatgpt_body),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 Button(onClick = onStart, enabled = !busy) {
                     Text(stringResource(R.string.settings_chatgpt_sign_in))
                 }
-            }
-            if (connected) {
-                Text(stringResource(R.string.settings_chatgpt_done), style = MaterialTheme.typography.bodySmall)
             }
         }
     }
