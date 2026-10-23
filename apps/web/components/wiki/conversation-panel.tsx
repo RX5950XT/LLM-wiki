@@ -448,7 +448,7 @@ export function ConversationPanel({
   return (
     <div
       className="flex h-full flex-col border-l"
-      style={{ borderColor: 'var(--border)', background: 'var(--bg)' }}
+      style={{ borderColor: 'var(--border)', background: 'var(--surface)' }}
     >
       {/* Saved synthesis notification */}
       {savedSlug && (
@@ -475,7 +475,7 @@ export function ConversationPanel({
       {/* Chat messages */}
       <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
         {messages.length === 0 && (
-          <p className="text-center text-xs" style={{ color: 'var(--fg-muted)' }}>
+          <p className="px-2 py-8 text-sm leading-6" style={{ color: 'var(--fg-muted)' }}>
             {t('query.empty')}
           </p>
         )}
@@ -485,11 +485,11 @@ export function ConversationPanel({
             className={`space-y-1 ${m.role === 'user' ? 'text-right' : 'text-left'}`}
           >
             <div
-              className={`inline-block max-w-[85%] rounded-lg px-3 py-2 text-sm ${
-                m.role === 'user' ? 'ml-auto' : 'chat-prose llm-content'
+              className={`text-sm ${
+                m.role === 'user' ? 'ml-auto inline-block max-w-[85%] rounded-xl px-3 py-2' : 'chat-prose llm-content py-2'
               }`}
               style={{
-                background: m.role === 'user' ? 'var(--color-accent-muted)' : 'var(--bg-2)',
+                background: m.role === 'user' ? 'var(--surface-secondary)' : 'transparent',
                 color: 'var(--fg)',
                 whiteSpace: m.role === 'user' ? 'pre-wrap' : undefined,
               }}
@@ -733,7 +733,16 @@ export function ConversationPanel({
 
         <div className="relative flex gap-2">
           {/* Action menu: model selection + import */}
-          <div className="relative shrink-0" ref={actionMenuRef}>
+          <div
+            className="relative shrink-0"
+            ref={actionMenuRef}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') {
+                setShowActionMenu(false);
+                actionMenuRef.current?.querySelector('button')?.focus();
+              }
+            }}
+          >
             <button
               type="button"
               onClick={() => setShowActionMenu((s) => !s)}
@@ -749,7 +758,7 @@ export function ConversationPanel({
               aria-expanded={showActionMenu}
               aria-controls="query-action-menu"
             >
-              <Bot size={13} />
+              <Bot size={18} />
             </button>
 
             {showActionMenu && (
@@ -842,7 +851,7 @@ export function ConversationPanel({
                           className="flex min-h-11 w-full flex-col px-3 py-2 text-left text-xs transition-all duration-100 hover:opacity-70 focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                           style={{
                             color: 'var(--fg)',
-                            borderLeft: isSelected ? '3px solid oklch(65% 0.22 145)' : '3px solid transparent',
+                            fontWeight: isSelected ? 600 : undefined,
                             background: isSelected ? 'var(--color-accent-glow)' : undefined,
                           }}
                         >
@@ -915,7 +924,7 @@ export function ConversationPanel({
               }
             }}
             placeholder={t('query.placeholder')}
-            className="flex-1 rounded-md border px-3 py-2 text-sm outline-none"
+            className="min-w-0 flex-1 rounded-xl border px-3 py-2 text-sm outline-none"
             style={{
               background: 'var(--bg-2)',
               borderColor: 'var(--border)',
@@ -938,15 +947,17 @@ export function ConversationPanel({
             <button
               type="submit"
               disabled={driveReconnectPending || !input.trim()}
+              aria-label={t('query.send')}
+              title={t('query.send')}
               className="min-h-11 min-w-11 rounded-md p-2 focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-50"
-              style={{ background: 'var(--color-accent)', color: 'oklch(10% 0.015 250)' }}
+              style={{ background: 'var(--color-accent)', color: 'var(--on-accent)' }}
             >
-              <Send size={14} />
+              <Send size={16} />
             </button>
           )}
         </div>
         {(selectedProfile || queryMode) && (
-          <p className="mt-1 truncate text-xs" style={{ color: 'var(--fg-muted)', opacity: 0.7 }}>
+          <p className="mt-1 truncate text-xs" style={{ color: 'var(--fg-muted)' }}>
             {selectedProfile?.name} {selectedProfile ? '· ' : ''}
             {queryMode === 'standard' ? t('query.modeStandard') : t('query.modeFaithful')}
           </p>

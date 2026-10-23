@@ -1,5 +1,6 @@
 {
   "common": {
+    "more": "More",
     "loading": "Loading...",
     "error": "Something went wrong",
     "save": "Save",
@@ -173,6 +174,7 @@
     "retry": "Retry"
   },
   "query": {
+    "send": "Send message",
     "placeholder": "Ask your wiki anything...",
     "fileBack": "Save as synthesis page",
     "sources": "Sources",

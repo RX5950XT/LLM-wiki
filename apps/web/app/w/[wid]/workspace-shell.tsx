@@ -3,7 +3,7 @@
 import { useState, useCallback, useRef, useEffect, useMemo, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { PanelLeft, PanelRight, GitFork, ChevronDown, LogOut, Plus, Settings, Search, Loader2, HelpCircle, Pencil, Trash2, GripVertical, Library, Wrench, CheckCircle2, AlertCircle, X } from 'lucide-react';
+import { PanelLeft, PanelRight, Ellipsis, GitFork, ChevronDown, LogOut, Plus, Settings, Search, Loader2, HelpCircle, Pencil, Trash2, GripVertical, Library, Wrench, CheckCircle2, AlertCircle, X } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import { PageTree } from '@/components/wiki/page-tree';
 import { PageViewer } from '@/components/wiki/page-viewer';
@@ -194,6 +194,9 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
     [recoveredMaintenance],
   );
   const [showWsMenu, setShowWsMenu] = useState(false);
+  const [showTools, setShowTools] = useState(false);
+  const toolsRef = useRef<HTMLDivElement>(null);
+  const toolsButtonRef = useRef<HTMLButtonElement>(null);
   const [showHelp, setShowHelp] = useState(false);
   const [showSources, setShowSources] = useState(false);
   const [workspaceList, setWorkspaceList] = useState(workspaces);
@@ -492,6 +495,9 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
     const onClick = (e: MouseEvent) => {
       if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
         setShowSearch(false);
+      }
+      if (toolsRef.current && !toolsRef.current.contains(e.target as Node)) {
+        setShowTools(false);
       }
     };
     document.addEventListener('mousedown', onClick);
@@ -841,37 +847,40 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
     }
   }, [persistWorkspaceOrder, workspaceList]);
 
-  // Secondary top-bar actions. Below md they move into the drawer footer (the
-  // Android drawer's bottom row) so the phone-width header never overflows.
+  // Secondary actions share one labelled list on desktop and phone.
   const toolButtons = (
     <>
           {/* Sources list */}
           <button
             onClick={() => setShowSources(true)}
-            className="rounded p-1 transition-all duration-100 hover:opacity-70 active:scale-90"
+            className="workspace-action"
             style={{ color: 'var(--fg-muted)' }}
             aria-label={t('sources.open')}
             title={t('sources.open')}
           >
-            <Library size={16} />
+            <Library size={16} /> {t('sources.open')}
           </button>
 
           {/* Graph view toggle */}
           <button
-            onClick={() => setShowGraph((g) => !g)}
-            className="rounded p-1 transition-all duration-100 hover:opacity-70 active:scale-90"
+            onClick={() => {
+              setShowGraph((g) => !g);
+              if (isMobile) setRightOpenOverride(false);
+            }}
+            aria-pressed={showGraph}
+            className="workspace-action"
             style={{ color: showGraph ? 'var(--color-accent)' : 'var(--fg-muted)' }}
             aria-label={t('workspace.toggleGraphView')}
             title={t('workspace.graphView')}
           >
-            <GitFork size={16} />
+            <GitFork size={16} /> {t('workspace.graphView')}
           </button>
 
           {/* Maintenance: health check + organize/dedupe in one background pass */}
           <button
             onClick={startMaintenance}
             disabled={maintenance?.status === 'running'}
-            className="rounded p-1 transition-all duration-100 hover:opacity-70 active:scale-90 disabled:cursor-default"
+            className="workspace-action disabled:cursor-default"
             style={{ color: maintenance?.status === 'running' ? 'var(--color-accent)' : 'var(--fg-muted)' }}
             aria-label={t('workspace.maintenance')}
             title={t('workspace.maintenanceDesc')}
@@ -881,6 +890,7 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
             ) : (
               <Wrench size={16} />
             )}
+            {t('workspace.maintenance')}
           </button>
 
     </>
@@ -890,53 +900,53 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
           <Link
             href="/settings"
             prefetch
-            className="rounded p-1 transition-all duration-100 hover:opacity-70 active:scale-90"
+            className="workspace-action"
             style={{ color: 'var(--fg-muted)' }}
             aria-label={t('common.settings')}
             title={t('common.settings')}
           >
-            <Settings size={16} />
+            <Settings size={16} /> {t('common.settings')}
           </Link>
 
           <button
             onClick={() => setShowHelp(true)}
-            className="rounded p-1 transition-all duration-100 hover:opacity-70 active:scale-90"
+            className="workspace-action"
             style={{ color: 'var(--fg-muted)' }}
             aria-label={t('help.open')}
             title={t('help.open')}
           >
-            <HelpCircle size={16} />
+            <HelpCircle size={16} /> {t('help.open')}
           </button>
 
           {/* Logout */}
           <button
             onClick={handleSignOut}
-            className="rounded p-1 transition-all duration-100 hover:opacity-70 active:scale-90"
+            className="workspace-action"
             style={{ color: 'var(--fg-muted)' }}
             aria-label={t('auth.signOut')}
             title={t('auth.signOut')}
           >
-            <LogOut size={16} />
+            <LogOut size={16} /> {t('auth.signOut')}
           </button>
     </>
   );
 
   return (
     <div
-      className="flex h-screen flex-col"
+      className="flex h-dvh flex-col"
       style={{ background: 'var(--bg)', color: 'var(--fg)' }}
     >
       {/* Top bar */}
       <header
-        className="flex h-10 items-center justify-between border-b px-4"
-        style={{ borderColor: 'var(--border)', background: 'var(--bg-2)' }}
+        className="flex h-14 shrink-0 items-center justify-between gap-1 border-b px-2 md:px-4"
+        style={{ borderColor: 'var(--border)', background: 'var(--surface)' }}
       >
-        <div className="flex items-center gap-3">
+        <div className="flex min-w-0 items-center gap-1 md:gap-3">
           <button
             onClick={() => setLeftOpenOverride((current) =>
               togglePanelOverride(current, responsivePanels.leftOpen),
             )}
-            className="rounded p-1 transition-all duration-100 hover:opacity-70 active:scale-90"
+            className="icon-button"
             style={{ color: 'var(--fg-muted)' }}
             aria-label={t('workspace.toggleSidebar')}
             title={t('workspace.toggleSidebar')}
@@ -945,11 +955,11 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
           </button>
 
           {/* Workspace switcher */}
-          <div className="relative">
+          <div className="relative min-w-0">
             <button
               onClick={() => setShowWsMenu((o) => !o)}
-              className="flex min-w-0 max-w-[260px] items-center md:min-w-[180px] justify-between gap-3 rounded-lg border px-3 py-1.5 text-sm font-medium transition-all duration-150 hover:opacity-80 active:scale-[0.98]"
-              style={{ color: 'var(--fg)', background: 'var(--bg)', borderColor: 'var(--border)' }}
+              className="flex min-h-11 w-full min-w-0 max-w-[260px] items-center justify-between gap-2 rounded-lg px-2 text-sm font-medium hover:bg-[var(--bg-2)] md:min-w-[180px]"
+              style={{ color: 'var(--fg)' }}
               aria-expanded={showWsMenu}
               aria-label={t('workspace.switchWorkspace')}
             >
@@ -1073,12 +1083,12 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-0.5 md:gap-1">
           {/* Search */}
           <div className="relative" ref={searchRef}>
             <button
               onClick={() => setShowSearch((s) => !s)}
-              className="rounded p-1 transition-all duration-100 hover:opacity-70 active:scale-90"
+              className="icon-button"
               style={{ color: showSearch ? 'var(--color-accent)' : 'var(--fg-muted)' }}
               aria-label={t('common.search')}
               title={t('common.search')}
@@ -1088,7 +1098,7 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
 
             {showSearch && (
               <div
-                className="absolute right-0 top-full z-50 mt-1 w-72 overflow-hidden rounded-lg border shadow-lg"
+                className="fixed left-3 right-3 top-16 z-50 overflow-hidden rounded-xl border shadow-lg md:absolute md:left-auto md:right-0 md:top-full md:mt-2 md:w-80"
                 style={{ background: 'var(--bg-2)', borderColor: 'var(--border)' }}
               >
                 <div className="px-3 py-2">
@@ -1159,13 +1169,11 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
             )}
           </div>
 
-          <div className="hidden items-center gap-2 md:flex">{toolButtons}</div>
-
           <button
             onClick={() => setRightOpenOverride((current) =>
               togglePanelOverride(current, responsivePanels.rightOpen),
             )}
-            className="rounded p-1 transition-all duration-100 hover:opacity-70 active:scale-90"
+            className="icon-button"
             style={{ color: 'var(--fg-muted)' }}
             aria-label={t('workspace.toggleConversation')}
             title={t('workspace.toggleConversation')}
@@ -1173,7 +1181,47 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
             <PanelRight size={16} />
           </button>
 
-          <div className="hidden items-center gap-2 md:flex">{accountButtons}</div>
+          <div
+            className="relative"
+            ref={toolsRef}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') {
+                setShowTools(false);
+                toolsButtonRef.current?.focus();
+              }
+            }}
+            onBlur={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget)) setShowTools(false);
+            }}
+          >
+            <button
+              ref={toolsButtonRef}
+              type="button"
+              className="icon-button gap-1 px-2"
+              onClick={() => setShowTools((open) => !open)}
+              aria-label={t('common.more')}
+              title={t('common.more')}
+              aria-expanded={showTools}
+              aria-controls="workspace-tools"
+            >
+              <Ellipsis size={18} />
+              <span className="hidden text-sm md:inline">{t('common.more')}</span>
+            </button>
+            {showTools && (
+              <div
+                id="workspace-tools"
+                className="absolute right-0 top-full z-50 mt-2 w-60 rounded-xl border p-1.5 shadow-lg"
+                style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
+                onClick={(event) => {
+                  if ((event.target as Element).closest('button, a')) setShowTools(false);
+                }}
+              >
+                {toolButtons}
+                <div className="my-1 border-t" style={{ borderColor: 'var(--border)' }} />
+                {accountButtons}
+              </div>
+            )}
+          </div>
         </div>
       </header>
 
@@ -1289,14 +1337,7 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
                   }}
                 />
               </div>
-              <div
-                className="flex items-center justify-around border-t px-2 py-2 [&_a]:p-2 [&_button]:p-2"
-                style={{ borderColor: 'var(--border)' }}
-                onClick={() => setLeftOpenOverride(false)}
-              >
-                {toolButtons}
-                {accountButtons}
-              </div>
+
             </div>
           </>
         )}
@@ -1509,7 +1550,7 @@ function WorkspaceRenameDialog({
             type="submit"
             disabled={loading || !name.trim()}
             className="rounded-md px-3 py-2 text-sm font-medium disabled:opacity-50"
-            style={{ background: 'var(--color-accent)', color: 'oklch(10% 0.015 250)' }}
+            style={{ background: 'var(--color-accent)', color: 'var(--on-accent)' }}
           >
             {t('common.save')}
           </button>

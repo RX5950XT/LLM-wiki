@@ -52,6 +52,12 @@ data class PageLinkRow(
     @SerialName("from_slug") val fromSlug: String,
 )
 
+@Serializable
+data class PageEdgeRow(
+    @SerialName("from_slug") val fromSlug: String,
+    @SerialName("to_slug") val toSlug: String,
+)
+
 /** A page in one of the user's other workspaces — the target of a re-shelved wiki link. */
 @Serializable
 data class WikiTargetRow(

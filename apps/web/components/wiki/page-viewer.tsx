@@ -498,7 +498,7 @@ export function PageViewer({
               }}
               disabled={reconnectPending}
               className="rounded-lg px-3 py-2 text-sm font-medium transition-opacity hover:opacity-80 disabled:opacity-50"
-              style={{ background: 'var(--color-accent)', color: 'oklch(10% 0.015 250)' }}
+              style={{ background: 'var(--color-accent)', color: 'var(--on-accent)' }}
             >
               {reconnectPending ? t('common.reconnectingDrive') : t('auth.driveAccessRequired')}
             </button>
@@ -509,7 +509,7 @@ export function PageViewer({
   }
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-col" style={{ background: 'var(--surface)' }}>
       {/* Inline action error (lock/save failures) */}
       {actionError && (
         <div
@@ -676,7 +676,7 @@ export function PageViewer({
             />
           </div>
         ) : (
-          <article className="wiki-prose max-w-none">
+          <article className="wiki-prose mx-auto max-w-[72ch]">
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
               urlTransform={preserveWikiUrlTransform}

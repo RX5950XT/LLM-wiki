@@ -1,5 +1,6 @@
 {
   "common": {
+    "more": "更多",
     "loading": "載入中...",
     "error": "發生錯誤",
     "save": "儲存",
@@ -173,6 +174,7 @@
     "retry": "重試"
   },
   "query": {
+    "send": "傳送訊息",
     "placeholder": "問問你的 Wiki 任何問題...",
     "fileBack": "存成綜合頁面",
     "sources": "來源",

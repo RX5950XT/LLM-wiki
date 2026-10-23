@@ -8,15 +8,18 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import com.llmwiki.data.ThemeMode
 
 private val DarkColorScheme = darkColorScheme(
     primary = Accent,
-    onPrimary = Bg,
+    onPrimary = Color(0xFF082F2A),
     primaryContainer = AccentContainerDark,
     onPrimaryContainer = AccentOnContainerDark,
-    secondaryContainer = BorderDark,
+    secondary = FgMuted,
+    onSecondary = Bg,
+    secondaryContainer = SurfaceContainerDark,
     onSecondaryContainer = FgDark,
     error = ErrorDark,
     errorContainer = ErrorContainerDark,
@@ -25,9 +28,10 @@ private val DarkColorScheme = darkColorScheme(
     onBackground = FgDark,
     surface = Bg2,
     onSurface = FgDark,
-    surfaceVariant = Bg2,
+    surfaceVariant = SurfaceContainerDark,
     onSurfaceVariant = FgMuted,
-    outline = BorderDark,
+    outline = FgMuted,
+    outlineVariant = BorderDark,
     surfaceContainerLowest = SurfaceContainerLowestDark,
     surfaceContainerLow = SurfaceContainerLowDark,
     surfaceContainer = SurfaceContainerDark,
@@ -37,20 +41,23 @@ private val DarkColorScheme = darkColorScheme(
 
 private val LightColorScheme = lightColorScheme(
     primary = AccentDark,
-    onPrimary = BgLight,
+    onPrimary = Color.White,
     primaryContainer = AccentContainerLight,
     onPrimaryContainer = AccentOnContainerLight,
+    secondary = FgMutedLight,
+    onSecondary = Color.White,
     secondaryContainer = Bg2Light,
     onSecondaryContainer = FgLight,
     errorContainer = ErrorContainerLight,
     onErrorContainer = ErrorOnContainerLight,
     background = BgLight,
     onBackground = FgLight,
-    surface = Bg2Light,
+    surface = Color.White,
     onSurface = FgLight,
     surfaceVariant = Bg2Light,
     onSurfaceVariant = FgMutedLight,
-    outline = BorderLight,
+    outline = FgMutedLight,
+    outlineVariant = BorderLight,
     surfaceContainerLowest = SurfaceContainerLowestLight,
     surfaceContainerLow = SurfaceContainerLowLight,
     surfaceContainer = SurfaceContainerLight,

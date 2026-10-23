@@ -177,3 +177,21 @@
 - lint：38 warnings / 0 errors；剩餘為 37 個診斷 `console` 與 1 個 module export 格式警告。
 - `bun run test`：140 pass / 0 fail；`bun run typecheck`：5/5；`bun run build`：成功。
 - `apps/android` 執行 `.\gradlew.bat :app:assembleDebug`：BUILD SUCCESSFUL；實機測試依使用者指示延後。
+
+# Web / Android 介面簡化與功能對齊（2026-10-23）
+
+- [x] 盤點兩端功能與真實畫面，建立功能對照表。
+- [x] 統一明暗配色、簡化常駐按鈕，保留清楚的功能入口與操作確認。
+- [x] 補齊 Android 缺少的 Web 功能（知識圖譜），驗證資料契約與錯誤狀態。
+- [x] Web 測試／型別／建置與 Android unit tests／debug APK 建置。
+- [ ] Pixel 6a 實機驗收（接手時手機已未連線，adb 找不到裝置）。
+- [x] 完成 review、提交並推送目前分支。
+
+### Review
+
+- 配色：Web `packages/ui/src/styles.css` 與 Android `Color.kt` 改為同一組 slate 底色＋青綠 accent；新增 `--surface` / `--surface-secondary` / `--on-accent`。
+- Web：頂列只留側欄、工作區、搜尋、對話、「更多」；來源、圖譜、維護、設定、說明、登出收進「更多」選單（桌面與手機同一份）。
+- Android：抽屜底部 7 顆圖示 → 「工具」選單＋「設定」；頁面頂列只留搜尋＋「⋮」（鎖定、編輯、重新整理）；側欄頁面列表不再有鎖頭按鈕，只顯示已鎖定標記；對話 FAB 加上文字。
+- 對齊：Android 新增知識圖譜（`GraphView.kt`，讀 `page_links`、alias 解析、kind 配色、孤兒空心、縮放拖曳、點節點開頁），圖譜洞察移到圖譜內，與 Web 相同。
+- 修 Codex 中斷遺留：`workspace-shell.probe.mjs` 的 lucide mock 缺新圖示導致 3 個測試失敗。
+- `bun run test` 149/149、`bun run typecheck --force` 5/5、`bun run build` 成功；`:app:testDebugUnitTest`、`:app:assembleDebug` 成功。

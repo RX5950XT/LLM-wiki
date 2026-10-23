@@ -100,7 +100,7 @@ export function CreateWorkspaceForm() {
         className="w-full rounded-lg px-4 py-2.5 text-sm font-medium disabled:opacity-50"
         style={{
           background: 'var(--color-accent)',
-          color: 'oklch(10% 0.015 250)',
+          color: 'var(--on-accent)',
           transitionDuration: 'var(--transition-default)',
         }}
       >

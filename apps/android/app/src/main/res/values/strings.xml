@@ -117,6 +117,13 @@
     <string name="graph_insights_title">Graph insights</string>
     <string name="graph_insights_retry">Retry</string>
     <string name="graph_insights_empty">No graph data yet</string>
+    <string name="graph_view_title">Knowledge graph</string>
+    <string name="graph_orphans">%1$d pages · %2$d unlinked</string>
+    <string name="wiki_tools">Tools</string>
+    <string name="wiki_page_actions">Page actions</string>
+    <string name="wiki_lock_page">Lock page</string>
+    <string name="wiki_unlock_page">Unlock page</string>
+    <string name="error_op_graph">Failed to load the graph</string>
     <string name="graph_count_pages">Pages: %1$d</string>
     <string name="graph_count_links">Links: %1$d</string>
     <string name="graph_count_orphans">Orphans: %1$d</string>

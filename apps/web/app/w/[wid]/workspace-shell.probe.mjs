@@ -8,7 +8,7 @@ const router = { prefetch() {}, push() {} };
 const translate = (key, values) => values ? `${key}:${JSON.stringify(values)}` : key;
 const Icon = () => React.createElement('span');
 const iconNames = [
-  'PanelLeft', 'PanelRight', 'GitFork', 'ChevronDown', 'LogOut', 'Plus', 'Settings', 'Search',
+  'PanelLeft', 'PanelRight', 'Ellipsis', 'GitFork', 'ChevronDown', 'LogOut', 'Plus', 'Settings', 'Search',
   'Loader2', 'HelpCircle', 'Pencil', 'Trash2', 'GripVertical', 'Library', 'Wrench',
   'CheckCircle2', 'AlertCircle', 'X',
 ];

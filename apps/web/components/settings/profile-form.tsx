@@ -183,7 +183,7 @@ export function ProfileForm({
               type="submit"
               disabled={submitting}
               className="flex-1 rounded-lg px-4 py-2 text-sm font-medium disabled:opacity-50"
-              style={{ background: 'var(--color-accent)', color: 'oklch(10% 0.015 250)' }}
+              style={{ background: 'var(--color-accent)', color: 'var(--on-accent)' }}
             >
               {submitting ? '...' : isEdit ? tCommon('save') : t('addProfile')}
             </button>

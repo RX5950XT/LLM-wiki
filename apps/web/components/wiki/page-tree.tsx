@@ -43,13 +43,14 @@ export function PageTree({ initialPages, activePage, onSelectPage }: PageTreePro
       style={{
         background: activePage === page.slug ? 'var(--color-accent-glow)' : undefined,
         color: activePage === page.slug ? 'var(--color-accent)' : 'var(--fg)',
-        borderLeft: activePage === page.slug ? '2px solid var(--color-accent)' : '2px solid transparent',
+        fontWeight: activePage === page.slug ? 600 : undefined,
       }}
-      className="flex items-center gap-1 pr-2"
+      className="mx-2 flex items-center gap-1 rounded-lg pr-2"
     >
       <button
         onClick={() => onSelectPage(page.slug)}
-        className="flex min-w-0 flex-1 items-center px-4 py-1.5 text-left text-sm transition-colors"
+        aria-current={activePage === page.slug ? 'page' : undefined}
+        className="flex min-h-11 min-w-0 flex-1 items-center px-3 py-2 text-left text-sm transition-colors"
       >
         <span className="truncate">{label ?? page.title ?? page.slug}</span>
       </button>
@@ -77,7 +78,8 @@ export function PageTree({ initialPages, activePage, onSelectPage }: PageTreePro
         <div className="flex items-center justify-between px-3 py-1.5">
           <button
             onClick={() => setExpanded((s) => !s)}
-            className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider transition-opacity hover:opacity-70"
+            aria-expanded={expanded}
+            className="flex min-h-11 items-center gap-1.5 text-xs font-semibold transition-opacity hover:opacity-70"
             style={{ color: 'var(--fg-muted)' }}
           >
             {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}

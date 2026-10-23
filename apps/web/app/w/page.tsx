@@ -34,7 +34,7 @@ export default async function WorkspacesPage() {
           className="inline-block rounded-lg px-5 py-2.5 text-sm font-medium"
           style={{
             background: 'var(--color-accent)',
-            color: 'oklch(10% 0.015 250)',
+            color: 'var(--on-accent)',
           }}
         >
           {t('create')}

@@ -69,7 +69,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -84,7 +84,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
@@ -172,10 +171,13 @@ fun WikiScreen(
     var pendingShareUrl by rememberSaveable { mutableStateOf<String?>(null) }
     var showChatSheet by rememberSaveable { mutableStateOf(false) }
     var showWorkspaceMenu by remember { mutableStateOf(false) }
+    var showToolsMenu by remember { mutableStateOf(false) }
+    var showPageMenu by remember { mutableStateOf(false) }
     var showHelpDialog by rememberSaveable { mutableStateOf(false) }
     var showSourcesDialog by rememberSaveable { mutableStateOf(false) }
     var showIngestQueueDialog by rememberSaveable { mutableStateOf(false) }
     var showGraphInsightsDialog by rememberSaveable { mutableStateOf(false) }
+    var showGraphDialog by rememberSaveable { mutableStateOf(false) }
     var showMaintenanceConfirm by rememberSaveable { mutableStateOf(false) }
     var showSignOutConfirm by rememberSaveable { mutableStateOf(false) }
     var renameWorkspace by remember { mutableStateOf<WorkspaceRow?>(null) }
@@ -420,9 +422,6 @@ fun WikiScreen(
                                             wikiViewModel.selectPage(page)
                                             scope.launch { drawerState.close() }
                                         },
-                                        onToggleLock = {
-                                            wikiViewModel.toggleLock(page.slug, page.lockedByHuman)
-                                        },
                                     )
                                 }
                                 item {
@@ -448,9 +447,6 @@ fun WikiScreen(
                                             wikiViewModel.selectPage(page)
                                             scope.launch { drawerState.close() }
                                         },
-                                        onToggleLock = {
-                                            wikiViewModel.toggleLock(page.slug, page.lockedByHuman)
-                                        },
                                     )
                                 }
                             }
@@ -463,84 +459,97 @@ fun WikiScreen(
                     Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 12.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    IconButton(onClick = { showHelpDialog = true }) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.Help,
-                            contentDescription = stringResource(R.string.help_title),
-                        )
-                    }
-                    IconButton(onClick = {
-                        showSourcesDialog = true
-                        wikiViewModel.loadSources()
-                        scope.launch { drawerState.close() }
-                    }) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.LibraryBooks,
-                            contentDescription = stringResource(R.string.sources_title),
-                        )
-                    }
-                    IconButton(onClick = {
-                        showIngestQueueDialog = true
-                        wikiViewModel.loadIngestJobs()
-                        scope.launch { drawerState.close() }
-                    }) {
-                        Icon(
-                            Icons.Default.AttachFile,
-                            contentDescription = stringResource(R.string.ingest_queue_title),
-                        )
-                    }
-                    IconButton(onClick = {
-                        showGraphInsightsDialog = true
-                        wikiViewModel.loadGraphInsights()
-                        scope.launch { drawerState.close() }
-                    }) {
-                        Icon(
-                            Icons.Default.Share,
-                            contentDescription = stringResource(R.string.graph_insights_title),
-                        )
-                    }
-                    // Single maintenance action: health check + dedupe in one pass
-                    IconButton(
-                        onClick = {
-                            showMaintenanceConfirm = true
-                            scope.launch { drawerState.close() }
-                        },
-                        enabled = !uiState.organizeRunning,
-                    ) {
-                        if (uiState.organizeRunning) {
-                            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                        } else {
-                            Icon(
-                                Icons.Default.Build,
-                                contentDescription = stringResource(R.string.wiki_maintenance),
+                    Box(Modifier.weight(1f)) {
+                        TextButton(
+                            onClick = { showToolsMenu = true },
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                        ) {
+                            Icon(Icons.Default.MoreVert, contentDescription = null)
+                            Spacer(Modifier.width(8.dp))
+                            Text(stringResource(R.string.wiki_tools))
+                            if (uiState.organizeRunning) {
+                                Spacer(Modifier.width(8.dp))
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                            }
+                        }
+                        DropdownMenu(
+                            expanded = showToolsMenu,
+                            onDismissRequest = { showToolsMenu = false },
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.sources_title)) },
+                                leadingIcon = { Icon(Icons.AutoMirrored.Filled.LibraryBooks, contentDescription = null) },
+                                onClick = {
+                                    showToolsMenu = false
+                                    showSourcesDialog = true
+                                    wikiViewModel.loadSources()
+                                    scope.launch { drawerState.close() }
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.ingest_queue_title)) },
+                                leadingIcon = { Icon(Icons.Default.AttachFile, contentDescription = null) },
+                                onClick = {
+                                    showToolsMenu = false
+                                    showIngestQueueDialog = true
+                                    wikiViewModel.loadIngestJobs()
+                                    scope.launch { drawerState.close() }
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.graph_view_title)) },
+                                leadingIcon = { Icon(Icons.Default.Share, contentDescription = null) },
+                                onClick = {
+                                    showToolsMenu = false
+                                    showGraphDialog = true
+                                    wikiViewModel.loadGraph()
+                                    scope.launch { drawerState.close() }
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.wiki_maintenance)) },
+                                leadingIcon = { Icon(Icons.Default.Build, contentDescription = null) },
+                                enabled = !uiState.organizeRunning,
+                                onClick = {
+                                    showToolsMenu = false
+                                    showMaintenanceConfirm = true
+                                    scope.launch { drawerState.close() }
+                                },
+                            )
+                            HorizontalDivider()
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.help_title)) },
+                                leadingIcon = { Icon(Icons.AutoMirrored.Filled.Help, contentDescription = null) },
+                                onClick = {
+                                    showToolsMenu = false
+                                    showHelpDialog = true
+                                    scope.launch { drawerState.close() }
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.auth_sign_out)) },
+                                leadingIcon = { Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = null) },
+                                onClick = {
+                                    showToolsMenu = false
+                                    showSignOutConfirm = true
+                                    scope.launch { drawerState.close() }
+                                },
                             )
                         }
                     }
-                    IconButton(onClick = {
-                        scope.launch { drawerState.close() }
-                        onNavigateToSettings(uiState.workspace?.id)
-                    }) {
-                        Icon(
-                            Icons.Default.Settings,
-                            contentDescription = stringResource(R.string.settings_title),
-                        )
-                    }
-                    IconButton(
+                    TextButton(
                         onClick = {
                             scope.launch { drawerState.close() }
-                            showSignOutConfirm = true
+                            onNavigateToSettings(uiState.workspace?.id)
                         },
-                        colors = IconButtonDefaults.iconButtonColors(
-                            contentColor = MaterialTheme.colorScheme.error,
-                        ),
+                        modifier = Modifier.weight(1f).heightIn(min = 48.dp),
                     ) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.Logout,
-                            contentDescription = stringResource(R.string.auth_sign_out),
-                        )
+                        Icon(Icons.Default.Settings, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text(stringResource(R.string.settings_title))
                     }
                 }
                 Spacer(Modifier.height(8.dp))
@@ -599,28 +608,8 @@ fun WikiScreen(
                             }
                         } else {
                             val editablePage = uiState.activePage?.takeIf { isHumanEditablePage(it) && uiState.pageContent != null }
-                            val isInlineEditing = inlineEditorPageSlug == editablePage?.slug
-                            IconButton(onClick = { wikiViewModel.toggleSearch() }) {
-                                Icon(Icons.Default.Search, contentDescription = stringResource(R.string.wiki_search))
-                            }
-                            // Same lock toggle the Web page header has, on the page itself
-                            uiState.activePage?.let { page ->
-                                IconButton(onClick = { wikiViewModel.toggleLock(page.slug, page.lockedByHuman) }) {
-                                    Icon(
-                                        if (page.lockedByHuman) Icons.Default.Lock else Icons.Default.LockOpen,
-                                        contentDescription = stringResource(
-                                            if (page.lockedByHuman) R.string.wiki_locked else R.string.wiki_unlocked,
-                                        ),
-                                        tint = if (page.lockedByHuman) {
-                                            MaterialTheme.colorScheme.primary
-                                        } else {
-                                            MaterialTheme.colorScheme.onSurfaceVariant
-                                        },
-                                    )
-                                }
-                            }
-                            if (editablePage != null) {
-                                if (isInlineEditing) {
+                            val isInlineEditing = editablePage != null && inlineEditorPageSlug == editablePage.slug
+                            if (isInlineEditing && editablePage != null) {
                                     IconButton(onClick = {
                                         inlineEditorPageSlug = null
                                         inlineEditorValue = TextFieldValue(uiState.pageContent.orEmpty())
@@ -648,23 +637,52 @@ fun WikiScreen(
                                             Icon(Icons.Default.Check, contentDescription = stringResource(R.string.action_save))
                                         }
                                     }
-                                } else {
-                                    IconButton(onClick = {
-                                        inlineEditorPageSlug = editablePage.slug
-                                        inlineEditorValue = TextFieldValue(uiState.pageContent.orEmpty())
-                                    }) {
-                                        Icon(Icons.Default.Edit, contentDescription = stringResource(R.string.action_edit))
-                                    }
-                                }
-                            }
-                            if (uiState.contentLoading || uiState.syncLoading) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(24.dp).padding(end = 4.dp),
-                                    strokeWidth = 2.dp,
-                                )
                             } else {
-                                IconButton(onClick = { wikiViewModel.syncPages() }) {
-                                    Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.wiki_sync))
+                                if (uiState.contentLoading || uiState.syncLoading) {
+                                    CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                                }
+                                IconButton(onClick = { wikiViewModel.toggleSearch() }) {
+                                    Icon(Icons.Default.Search, contentDescription = stringResource(R.string.wiki_search))
+                                }
+                                Box {
+                                    IconButton(onClick = { showPageMenu = true }) {
+                                        Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.wiki_page_actions))
+                                    }
+                                    DropdownMenu(
+                                        expanded = showPageMenu,
+                                        onDismissRequest = { showPageMenu = false },
+                                    ) {
+                                        uiState.activePage?.let { page ->
+                                            DropdownMenuItem(
+                                                text = { Text(stringResource(if (page.lockedByHuman) R.string.wiki_unlock_page else R.string.wiki_lock_page)) },
+                                                leadingIcon = { Icon(if (page.lockedByHuman) Icons.Default.LockOpen else Icons.Default.Lock, contentDescription = null) },
+                                                onClick = {
+                                                    showPageMenu = false
+                                                    wikiViewModel.toggleLock(page.slug, page.lockedByHuman)
+                                                },
+                                            )
+                                        }
+                                        if (editablePage != null) {
+                                            DropdownMenuItem(
+                                                text = { Text(stringResource(R.string.action_edit)) },
+                                                leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
+                                                onClick = {
+                                                    showPageMenu = false
+                                                    inlineEditorPageSlug = editablePage.slug
+                                                    inlineEditorValue = TextFieldValue(uiState.pageContent.orEmpty())
+                                                },
+                                            )
+                                        }
+                                        DropdownMenuItem(
+                                            text = { Text(stringResource(R.string.wiki_sync)) },
+                                            leadingIcon = { Icon(Icons.Default.Refresh, contentDescription = null) },
+                                            enabled = !uiState.contentLoading && !uiState.syncLoading,
+                                            onClick = {
+                                                showPageMenu = false
+                                                wikiViewModel.syncPages()
+                                            },
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -674,13 +692,13 @@ fun WikiScreen(
             floatingActionButton = {
                 if (!uiState.showSearch) {
                     // Import lives inside the chat sheet's action menu now — one FAB
-                    FloatingActionButton(
+                    ExtendedFloatingActionButton(
                         onClick = { showChatSheet = true },
                         containerColor = MaterialTheme.colorScheme.primary,
                         contentColor = MaterialTheme.colorScheme.onPrimary,
-                    ) {
-                        Icon(Icons.Default.ChatBubbleOutline, contentDescription = stringResource(R.string.wiki_chat))
-                    }
+                        icon = { Icon(Icons.Default.ChatBubbleOutline, contentDescription = null) },
+                        text = { Text(stringResource(R.string.wiki_chat)) },
+                    )
                 }
             },
         ) { innerPadding ->
@@ -1105,6 +1123,25 @@ fun WikiScreen(
         )
     }
 
+    if (showGraphDialog) {
+        GraphViewDialog(
+            pages = pages,
+            edges = uiState.graphEdges,
+            isLoading = uiState.graphLoading,
+            error = uiState.graphError,
+            onRetry = { wikiViewModel.loadGraph() },
+            onOpenInsights = {
+                showGraphInsightsDialog = true
+                wikiViewModel.loadGraphInsights()
+            },
+            onPageClick = { slug ->
+                showGraphDialog = false
+                wikiViewModel.selectPageBySlug(slug)
+            },
+            onDismiss = { showGraphDialog = false },
+        )
+    }
+
     if (showGraphInsightsDialog) {
         GraphInsightsDialog(
             insights = uiState.graphInsights,
@@ -1113,6 +1150,7 @@ fun WikiScreen(
             onRetry = { wikiViewModel.loadGraphInsights() },
             onPageClick = { slug ->
                 showGraphInsightsDialog = false
+                showGraphDialog = false
                 wikiViewModel.selectPageBySlug(slug)
             },
             onDismiss = { showGraphInsightsDialog = false },
@@ -1201,7 +1239,7 @@ private fun WorkspaceMenuRow(
             }
             IconButton(
                 onClick = { showActions = true },
-                modifier = Modifier.size(44.dp),
+                modifier = Modifier.size(48.dp),
             ) {
                 Icon(
                     Icons.Default.MoreVert,
@@ -1463,27 +1501,20 @@ private fun PageListItem(
     page: PageEntity,
     isSelected: Boolean,
     onClick: () -> Unit,
-    onToggleLock: () -> Unit,
     label: String? = null,
 ) {
     NavigationDrawerItem(
-        label = { Text(label ?: page.title ?: page.slug, maxLines = 1) },
+        label = { Text(label ?: page.title ?: page.slug, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         selected = isSelected,
         onClick = onClick,
         modifier = Modifier.padding(horizontal = 8.dp),
         badge = {
-            IconButton(onClick = onToggleLock) {
+            if (page.lockedByHuman) {
                 Icon(
-                    if (page.lockedByHuman) Icons.Default.Lock else Icons.Default.LockOpen,
-                    contentDescription = if (page.lockedByHuman)
-                        stringResource(R.string.wiki_locked)
-                    else
-                        stringResource(R.string.wiki_unlocked),
-                    modifier = Modifier.size(20.dp),
-                    tint = if (page.lockedByHuman)
-                        MaterialTheme.colorScheme.primary
-                    else
-                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
+                    Icons.Default.Lock,
+                    contentDescription = stringResource(R.string.wiki_locked),
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         },
@@ -1724,8 +1755,7 @@ private fun ChatBottomSheet(
                         onClick = { showActionMenu = true },
                         modifier = Modifier.size(56.dp),
                         colors = IconButtonDefaults.iconButtonColors(
-                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                         ),
                     ) {
                         Icon(

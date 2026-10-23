@@ -1,32 +1,32 @@
 /**
  * LLM Wiki — base design tokens.
- * LLM Wiki base tokens: ink + paper neutrals, teal-blue accent, OKLCH color space.
+ * Shared with Android: quiet slate surfaces and a teal action color.
  *
  * Consumed by apps/web via @import. Tailwind v4 reads @theme blocks here too.
  */
 
 @theme {
   /* Backgrounds */
-  --color-bg-dark: oklch(15% 0.015 250);
-  --color-bg-dark-2: oklch(18% 0.015 250);
-  --color-bg-light: oklch(98% 0.005 90);
-  --color-bg-light-2: oklch(96% 0.005 90);
+  --color-bg-dark: #11181c;
+  --color-bg-dark-2: #182126;
+  --color-bg-light: #f8fafc;
+  --color-bg-light-2: #f1f5f9;
 
   /* Text */
-  --color-fg-dark: oklch(92% 0.01 250);
-  --color-fg-dark-muted: oklch(65% 0.01 250);
-  --color-fg-light: oklch(20% 0.015 250);
-  --color-fg-light-muted: oklch(45% 0.015 250);
+  --color-fg-dark: #e6edf0;
+  --color-fg-dark-muted: #a7b6bd;
+  --color-fg-light: #1e293b;
+  --color-fg-light-muted: #475569;
 
   /* Accent (teal-blue, shared across themes) */
-  --color-accent: oklch(72% 0.14 205);
-  --color-accent-strong: oklch(63% 0.16 245);
-  --color-accent-muted: oklch(72% 0.14 205 / 0.34);
-  --color-accent-glow: oklch(72% 0.14 205 / 0.14);
+  --color-accent: #5ec4b6;
+  --color-accent-strong: #5ec4b6;
+  --color-accent-muted: #5ec4b629;
+  --color-accent-glow: #5ec4b614;
 
   /* Borders */
-  --color-border-dark: oklch(25% 0.01 250);
-  --color-border-light: oklch(90% 0.005 90);
+  --color-border-dark: #33434b;
+  --color-border-light: #e2e8f0;
 
   /* Typography */
   --font-sans: 'Geist', 'Noto Sans TC', ui-sans-serif, system-ui, sans-serif;
@@ -52,6 +52,10 @@
   --fg: var(--color-fg-dark);
   --fg-muted: var(--color-fg-dark-muted);
   --border: var(--color-border-dark);
+  --surface: #182126;
+  --surface-secondary: #202b31;
+  --on-accent: #082f2a;
+  color-scheme: dark;
 }
 
 [data-theme='light'] {
@@ -60,6 +64,14 @@
   --fg: var(--color-fg-light);
   --fg-muted: var(--color-fg-light-muted);
   --border: var(--color-border-light);
+  --surface: #ffffff;
+  --surface-secondary: #f1f5f9;
+  --color-accent: #0f766e;
+  --color-accent-strong: #0f766e;
+  --color-accent-muted: #0f766e1f;
+  --color-accent-glow: #0f766e0d;
+  --on-accent: #ffffff;
+  color-scheme: light;
 }
 
 html,
@@ -69,15 +81,33 @@ body {
   font-family: var(--font-sans);
 }
 
-/* LLM-generated content marker */
+::selection {
+  background: var(--color-accent-muted);
+  color: var(--fg);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 3px;
+}
+
+input, textarea {
+  caret-color: var(--color-accent);
+}
+
+input::placeholder, textarea::placeholder {
+  color: var(--fg-muted);
+  opacity: 1;
+}
+
+* {
+  scrollbar-color: var(--border) transparent;
+  scrollbar-width: thin;
+}
+
+/* Keep generated prose as calm as the rest of the reading surface. */
 .llm-content {
-  border-left: 2px solid var(--color-accent-muted);
-  padding-left: 1rem;
-  background: linear-gradient(
-    to right,
-    var(--color-accent-glow),
-    transparent 20%
-  );
+  background: var(--surface);
 }
 
 @media (prefers-reduced-motion: reduce) {

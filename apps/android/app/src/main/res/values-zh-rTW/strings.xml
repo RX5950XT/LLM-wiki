@@ -117,6 +117,13 @@
     <string name="graph_insights_title">圖譜洞察</string>
     <string name="graph_insights_retry">重試</string>
     <string name="graph_insights_empty">目前沒有圖譜資料</string>
+    <string name="graph_view_title">知識圖譜</string>
+    <string name="graph_orphans">%1$d 頁 · %2$d 頁未連結</string>
+    <string name="wiki_tools">工具</string>
+    <string name="wiki_page_actions">頁面操作</string>
+    <string name="wiki_lock_page">鎖定頁面</string>
+    <string name="wiki_unlock_page">解除鎖定</string>
+    <string name="error_op_graph">載入圖譜失敗</string>
     <string name="graph_count_pages">頁面：%1$d</string>
     <string name="graph_count_links">連結：%1$d</string>
     <string name="graph_count_orphans">孤立頁：%1$d</string>

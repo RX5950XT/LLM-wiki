@@ -624,7 +624,7 @@ export function ImportDialog({
             onClick={() => void handleSubmitText()}
             disabled={busy || !input.trim()}
             className="flex min-h-11 items-center justify-center gap-1.5 rounded-md px-4 py-1.5 text-xs font-medium transition-all duration-100 active:scale-95 focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-50"
-            style={{ background: 'var(--color-accent)', color: 'oklch(10% 0.015 250)' }}
+            style={{ background: 'var(--color-accent)', color: 'var(--on-accent)' }}
           >
             {busy ? <Loader2 size={14} className="animate-spin" /> : t('ingest.button')}
           </button>

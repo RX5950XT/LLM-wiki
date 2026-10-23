@@ -16,6 +16,7 @@ import com.llmwiki.data.LlmProfile
 import com.llmwiki.data.GraphInsights
 import com.llmwiki.data.RawSourceCitation
 import com.llmwiki.data.PageLinkRow
+import com.llmwiki.data.PageEdgeRow
 import com.llmwiki.data.WikiTargetRow
 import com.llmwiki.data.PageRepository
 import com.llmwiki.data.SourceListItem
@@ -236,6 +237,10 @@ data class WikiUiState(
     val graphInsights: GraphInsights? = null,
     val graphInsightsLoading: Boolean = false,
     val graphInsightsError: String? = null,
+    /** Resolved (from, to) slug pairs for the graph view; null = not loaded */
+    val graphEdges: List<Pair<String, String>>? = null,
+    val graphLoading: Boolean = false,
+    val graphError: String? = null,
 )
 
 private val apiJson = Json { ignoreUnknownKeys = true }
@@ -360,6 +365,8 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                 ingestJobs = emptyList(),
                 graphInsights = null,
                 graphInsightsError = null,
+                graphEdges = null,
+                graphError = null,
             )
         }
         workspaceId.value = ws.id
@@ -1396,6 +1403,34 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                 )
             }.getOrNull()
         }.filter { it.id != null || it.sourceId.isNotBlank() }
+    }
+
+    fun loadGraph() {
+        val wsId = workspaceId.value ?: return
+        viewModelScope.launch {
+            _uiState.update { it.copy(graphLoading = true, graphError = null) }
+            try {
+                supabase.requireAccessToken(forceRefresh = false)
+                val rows = supabase.from("page_links")
+                    .select(columns = Columns.raw("from_slug,to_slug")) {
+                        filter { eq("workspace_id", wsId) }
+                    }
+                    .decodeList<PageEdgeRow>()
+                // Same as Web: links are resolved to real pages, unresolved ones are dropped (no ghost nodes)
+                val edges = rows.mapNotNull { row ->
+                    val from = resolvePageSlug(row.fromSlug)?.slug ?: return@mapNotNull null
+                    val to = resolvePageSlug(row.toSlug)?.slug ?: return@mapNotNull null
+                    if (from == to) null else from to to
+                }.distinct()
+                if (workspaceId.value == wsId) _uiState.update { it.copy(graphEdges = edges) }
+            } catch (e: Exception) {
+                if (workspaceId.value == wsId) {
+                    _uiState.update { it.copy(graphError = e.toUserFacingMessage(str(R.string.error_op_graph))) }
+                }
+            } finally {
+                if (workspaceId.value == wsId) _uiState.update { it.copy(graphLoading = false) }
+            }
+        }
     }
 
     fun loadGraphInsights() {

@@ -43,7 +43,7 @@
 .wiki-prose ul, .wiki-prose ol { padding-left: 1.5em; margin-bottom: 1em; }
 .wiki-prose li { margin-bottom: 0.25em; }
 .wiki-prose blockquote {
-  border-left: 3px solid var(--color-accent-muted);
+  border-left: 1px solid var(--border);
   padding-left: 1em;
   color: var(--fg-muted);
   margin-left: 0;
@@ -88,7 +88,7 @@
 }
 .chat-prose a { color: var(--color-accent); text-decoration: underline; }
 .chat-prose blockquote {
-  border-left: 3px solid var(--color-accent-muted);
+  border-left: 1px solid var(--border);
   padding-left: 0.75em;
   color: var(--fg-muted);
   margin: 0 0 0.75em;
@@ -115,4 +115,32 @@
 .animate-dropdown {
   animation: dropdown-in 140ms ease-out;
   transform-origin: top left;
+}
+
+/* Shared interactive surfaces: clear focus and generous touch targets. */
+.workspace-action {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-height: 2.75rem;
+  width: 100%;
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  font-size: 0.875rem;
+  color: var(--fg);
+}
+.workspace-action:hover:not(:disabled), .icon-button:hover {
+  background: var(--surface-secondary);
+}
+.workspace-action:disabled { opacity: 0.5; }
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  border-radius: 0.5rem;
+  color: var(--fg-muted);
 }
