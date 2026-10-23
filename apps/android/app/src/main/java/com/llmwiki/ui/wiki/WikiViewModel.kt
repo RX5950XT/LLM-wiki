@@ -518,13 +518,11 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun moveWorkspaceUp(workspace: WorkspaceRow) {
-        reorderWorkspace(workspace, -1)
+    fun moveWorkspace(workspace: WorkspaceRow, toIndex: Int) {
+        val fromIndex = _uiState.value.workspaces.indexOfFirst { it.id == workspace.id }
+        if (fromIndex >= 0) reorderWorkspace(workspace, toIndex - fromIndex)
     }
 
-    fun moveWorkspaceDown(workspace: WorkspaceRow) {
-        reorderWorkspace(workspace, 1)
-    }
 
     fun syncPages(wsId: String? = workspaceId.value) {
         val id = wsId ?: return

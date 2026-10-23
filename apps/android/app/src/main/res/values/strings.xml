@@ -157,6 +157,7 @@
     <string name="settings_api_key_keep_hint">Leave blank to keep current key</string>
     <string name="wiki_current_workspace">Current workspace</string>
     <string name="workspace_actions">Workspace actions</string>
+    <string name="wiki_workspace_drag_hint">Long-press and drag to reorder</string>
     <string name="workspace_move_up">Move workspace up</string>
     <string name="workspace_move_down">Move workspace down</string>
 

@@ -105,6 +105,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -171,6 +174,8 @@ fun WikiScreen(
     var pendingShareUrl by rememberSaveable { mutableStateOf<String?>(null) }
     var showChatSheet by rememberSaveable { mutableStateOf(false) }
     var showWorkspaceMenu by remember { mutableStateOf(false) }
+    var workspaceMenuWidth by remember { mutableStateOf(280.dp) }
+    val density = LocalDensity.current
     var showToolsMenu by remember { mutableStateOf(false) }
     var showPageMenu by remember { mutableStateOf(false) }
     var showHelpDialog by rememberSaveable { mutableStateOf(false) }
@@ -302,7 +307,9 @@ fun WikiScreen(
                 ) {
                     OutlinedButton(
                         onClick = { showWorkspaceMenu = true },
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .onSizeChanged { workspaceMenuWidth = with(density) { it.width.toDp() } },
                         shape = MaterialTheme.shapes.medium,
                         colors = ButtonDefaults.outlinedButtonColors(
                             containerColor = MaterialTheme.colorScheme.surfaceVariant,
@@ -339,37 +346,30 @@ fun WikiScreen(
                     DropdownMenu(
                         expanded = showWorkspaceMenu,
                         onDismissRequest = { showWorkspaceMenu = false },
-                        modifier = Modifier.widthIn(min = 280.dp),
+                        // Same width as the switcher button above it
+                        modifier = Modifier.width(workspaceMenuWidth),
+                        shape = RoundedCornerShape(16.dp),
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                     ) {
-                        uiState.workspaces.forEach { workspace ->
-                            val selected = workspace.id == uiState.workspace?.id
-                            WorkspaceMenuRow(
-                                workspaceName = workspace.name,
-                                selected = selected,
-                                canMoveUp = uiState.workspaces.indexOf(workspace) > 0,
-                                canMoveDown = uiState.workspaces.indexOf(workspace) < uiState.workspaces.lastIndex,
-                                onSelect = {
-                                    showWorkspaceMenu = false
-                                    wikiViewModel.switchWorkspace(workspace)
-                                    scope.launch { drawerState.close() }
-                                },
-                                onMoveUp = {
-                                    wikiViewModel.moveWorkspaceUp(workspace)
-                                },
-                                onMoveDown = {
-                                    wikiViewModel.moveWorkspaceDown(workspace)
-                                },
-                                onRename = {
-                                    showWorkspaceMenu = false
-                                    renameWorkspace = workspace
-                                },
-                                onDelete = {
-                                    showWorkspaceMenu = false
-                                    deleteWorkspace = workspace
-                                },
-                            )
-                        }
-                        HorizontalDivider(Modifier.padding(vertical = 4.dp))
+                        WorkspaceMenuList(
+                            workspaces = uiState.workspaces,
+                            currentId = uiState.workspace?.id,
+                            onSelect = { workspace ->
+                                showWorkspaceMenu = false
+                                wikiViewModel.switchWorkspace(workspace)
+                                scope.launch { drawerState.close() }
+                            },
+                            onMove = { workspace, toIndex -> wikiViewModel.moveWorkspace(workspace, toIndex) },
+                            onRename = { workspace ->
+                                showWorkspaceMenu = false
+                                renameWorkspace = workspace
+                            },
+                            onDelete = { workspace ->
+                                showWorkspaceMenu = false
+                                deleteWorkspace = workspace
+                            },
+                        )
+                        HorizontalDivider(Modifier.padding(vertical = 4.dp, horizontal = 12.dp))
                         WorkspaceCreateMenuRow(
                             onClick = {
                                 showWorkspaceMenu = false
@@ -1179,142 +1179,6 @@ fun WikiScreen(
                 deleteWorkspace = null
             },
         )
-    }
-}
-
-@Composable
-private fun WorkspaceMenuRow(
-    workspaceName: String,
-    selected: Boolean,
-    canMoveUp: Boolean,
-    canMoveDown: Boolean,
-    onSelect: () -> Unit,
-    onMoveUp: () -> Unit,
-    onMoveDown: () -> Unit,
-    onRename: () -> Unit,
-    onDelete: () -> Unit,
-) {
-    var showActions by remember { mutableStateOf(false) }
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(min = 72.dp)
-            .padding(horizontal = 16.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(
-            modifier = Modifier
-                .weight(1f)
-                .clickable(onClick = onSelect)
-                .padding(vertical = 12.dp),
-        ) {
-            Text(
-                text = workspaceName,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            if (selected) {
-                Text(
-                    stringResource(R.string.wiki_current_workspace),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-            }
-        }
-        Spacer(Modifier.width(12.dp))
-        Row(
-            modifier = Modifier.widthIn(min = 108.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.End,
-        ) {
-            if (selected) {
-                Icon(
-                    Icons.Default.Check,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(18.dp),
-                )
-                Spacer(Modifier.width(10.dp))
-            }
-            IconButton(
-                onClick = { showActions = true },
-                modifier = Modifier.size(48.dp),
-            ) {
-                Icon(
-                    Icons.Default.MoreVert,
-                    contentDescription = stringResource(R.string.workspace_actions),
-                    modifier = Modifier.size(20.dp),
-                )
-            }
-            DropdownMenu(
-                expanded = showActions,
-                onDismissRequest = { showActions = false },
-            ) {
-                DropdownMenuItem(
-                    text = { Text(stringResource(R.string.workspace_move_up)) },
-                    enabled = canMoveUp,
-                    onClick = {
-                        showActions = false
-                        onMoveUp()
-                    },
-                )
-                DropdownMenuItem(
-                    text = { Text(stringResource(R.string.workspace_move_down)) },
-                    enabled = canMoveDown,
-                    onClick = {
-                        showActions = false
-                        onMoveDown()
-                    },
-                )
-                HorizontalDivider()
-                DropdownMenuItem(
-                    text = { Text(stringResource(R.string.workspace_rename_title)) },
-                    leadingIcon = {
-                        Icon(Icons.Default.Edit, contentDescription = null)
-                    },
-                    onClick = {
-                        showActions = false
-                        onRename()
-                    },
-                )
-                DropdownMenuItem(
-                    text = { Text(stringResource(R.string.workspace_delete_title)) },
-                    leadingIcon = {
-                        Icon(Icons.Default.Delete, contentDescription = null)
-                    },
-                    onClick = {
-                        showActions = false
-                        onDelete()
-                    },
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun WorkspaceCreateMenuRow(
-    onClick: () -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(min = 72.dp)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 20.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(Icons.Default.Add, contentDescription = null)
-        Spacer(Modifier.width(16.dp))
-        Column {
-            Text(stringResource(R.string.workspace_create_action))
-            Text(
-                stringResource(R.string.workspace_create_menu_hint),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
     }
 }
 

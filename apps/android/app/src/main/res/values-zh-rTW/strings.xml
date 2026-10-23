@@ -157,6 +157,7 @@
     <string name="settings_api_key_keep_hint">留空保留原金鑰</string>
     <string name="wiki_current_workspace">目前工作區</string>
     <string name="workspace_actions">工作區操作</string>
+    <string name="wiki_workspace_drag_hint">按住並拖曳可調整順序</string>
     <string name="workspace_move_up">工作區往上移</string>
     <string name="workspace_move_down">工作區往下移</string>
 
