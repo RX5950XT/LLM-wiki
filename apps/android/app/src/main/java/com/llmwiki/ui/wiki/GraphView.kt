@@ -31,6 +31,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
@@ -81,11 +83,15 @@ private fun layoutGraph(pages: List<PageEntity>, edges: List<Pair<String, String
     val index = nodes.withIndex().associate { it.value.slug to it.index }
     val links = edges.mapNotNull { (a, b) -> index[a]?.let { ia -> index[b]?.let { ib -> ia to ib } } }
     val k = 40f
+    // Only linked pages take part in the simulation: summed repulsion would fling orphans
+    // far away and the fit-to-screen would shrink the real graph to a dot (seen on device).
+    val active = nodes.indices.filter { nodes[it].degree > 0 }
     val dx = FloatArray(n); val dy = FloatArray(n)
-    var temp = ring / 4f
-    repeat(220) {
+    var temp = ring / 2f
+    repeat(300) {
         dx.fill(0f); dy.fill(0f)
-        for (i in 0 until n) for (j in i + 1 until n) {
+        for (ai in active.indices) for (bi in ai + 1 until active.size) {
+            val i = active[ai]; val j = active[bi]
             val vx = nodes[i].x - nodes[j].x; val vy = nodes[i].y - nodes[j].y
             val d2 = max(vx * vx + vy * vy, 0.01f)
             val f = k * k / d2
@@ -94,17 +100,24 @@ private fun layoutGraph(pages: List<PageEntity>, edges: List<Pair<String, String
         for ((a, b) in links) {
             val vx = nodes[a].x - nodes[b].x; val vy = nodes[a].y - nodes[b].y
             val d = max(sqrt(vx * vx + vy * vy), 0.1f)
-            val f = d / k
+            // Dense wikis (index.md links to everything) collapse into a hairball at full FR pull.
+            val f = d / k * 0.12f
             dx[a] -= vx * f; dy[a] -= vy * f; dx[b] += vx * f; dy[b] += vy * f
         }
-        for (i in 0 until n) {
-            // weak gravity keeps orphans from drifting off-screen
+        for (i in active) {
             dx[i] -= nodes[i].x * 0.02f; dy[i] -= nodes[i].y * 0.02f
             val d = max(sqrt(dx[i] * dx[i] + dy[i] * dy[i]), 0.01f)
             val step = min(d, temp)
             nodes[i].x += dx[i] / d * step; nodes[i].y += dy[i] / d * step
         }
-        temp *= 0.98f
+        temp *= 0.985f
+    }
+    // Orphans sit on a ring just outside the linked graph, like Obsidian's loose nodes.
+    val orphans = nodes.filter { it.degree == 0 }
+    val outer = (active.maxOfOrNull { sqrt(nodes[it].x * nodes[it].x + nodes[it].y * nodes[it].y) } ?: ring) * 1.12f + k
+    orphans.forEachIndexed { i, node ->
+        val angle = (i.toFloat() / orphans.size) * 6.2831855f - 1.5707964f
+        node.x = outer * kotlin.math.cos(angle); node.y = outer * kotlin.math.sin(angle)
     }
     return nodes
 }
@@ -202,22 +215,31 @@ private fun GraphCanvas(pages: List<PageEntity>, edges: List<Pair<String, String
             val s = fitScale(laidOut, size.width, size.height) * zoom
             val c = Offset(size.width / 2f + pan.x, size.height / 2f + pan.y)
             fun pos(n: GraphNode) = Offset(c.x + n.x * s, c.y + n.y * s)
+            // Node size lives in graph units (like Web) so zooming out never piles nodes on top of each other
+            val minR = 2.dp.toPx()
+            fun radius(n: GraphNode) = max(nodeRadius(n.degree) * s * 1.2f, minR)
             edges.forEach { (a, b) ->
                 val na = bySlug[a] ?: return@forEach; val nb = bySlug[b] ?: return@forEach
                 drawLine(edgeColor, pos(na), pos(nb), strokeWidth = 1.dp.toPx())
             }
             laidOut.forEach { n ->
-                val r = nodeRadius(n.degree).dp.toPx()
+                val r = radius(n)
                 val color = kindColor(n.kind, dark)
                 // Orphans are hollow: an unlinked page is a finding, not noise (same as Web)
                 if (n.degree == 0) drawCircle(color, r, pos(n), style = Stroke(1.5.dp.toPx()))
                 else drawCircle(color, r, pos(n))
             }
-            laidOut.forEach { n ->
+            // Hubs label first; a label that would overlap one already drawn is skipped.
+            val taken = ArrayList<Rect>()
+            laidOut.sortedByDescending { it.degree }.forEach { n ->
                 if (zoom < 1.5f && n.slug !in labelled) return@forEach
                 val p = pos(n)
                 val layout = measurer.measure(n.label.take(24), TextStyle(fontSize = 11.sp, color = labelColor))
-                drawText(layout, topLeft = Offset(p.x - layout.size.width / 2f, p.y + nodeRadius(n.degree).dp.toPx() + 2.dp.toPx()))
+                val topLeft = Offset(p.x - layout.size.width / 2f, p.y + radius(n) + 2.dp.toPx())
+                val rect = Rect(topLeft, Size(layout.size.width.toFloat(), layout.size.height.toFloat()))
+                if (taken.any { it.overlaps(rect) }) return@forEach
+                taken += rect
+                drawText(layout, topLeft = topLeft)
             }
         }
     }
