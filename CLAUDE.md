@@ -307,7 +307,7 @@ apps/android/app/src/main/java/com/llmwiki/
 - Web API 錯誤格式有 `{error:"…"}` 與 `{error:{code,message}}`（ingest / reingest）兩種，且可能夾非字串欄位（`jobId`）；一律走 `extractApiErrorMessage()`，不可再用 `Map<String,String>` 解，否則使用者看到原始 JSON。
 - 頁面內容由 Compose `verticalScroll` 捲動（TextView 自己捲只能拖、沒有慣性），反向連結放在文章末尾並顯示標題、底部留 88dp 給 FAB。
 - 匯入橫幅只在有 pending/running/paused 時顯示；「本批」完成／失敗數用與 Web 相同的 30 分鐘視窗（`ingestBatchCounts()`），舊的失敗不可永遠掛在畫面上。
-- 冷啟與切換工作區先顯示 Room 快取的 index，再背景同步。
+- 冷啟與切換工作區先顯示 Room 快取的 index，再背景同步。打開工作區選單時 `prefetchWorkspaceIndexes()` 先把其他工作區還沒快取的 index.md 抓進 Room；Web 同樣在滑過／打開切換按鈕時 `router.prefetch` ＋ `prefetchPage(ws, "index.md")`，切換不必等約 1 秒的 Drive 讀取。
 - **Android 按鈕收斂（2026-10-23）**：抽屜底部只有「工具」選單（來源／匯入佇列／知識圖譜／整理知識庫／說明／登出）＋「設定」；頁面頂列只有搜尋＋「⋮」（鎖定／編輯／重新整理）。新功能入口請加進既有選單，不要再加常駐圖示。知識圖譜在 `ui/wiki/GraphView.kt`（直查 `page_links`、經 `resolvePageSlug` 解析端點；上方類型 chip 同時是圖例與篩選，對齊 Web），圖譜洞察從圖譜右上角進入（Web 同）。
 - Chat/設定選擇（主題/語言）用 `FilterChip`（含勾選 + TalkBack selected 語意），不要用僅變文字色的 OutlinedButton
 

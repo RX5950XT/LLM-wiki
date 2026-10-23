@@ -182,6 +182,27 @@ function rememberPage(workspaceId: string, data: PageData): void {
   }
 }
 
+const prefetching = new Set<string>();
+
+/**
+ * Warms the cache so the next open paints at once instead of waiting on the
+ * ~1s Drive read (used for each workspace's index.md when the switcher opens).
+ * Failures are left for the real open to surface.
+ */
+export function prefetchPage(workspaceId: string, slug: string): void {
+  const key = cacheKey(workspaceId, slug);
+  if (pageCache.has(key) || prefetching.has(key)) return;
+  prefetching.add(key);
+  fetch(`/api/pages/${workspaceId}/${encodeSlugPath(slug)}`)
+    .then(async (response) => {
+      if (!response.ok) return;
+      const data = await response.json() as Partial<PageData>;
+      if (typeof data.content === 'string' && data.slug === slug) rememberPage(workspaceId, data as PageData);
+    })
+    .catch((error) => console.warn('[page-viewer] prefetch failed', slug, error))
+    .finally(() => prefetching.delete(key));
+}
+
 export function PageViewer({
   workspaceId,
   slug,

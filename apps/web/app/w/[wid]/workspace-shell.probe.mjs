@@ -31,6 +31,7 @@ mock.module('@/components/wiki/page-tree', () => ({
 }));
 mock.module('@/components/wiki/page-viewer', () => ({
   PageViewer: () => React.createElement('div', { 'data-testid': 'page-viewer' }, 'page-viewer'),
+  prefetchPage: () => {},
 }));
 mock.module('@/components/wiki/conversation-panel', () => ({
   ConversationPanel: () => React.createElement('div', { 'data-testid': 'conversation-panel' }, 'conversation-panel'),

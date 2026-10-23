@@ -678,6 +678,34 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private val indexPrefetching = HashSet<String>()
+
+    /**
+     * Opening the workspace menu warms each workspace's index.md in Room, so a switch
+     * paints it at once instead of waiting ~1s on the Drive read (Web does the same).
+     * Only pages with a Room row and no cached content are fetched; failures are ignored
+     * because the real switch loads the page again and shows any error then.
+     */
+    fun prefetchWorkspaceIndexes() {
+        val current = workspaceId.value
+        _uiState.value.workspaces.filter { it.id != current && indexPrefetching.add(it.id) }.forEach { ws ->
+            viewModelScope.launch {
+                try {
+                    val entity = db.pageDao().getPage(ws.id, accountName, "index.md")
+                    if (entity != null && entity.content == null) {
+                        PageRepository(db, driveClient).loadPageContent(ws.id, accountName, "index.md")
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    android.util.Log.w("WikiViewModel", "index prefetch failed for ${ws.id}", e)
+                } finally {
+                    indexPrefetching.remove(ws.id)
+                }
+            }
+        }
+    }
+
     private fun loadContent(page: PageEntity) {
         val requestToken = ++contentLoadGeneration
         viewModelScope.launch {

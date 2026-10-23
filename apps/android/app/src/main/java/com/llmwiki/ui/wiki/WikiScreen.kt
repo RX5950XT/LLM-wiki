@@ -308,7 +308,7 @@ fun WikiScreen(
                         .padding(horizontal = 16.dp, vertical = 6.dp),
                 ) {
                     OutlinedButton(
-                        onClick = { showWorkspaceMenu = true },
+                        onClick = { showWorkspaceMenu = true; wikiViewModel.prefetchWorkspaceIndexes() },
                         modifier = Modifier
                             .fillMaxWidth()
                             .onSizeChanged { workspaceMenuWidth = with(density) { it.width.toDp() } },

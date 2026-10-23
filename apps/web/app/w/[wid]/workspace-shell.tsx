@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { PanelLeft, PanelRight, Ellipsis, GitFork, ChevronDown, LogOut, Plus, Settings, Search, Loader2, HelpCircle, Pencil, Trash2, GripVertical, Library, Wrench, CheckCircle2, AlertCircle, X, Check } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import { PageTree } from '@/components/wiki/page-tree';
-import { PageViewer } from '@/components/wiki/page-viewer';
+import { PageViewer, prefetchPage } from '@/components/wiki/page-viewer';
 import { ConversationPanel } from '@/components/wiki/conversation-panel';
 import { GraphView } from '@/components/wiki/graph-view';
 import { HelpDialog } from '@/components/wiki/help-dialog';
@@ -744,6 +744,16 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
     router.push('/login');
   }, [router]);
 
+  // Hovering or opening the switcher warms every other workspace's route and
+  // index.md, so the switch itself skips the Drive wait.
+  const prefetchWorkspaces = useCallback(() => {
+    for (const ws of workspaceList) {
+      if (ws.id === workspaceId) continue;
+      router.prefetch(`/w/${ws.id}`);
+      prefetchPage(ws.id, 'index.md');
+    }
+  }, [router, workspaceId, workspaceList]);
+
   const renameWorkspace = useCallback(async (workspace: WorkspaceEntry, name: string) => {
     const trimmed = name.trim();
     if (!trimmed || trimmed === workspace.name) {
@@ -958,6 +968,8 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
           <div className="relative min-w-0">
             <button
               onClick={() => { setShowWsMenu((o) => !o); setRenamingWorkspace(null); }}
+              onPointerEnter={prefetchWorkspaces}
+              onFocus={prefetchWorkspaces}
               className="flex min-h-11 w-full min-w-0 max-w-[260px] items-center justify-between gap-2 rounded-lg px-2 text-sm font-medium hover:bg-[var(--bg-2)] md:min-w-[180px]"
               style={{ color: 'var(--fg)' }}
               aria-expanded={showWsMenu}
