@@ -263,7 +263,7 @@
     <string name="action_view">View</string>
     <string name="auth_sign_out_confirm">Sign out? Pages cached on this phone will be cleared.</string>
     <string name="ingest_touched_pages">%1$d pages updated</string>
-    <string name="ingest_uploading">Sending import to the server…</string>
+    <string name="ingest_uploading">Import queued; sends by itself when online · safe to close the app</string>
     <string name="ingest_waiting_batch">%1$d imports waiting · %2$s · runs in the background</string>
     <string name="ingest_wait_usage_limit">Model usage limit reached; continues by itself at %1$s when it resets</string>
     <string name="ingest_wait_retry">Temporary failure; retries by itself at %1$s</string>

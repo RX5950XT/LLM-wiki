@@ -842,7 +842,7 @@ fun WikiScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
-                            if (hasActiveIngest && !uiState.ingestAllWaiting) {
+                            if (uiState.ingestLoading || (hasActiveIngest && !uiState.ingestAllWaiting)) {
                                 CircularProgressIndicator(
                                     modifier = Modifier.size(16.dp),
                                     strokeWidth = 2.dp,
@@ -858,6 +858,8 @@ fun WikiScreen(
                             }
                             Text(
                                 text = when {
+                                    // First: a job parked for hours must not hide the import just sent.
+                                    uiState.ingestLoading -> stringResource(R.string.ingest_uploading)
                                     uiState.ingestAllWaiting -> stringResource(
                                         R.string.ingest_waiting_batch,
                                         uiState.activeIngestCount,
@@ -870,7 +872,6 @@ fun WikiScreen(
                                         uiState.activeIngestDone,
                                         uiState.activeIngestFailed,
                                     )
-                                    uiState.ingestLoading -> stringResource(R.string.ingest_uploading)
                                     uiState.ingestProgress > 0 ->
                                         stringResource(R.string.ingest_running_progress, uiState.ingestProgress)
                                     hasPausedIngest && !hasActiveIngest ->

@@ -263,7 +263,7 @@
     <string name="action_view">查看</string>
     <string name="auth_sign_out_confirm">確定要登出？這支手機上快取的頁面會被清除。</string>
     <string name="ingest_touched_pages">已更新 %1$d 個頁面</string>
-    <string name="ingest_uploading">正在把匯入送到伺服器…</string>
+    <string name="ingest_uploading">匯入已排入，有網路就會自動送出 · 可關閉 App</string>
     <string name="ingest_waiting_batch">%1$d 篇匯入等待中 · %2$s · 可關閉 App，任務會在背景繼續</string>
     <string name="ingest_wait_usage_limit">模型額度已用完，%1$s 額度重置後會自動繼續</string>
     <string name="ingest_wait_retry">暫時失敗，%1$s 會自動重試</string>

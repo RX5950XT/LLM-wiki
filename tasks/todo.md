@@ -202,13 +202,15 @@
 - [x] 伺服器：先存檔再回應、背景 intake、pg_cron worker、失敗分類與自動重試、ChatGPT 工具 `strict:false`
 - [x] Web／Android：全帳號佇列、等待原因與時間、立即重試；Android WorkManager 上傳（0.8.1）
 - [x] production 實測背景流程（瀏覽器＋Pixel 6a），測試資料已清除
-- [ ] 額度重置後確認 job `a45d5c4f-…` 真的寫入頁面
+- [ ] 額度重置後確認 job `a45d5c4f-…` 真的寫入頁面（使用者決定 ChatGPT 暫緩）
 - [x] 手機在請求送出前被殺的重送（0.8.4 實測）
 - [x] Android 傳檔、大檔競態、等待中蓋掉失敗橫幅三個 bug
 - [x] 手機匯入真實 PDF 並寫出頁面（修掉 production 所有 PDF 都失敗的 bug）
 - [x] DOCX／PPTX／EPUB／圖片／掃描 PDF／網頁 PDF 的 production 實測
 - [x] 批次匯入開出多個近似工作區
-- [ ] 離線時的重送（需切飛航模式，屬手機系統設定，未測）
+- [x] 離線時的重送（使用者切飛航模式實測：App 沒開也自動補送，只有 1 筆）
+- [x] 離線送出後看不出已排入的橫幅（0.8.6）
+- [ ] 手機接電腦一直響：已排除每小時固定斷線，根因未完全查明（見 `CONTEXT.md`）
 
 ### Review
 

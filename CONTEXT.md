@@ -2,14 +2,18 @@
 
 > 給下一個 AI Agent 的接手指南。架構與規範細節以 `CLAUDE.md` / `AGENTS.md` 為準，這裡只記「最近做了什麼、為什麼、還缺什麼」。
 
-## 2026-11-07 匯入改為持久化（Android 0.8.5 / versionCode 17）
+## 2026-11-07 匯入改為持久化（Android 0.8.6 / versionCode 18）
 
 - **改了什麼**：POST 只存檔就回 202（`runIntake` 在背景讀來源）、pg_cron `ingest-worker` 每分鐘喚醒 worker、失敗分類與自動重試、Android `IngestUploadWorker`、佇列改看全帳號。規格見 `CLAUDE.md`「非同步 Ingest 協定」。migration `20261107090000_durable_ingest.sql` 已套用 production；Vault 的 `ingest_worker_url` 是手動寫入的，不在 migration 內。
 - **production 實測通過**：POST 0.39 秒（舊版 21.4 秒）；同一個 `client_request_id` 重送回同一個 job；額度用完時進入等待並顯示重置時間；手機與瀏覽器都關閉時 cron 打 worker 回 `200 {"started":1}`；模擬 running 被砍，cron 於下一分鐘救回成 `continue`；手機點匯入後緊接 force-stop，請求已先送出，伺服器只有一筆 job，且 log 有 `WM-ForceStopRunnable: rescheduling`；Web 與手機都看得到別的工作區的等待任務。
 - **真實模型實測**：OpenRouter `google/gemini-3.8-flash` 匯入一篇短文，送出後關閉分頁，9 頁全部寫入（job `0a6fc762`）。這證明流程能跑完，但**不代表 ChatGPT 的 strict 問題已解決**，那條路徑仍待額度重置後驗證。
 - **尚未驗證**：
   - **`strict:false` 是否真的解決 0 頁**。帳號只有 ChatGPT 設定檔，週額度用完（約 11/8 12:53 Taiwan 重置），沒有任何實際寫入的測試。Nvidia 文章 job `a45d5c4f-b5f5-4ec0-86bc-52066137cf7a` 已重新排隊，重置後會自動跑，它就是驗證：看 `touched_pages`；若仍 0 頁，讀 `checkpoint.diagnostics`。
-  - 手機離線時的重送。要切飛航模式，這是手機的系統設定，沒有動。
+- **手機離線重送（0.8.5，使用者切飛航模式實測）**：離線送出網址後伺服器沒有收到（sources／jobs 數量不變），WorkManager 工作只差 `CONNECTIVITY`；接著殺掉 App 程序。關閉飛航模式後約 7 秒，App 沒開也自動送出，伺服器只有 1 筆 source、1 筆 job。測試內容在 intake 階段被暫停並刪除，沒有寫入知識頁，但 Drive 的 AI/sources 留下一個來源檔 `1c9vSDFgDVc5vzR3QY6ZpI9_26GD7OAgB`。
+- **暫停 intake 擋不住 Drive 寫入**：`runIntake` 寫 Drive 來源檔前不檢查 job 狀態，暫停後它仍會寫檔，才在交棒時發現 lease 沒了。測試時要清資料，請用解析必敗的網址（如 `https://x.invalid/`），不會碰 Drive 也不花模型費用。
+- **Android 橫幅（0.8.6）**：等額度的 job 曾蓋住剛送出的匯入，離線時看不出已排入。現在上傳未完成時優先顯示「匯入已排入，有網路就會自動送出」。線上實測顯示正確（Nvidia 那筆同時在等額度）；新文字沒有在真正離線時再測一次，但走的是同一個 `ingestLoading` 狀態。Web 沒有離線佇列，不適用。
+- **手機接電腦一直響（未完全查明）**：響聲是 Windows 的裝置連線／中斷音效，手機確實一再斷線（Event 1010，今天 15:07–21:45 共 123 次）。「每小時固定斷線」已排除：預測 22:30 的斷線沒有發生（當時 94–95%）。靜置時（22:06–22:20、22:26 之後）沒有斷線；22:20 是使用者重插，22:24 那陣與切飛航模式同時（22:24:05），應是手拿手機時接頭晃動，22:25:47 那陣原因未確認。先前 15:29、16:29、17:29 那幾陣都在 100% 時，「充飽才斷」只測過一次反例，還不算證實。`+cellular_high_tx_power` 看似與斷線 47/47 重合，但使用者手動重插也在其中、該旗標 40% 時間都亮著，**不是證據，別再走這條**。
+- **ChatGPT 暫緩（使用者決定）**：`strict:false` 驗證先不做，OpenRouter 設定不動。
 - **真實注音實測（Pixel 6a，Gboard 注音，直接點螢幕按鍵）**：App 內選字中按鍵盤送出鍵只會確定選字，不會送出；確定後再按才送出；從候選列選字正常。手機 Chrome 上選字中的 Enter 是 `key=Unidentified`、`keyCode=229`，不會誤送。此時點畫面上的傳送鈕，會送出已確定的字，還在鍵盤上選字的部分（這次是「ㄇㄚ」）會消失；這段內容在 Gboard 裡，App 拿不到。**桌面版的真實輸入法沒測過**，只有手機 Chrome 的實測，桌面版是模擬事件。
 - **實測找到並修掉的 bug**：
   - Android 傳檔一律失敗（`file is required`）：`Content-Disposition` 重複。舊版程式也是同樣寫法，應該早就壞了，但沒有舊版實測佐證。

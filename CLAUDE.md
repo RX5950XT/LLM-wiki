@@ -159,7 +159,7 @@ Android 呼叫與 Web 相同的後端 API（`/api/ingest`、`/api/query`、`/api
 - **Phase 16** ✅：維護合一 + AI 真權限 — 健康檢查與整理去重合併成單一按鈕／單一 pipeline（`/api/organize`），不再產生報告頁；維護 job 改 `confirmDestructive: false` 且保留 workspace 生命週期工具（真的能合併、刪除、改名、重排），新增 `reorderWorkspaces` AI 工具；刪除 `/api/lint` route、`vercel.json` cron 與 `CRON_SECRET`；`_schema/lint.md` 改為「檢查並直接修正」的清單並注入維護 pipeline
 - **Phase 15** ✅：連結修復 + 維護整合 + 來源重跑 — wiki 連結伺服器咽喉點 alias fallback（`lib/wiki/slug.ts` + `/api/pages` GET，修 `[PAGE_NOT_FOUND]`）、圖譜邊 alias 解析去幽靈節點、lint job 化（migration `0016`，與 organize 共用 agent_jobs 鎖）、維護按鈕整合（Web `Wrench` 選單 + 進度 pill + localStorage 背景續跑；Android `Build` 選單）、來源重新整合（`/api/sources/[id]/reingest`）
 - **Phase 17** ✅（2026-09-01）：六項知識編譯能力——兩階段可恢復 Ingest queue（SHA unchanged、pause/resume/retry、checkpoint）、安全 allowlist/fencing/CAS 寫入、多格式檔案解析（PDF/DOCX/PPTX/EPUB/text/image，2 MiB）、Faithful raw-source query、Graph Insights；Web/Android 對齊，Android APK `0.7.0`（versionCode `7`）。production 已套用並驗證 `recoverable_ingest` migration 的欄位與索引。
-- **Phase 18** 🚧（2026-11-07）：匯入持久化——送出先存檔、pg_cron 續跑、失敗自動重試、App 被殺仍會上傳；Android `0.8.5`（versionCode `17`）。背景流程已實測；ChatGPT `strict:false` 是否解決 0 頁待額度重置後驗證（見 `CONTEXT.md`）。
+- **Phase 18** 🚧（2026-11-07）：匯入持久化——送出先存檔、pg_cron 續跑、失敗自動重試、App 被殺仍會上傳；Android `0.8.6`（versionCode `18`）。背景流程已實測；ChatGPT `strict:false` 是否解決 0 頁待額度重置後驗證（見 `CONTEXT.md`）。
 
 ## 安全注意事項（Phase 10）
 
@@ -399,6 +399,7 @@ GCP 專案 `my-project-1750440589634`（LLM Wiki）的 OAuth 同意畫面必須�
 **ChatGPT 的工具必須送 `strict:false`（`toCodexRequestBody`，勿回退）**：Responses API 在沒設 `strict` 時把 function tools 當嚴格模式，選填欄位沒有值時模型只能送 `null`，我們的 zod 就拒絕每一次 `writePage`，結果是跑 165 秒、0 頁。判斷依據是 SDK 程式碼與症狀，**尚未用真模型驗證**（見 `CONTEXT.md`）。寫入階段 `prepareStep` 也會 `toolChoice:'required'` 直到計畫寫完；鎖定或多次被拒的頁會記入 `checkpoint.skipped_pages`，不拖垮整篇；寫 0 頁時診斷資訊存 `checkpoint.diagnostics`。
 
 Android 匯入走 `IngestUploadWorker`（WorkManager expedited）：內容先寫入 `filesDir/ingest_outbox/<requestId>`，App 被殺或離線後會重送；登出時 `cancelAll`。檔案的 `Content-Disposition` 只能補 `filename=`，Ktor 已自帶 `form-data; name=`，重複寫會變成兩個 header，伺服器回 `file is required`。
+**等待中的 job 也不可蓋掉剛送出的匯入（Android）**：`ingestLoading` 排在等待訊息前面，否則離線送出後畫面看不出已排入。
 **等待中的 job 不可蓋掉失敗訊息（Web／Android 相同）**：等額度的 job 可能掛好幾個小時。只要沒有 job 真的在跑，就要顯示最近一筆未讀的失敗；有 job 在跑時才不顯示。
 `urlToMarkdown` 有 20s fetch timeout、5 MB 頁面上限、逐跳 redirect SSRF 驗證（IP 正規化 + DNS 解析檢查，含 IPv6/link-local/CGNAT/metadata IP），並用 undici Agent 的 connect-time `lookup` 在建立連線當下驗證 IP（無 TOCTOU rebinding 窗口）。
 **即時進度**：pipeline 的 `onStepFinish` 會把 `touched_pages` 逐步寫回 job row，輪詢端在 `running` 期間即可顯示「已更新 N 頁」（Web `ingestProgress` state / Android `WikiUiState.ingestProgress`）。
