@@ -133,7 +133,7 @@ GOOGLE_OAUTH_CLIENT_SECRET=
 ## 關鍵功能
 
 ### 對話輸入區（導入 + 模型）
-- 對話輸入區是**單一卡片**（Web `conversation-panel.tsx`、Android `ChatBottomSheet`，版面相同）：上方是會長高的輸入框，下方工具列左邊是「＋」（導入）與模型晶片（顯示目前模型，非預設模式才加上模式名；點開選模型與回答模式），右邊是送出／停止。Web 的 Enter 送出、Shift+Enter 換行，**Enter 必須排除 `isComposing`，否則選中文字時會誤送**。新功能入口請加進這兩個選單，不要再加常駐按鈕。
+- 對話輸入區是**單一卡片**（Web `conversation-panel.tsx`、Android `ChatBottomSheet`，版面相同）：上方是會長高的輸入框，下方工具列左邊是「＋」（導入）與模型晶片（顯示目前模型，非預設模式才加上模式名；點開選模型與回答模式），右邊是送出／停止。Web 的 Enter 送出、Shift+Enter 換行，**Enter 必須排除 `isComposing`，否則選中文字時會誤送**。新功能入口請加進這兩個選單，不要再加常駐按鈕。**Android 的送出鍵放在文字列右側，不可搬回右下角**：Typeless 這類語音輸入的浮動按鈕固定在鍵盤右上方，會蓋住右下角（Pixel 6a 實測）。
 - profile 列表來自 `/api/settings/profiles`，預設選中 `is_default=true`
 - Query / Ingest / Organize API 支援 `profile_id` override，檢查 `owner_id` 權限
 - **不要再加獨立的導入輸入框**：舊版把導入 textarea 疊在對話輸入框上方，使用者會誤認成「輸入框重複顯示兩次」

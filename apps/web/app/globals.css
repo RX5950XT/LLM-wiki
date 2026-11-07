@@ -176,6 +176,10 @@
   outline: 2px solid var(--color-accent);
   outline-offset: 1px;
 }
+/* The card shows focus; a second outline around the text box would stick out of it. */
+.composer-input:focus-visible {
+  outline: none;
+}
 .composer-option:hover {
   background: color-mix(in srgb, var(--fg) 7%, transparent);
 }

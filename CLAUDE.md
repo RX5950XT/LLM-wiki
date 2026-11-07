@@ -439,7 +439,7 @@ Android 匯入走 `IngestUploadWorker`（WorkManager expedited）：內容先寫
 
 ## 對話輸入區與模型選擇器
 
-對話輸入區是**單一卡片**（Web `conversation-panel.tsx`、Android `ChatBottomSheet`，版面相同）：上方是會長高的輸入框，下方工具列左邊是「＋」（導入）與模型晶片（顯示目前模型，非預設模式才加上模式名；點開選模型與回答模式），右邊是送出／停止。Web 的 Enter 送出、Shift+Enter 換行，**Enter 必須排除 `isComposing`，否則選中文字時會誤送**。新功能入口請加進這兩個選單，不要再加常駐按鈕。
+對話輸入區是**單一卡片**（Web `conversation-panel.tsx`、Android `ChatBottomSheet`，版面相同）：上方是會長高的輸入框，下方工具列左邊是「＋」（導入）與模型晶片（顯示目前模型，非預設模式才加上模式名；點開選模型與回答模式），右邊是送出／停止。Web 的 Enter 送出、Shift+Enter 換行，**Enter 必須排除 `isComposing`，否則選中文字時會誤送**。新功能入口請加進這兩個選單，不要再加常駐按鈕。**Android 的送出鍵放在文字列右側，不可搬回右下角**：Typeless 這類語音輸入的浮動按鈕固定在鍵盤右上方，會蓋住右下角（Pixel 6a 實測）。
 - profile 列表來自 `/api/settings/profiles`，預設選中 `is_default=true`
 - Query / Ingest / Organize API 支援可選 `profile_id` override，會檢查 `owner_id` 權限
 - 若使用者未設定任何 profile，選單只留導入項，API fallback 至 workspace 綁定的 default profile

@@ -1611,7 +1611,7 @@ private fun ChatBottomSheet(
                 else -> composerProfile.name
             }
             Surface(
-                modifier = Modifier.fillMaxWidth().padding(start = 12.dp, top = 8.dp, end = 12.dp, bottom = 12.dp),
+                modifier = Modifier.fillMaxWidth().padding(start = 12.dp, top = 8.dp, end = 12.dp, bottom = 16.dp),
                 shape = RoundedCornerShape(24.dp),
                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
                 border = BorderStroke(
@@ -1620,30 +1620,73 @@ private fun ChatBottomSheet(
                 ),
             ) {
                 Column {
-                    TextField(
-                        value = input,
-                        onValueChange = onInputChange,
-                        placeholder = { Text(stringResource(R.string.wiki_chat_input_hint)) },
-                        modifier = Modifier.fillMaxWidth().onFocusChanged { composerFocused = it.isFocused },
-                        maxLines = 6,
-                        colors = TextFieldDefaults.colors(
-                            focusedContainerColor = Color.Transparent,
-                            unfocusedContainerColor = Color.Transparent,
-                            disabledContainerColor = Color.Transparent,
-                            focusedIndicatorColor = Color.Transparent,
-                            unfocusedIndicatorColor = Color.Transparent,
-                            disabledIndicatorColor = Color.Transparent,
-                        ),
-                        keyboardOptions = KeyboardOptions(
-                            capitalization = KeyboardCapitalization.Sentences,
-                            imeAction = ImeAction.Send,
-                        ),
-                        keyboardActions = KeyboardActions(onSend = {
-                            if (input.isNotBlank() && !isLoading) onSend(input)
-                        }),
-                    )
+                    // Send sits beside the text, not in the bottom corner: floating dictation
+                    // buttons (Typeless) park right above the keyboard and would cover it there.
                     Row(
-                        Modifier.fillMaxWidth().padding(start = 4.dp, end = 8.dp, bottom = 8.dp),
+                        Modifier.fillMaxWidth().padding(end = 8.dp),
+                        verticalAlignment = Alignment.Bottom,
+                    ) {
+                        TextField(
+                            value = input,
+                            onValueChange = onInputChange,
+                            placeholder = { Text(stringResource(R.string.wiki_chat_input_hint)) },
+                            modifier = Modifier.weight(1f).onFocusChanged { composerFocused = it.isFocused },
+                            maxLines = 6,
+                            colors = TextFieldDefaults.colors(
+                                focusedContainerColor = Color.Transparent,
+                                unfocusedContainerColor = Color.Transparent,
+                                disabledContainerColor = Color.Transparent,
+                                focusedIndicatorColor = Color.Transparent,
+                                unfocusedIndicatorColor = Color.Transparent,
+                                disabledIndicatorColor = Color.Transparent,
+                            ),
+                            keyboardOptions = KeyboardOptions(
+                                capitalization = KeyboardCapitalization.Sentences,
+                                imeAction = ImeAction.Send,
+                            ),
+                            keyboardActions = KeyboardActions(onSend = {
+                                if (input.isNotBlank() && !isLoading) onSend(input)
+                            }),
+                        )
+                        Box(Modifier.padding(bottom = 6.dp)) {
+                    if (isLoading) {
+                        IconButton(
+                            onClick = onStop,
+                            modifier = Modifier.size(44.dp),
+                            colors = IconButtonDefaults.iconButtonColors(
+                                containerColor = MaterialTheme.colorScheme.onSurface,
+                                contentColor = MaterialTheme.colorScheme.surface,
+                            ),
+                        ) {
+                            Icon(
+                                Icons.Default.Stop,
+                                contentDescription = stringResource(R.string.chat_stop),
+                                modifier = Modifier.size(20.dp),
+                            )
+                        }
+                    } else {
+                        IconButton(
+                            onClick = { if (input.isNotBlank()) onSend(input) },
+                            enabled = input.isNotBlank(),
+                            modifier = Modifier.size(44.dp),
+                            colors = IconButtonDefaults.iconButtonColors(
+                                containerColor = MaterialTheme.colorScheme.primary,
+                                contentColor = MaterialTheme.colorScheme.onPrimary,
+                                disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            ),
+                        ) {
+                            Icon(
+                                Icons.Default.ArrowUpward,
+                                contentDescription = stringResource(R.string.wiki_send),
+                                modifier = Modifier.size(20.dp),
+                            )
+                        }
+                    }
+                        }
+                    }
+                    Row(
+                        Modifier.fillMaxWidth().padding(start = 4.dp, top = 2.dp, end = 8.dp, bottom = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Box {
@@ -1753,41 +1796,6 @@ private fun ChatBottomSheet(
                                         onQueryModeSelected(QUERY_MODE_FAITHFUL)
                                         showActionMenu = false
                                     },
-                                )
-                            }
-                        }
-
-                        if (isLoading) {
-                            IconButton(
-                                onClick = onStop,
-                                modifier = Modifier.size(44.dp),
-                                colors = IconButtonDefaults.iconButtonColors(
-                                    containerColor = MaterialTheme.colorScheme.onSurface,
-                                    contentColor = MaterialTheme.colorScheme.surface,
-                                ),
-                            ) {
-                                Icon(
-                                    Icons.Default.Stop,
-                                    contentDescription = stringResource(R.string.chat_stop),
-                                    modifier = Modifier.size(20.dp),
-                                )
-                            }
-                        } else {
-                            IconButton(
-                                onClick = { if (input.isNotBlank()) onSend(input) },
-                                enabled = input.isNotBlank(),
-                                modifier = Modifier.size(44.dp),
-                                colors = IconButtonDefaults.iconButtonColors(
-                                    containerColor = MaterialTheme.colorScheme.primary,
-                                    contentColor = MaterialTheme.colorScheme.onPrimary,
-                                    disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                                    disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                                ),
-                            ) {
-                                Icon(
-                                    Icons.Default.ArrowUpward,
-                                    contentDescription = stringResource(R.string.wiki_send),
-                                    modifier = Modifier.size(20.dp),
                                 )
                             }
                         }

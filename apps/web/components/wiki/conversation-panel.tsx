@@ -840,7 +840,7 @@ export function ConversationPanel({
             }}
             placeholder={t('query.placeholder')}
             aria-label={t('query.placeholder')}
-            className="block w-full resize-none bg-transparent px-3.5 pb-1 pt-3 text-base leading-6 outline-none sm:text-sm"
+            className="block w-full resize-none bg-transparent px-3.5 pb-1 pt-3 composer-input text-base leading-6 sm:text-sm"
             style={{ color: 'var(--fg)', maxHeight: COMPOSER_MAX_HEIGHT }}
             disabled={driveReconnectPending}
           />
