@@ -17,7 +17,9 @@ import {
 import { useLocale, useTranslations } from 'next-intl';
 import { isDriveReconnectError, reconnectGoogleDrive } from '@/lib/google/drive-reconnect';
 import {
+  describeIngestWait,
   isActiveIngestStatus,
+  isWaitingIngestJob,
   ingestFileMimeForUpload,
   isSupportedIngestFile,
   mergeIngestQueueJobs,
@@ -151,6 +153,8 @@ function statusLabel(t: ReturnType<typeof useTranslations>, status: IngestQueueS
 
 function phaseLabel(t: ReturnType<typeof useTranslations>, phase: IngestQueueJob['phase']): string {
   switch (phase) {
+    case 'intake':
+      return t('ingest.phaseIntake');
     case 'analysis':
       return t('ingest.phaseAnalysis');
     case 'writing':
@@ -245,7 +249,8 @@ export function ImportDialog({
         setJobsError(null);
       }
       try {
-        const listResponse = await fetch(`/api/ingest?workspace_id=${encodeURIComponent(workspaceId)}`);
+        // Auto-routed imports leave this workspace, so the queue spans all of them.
+        const listResponse = await fetch(`/api/ingest?workspace_id=${encodeURIComponent(workspaceId)}&scope=owner`);
         const listValue = await readJsonResponse(listResponse, t('ingest.jobsLoadFailed'));
         const listed = parseIngestJobsResponse(listValue, workspaceId);
         if (!listed) throw new Error(t('ingest.invalidJobsResponse'));
@@ -371,7 +376,7 @@ export function ImportDialog({
         workspace_id: started.routed_workspace_id ?? workspaceId,
         source_id: '',
         status: started.status,
-        phase: started.status === 'done' ? 'done' : 'analysis',
+        phase: started.status === 'done' ? 'done' : 'intake',
         result: started.result,
         error: null,
         touched_pages: [],
@@ -698,8 +703,9 @@ export function ImportDialog({
           ) : (
             <ul className="mt-2 max-h-64 space-y-1.5 overflow-y-auto">
               {jobs.map((job) => {
-                const action = job.status === 'paused' ? 'resume' : job.status === 'failed' ? 'retry' : 'pause';
-                const actionLabel = action === 'pause' ? t('ingest.pause') : action === 'resume' ? t('ingest.resume') : t('ingest.retry');
+                const waiting = isWaitingIngestJob(job);
+                const action = job.status === 'paused' ? 'resume' : job.status === 'failed' || waiting ? 'retry' : 'pause';
+                const actionLabel = waiting ? t('ingest.retryNow') : action === 'pause' ? t('ingest.pause') : action === 'resume' ? t('ingest.resume') : t('ingest.retry');
                 const actionIcon = action === 'pause' ? <Pause size={13} /> : action === 'resume' ? <Play size={13} /> : <RotateCcw size={13} />;
                 const actionBusy = actionKey === `${job.id}:${action}`;
                 const actionError = actionErrors[job.id];
@@ -720,8 +726,13 @@ export function ImportDialog({
                             {job.workspace_name ? t('ingest.routedTo', { name: job.workspace_name }) : t('ingest.otherWorkspace')}
                           </p>
                         )}
-                        {job.status === 'failed' && job.error && (
-                          <p className="mt-1 truncate text-[10px]" style={{ color: 'oklch(65% 0.18 30)' }} title={job.error}>{job.error}</p>
+                        {waiting && (
+                          <p className="mt-1 text-[10px]" style={{ color: 'oklch(75% 0.16 80)' }} role="status">
+                            {describeIngestWait(t, job)}
+                          </p>
+                        )}
+                        {(job.status === 'failed' || (waiting && job.wait_reason === 'retry')) && job.error && (
+                          <p className="mt-1 text-[10px]" style={{ color: 'oklch(65% 0.18 30)' }}>{job.error}</p>
                         )}
                         {actionError && <p className="mt-1 truncate text-[10px]" style={{ color: 'oklch(65% 0.18 30)' }} role="alert">{actionError}</p>}
                       </div>

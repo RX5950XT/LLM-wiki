@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import {
   failureUpdate,
-  isStaleRunning,
+  isDeadRunning,
   nextAttemptCount,
   transitionIngestJob,
 } from './ingest-job-state';
@@ -26,11 +26,15 @@ describe('ingest job state transitions', () => {
     expect(update).not.toHaveProperty('touched_pages');
   });
 
-  it('detects stale running rows from updated_at, not started_at', () => {
+  it('treats a run past the invocation lease as dead', () => {
     const now = Date.parse('2026-09-01T12:00:00.000Z');
-    expect(isStaleRunning('running', '2026-09-01T11:51:59.000Z', now)).toBe(true);
-    expect(isStaleRunning('running', '2026-09-01T11:52:01.000Z', now)).toBe(false);
-    expect(isStaleRunning('pending', '2026-09-01T00:00:00.000Z', now)).toBe(false);
+    expect(isDeadRunning('running', '2026-09-01T11:54:29.000Z', now)).toBe(true);
+    expect(isDeadRunning('running', '2026-09-01T11:54:31.000Z', now)).toBe(false);
+    expect(isDeadRunning('pending', '2026-09-01T00:00:00.000Z', now)).toBe(false);
+  });
+
+  it('lets a waiting job be retried right away', () => {
+    expect(transitionIngestJob('pending', 'retry')).toEqual({ ok: true, status: 'pending' });
   });
 
   it('increments malformed attempt counts from zero', () => {

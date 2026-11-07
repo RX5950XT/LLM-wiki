@@ -3,7 +3,7 @@
 import { useState, useCallback, useRef, useEffect, useMemo, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { PanelLeft, PanelRight, Ellipsis, GitFork, ChevronDown, LogOut, Plus, Settings, Search, Loader2, HelpCircle, Pencil, Trash2, GripVertical, Library, Wrench, CheckCircle2, AlertCircle, X, Check } from 'lucide-react';
+import { PanelLeft, PanelRight, Ellipsis, GitFork, ChevronDown, LogOut, Plus, Settings, Search, Loader2, HelpCircle, Pencil, Trash2, GripVertical, Library, Wrench, CheckCircle2, AlertCircle, X, Check, Clock3 } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import { PageTree } from '@/components/wiki/page-tree';
 import { PageViewer, prefetchPage } from '@/components/wiki/page-viewer';
@@ -11,7 +11,7 @@ import { ConversationPanel } from '@/components/wiki/conversation-panel';
 import { GraphView } from '@/components/wiki/graph-view';
 import { HelpDialog } from '@/components/wiki/help-dialog';
 import { SourcesDialog } from '@/components/wiki/sources-dialog';
-import { parseIngestJobsResponse } from '@/components/wiki/ingest-queue';
+import { describeIngestWait, isWaitingIngestJob, parseIngestJobsResponse, type IngestQueueJob } from '@/components/wiki/ingest-queue';
 import { useRealtimePages, type PageChangedEvent } from '@/lib/sync/realtime';
 import { createClient } from '@/lib/supabase/client';
 
@@ -61,6 +61,24 @@ const MAX_MAINTENANCE_PASSES = 6;
  * oldest running one is part of the same push, not last week's session.
  */
 const BATCH_LOOKBACK_MS = 30 * 60 * 1000;
+const FAILURE_NOTICE_MS = 24 * 60 * 60 * 1000;
+const FAILURE_DISMISSED_KEY = 'llmwiki:ingest-failure-dismissed-at';
+
+function readFailureDismissedAt(): number {
+  try {
+    return Number(window.localStorage.getItem(FAILURE_DISMISSED_KEY)) || 0;
+  } catch {
+    return 0; // Private browsing can deny storage; the notice just shows again.
+  }
+}
+
+function writeFailureDismissedAt(value: number): void {
+  try {
+    window.localStorage.setItem(FAILURE_DISMISSED_KEY, String(value));
+  } catch {
+    /* Private browsing can deny storage. */
+  }
+}
 
 function getResponsivePanelDefaults(isMobile: boolean, isTablet: boolean): { leftOpen: boolean; rightOpen: boolean } {
   return {
@@ -295,6 +313,11 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
     done: number;
     failed: number;
     pages: number;
+    /** The soonest parked job; every in-flight job is waiting when `allWaiting`. */
+    waiting: IngestQueueJob | null;
+    allWaiting: boolean;
+    /** Only a recent failure with nothing else going on. */
+    failure: IngestQueueJob | null;
   } | null>(null);
   useEffect(() => {
     let cancelled = false;
@@ -312,7 +335,18 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
         // Queued (pending) imports are part of the batch too — same rule as Android.
         const inFlight = jobs.filter((job) => job.status === 'running' || job.status === 'pending');
         if (inFlight.length === 0) {
-          setIngest(null);
+          // A failure nobody saw must not vanish with the tab: it stays until dismissed or a day old.
+          const dismissedBefore = readFailureDismissedAt();
+          const failure = jobs.find(
+            (job) =>
+              job.status === 'failed' &&
+              Date.parse(job.finished_at ?? '') > Math.max(Date.now() - FAILURE_NOTICE_MS, dismissedBefore),
+          );
+          setIngest(
+            failure
+              ? { running: 0, done: 0, failed: 1, pages: 0, waiting: null, allWaiting: false, failure }
+              : null,
+          );
           if (previous > 0) {
             refreshPageList();
             refreshWorkspaceList();
@@ -337,11 +371,17 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
         ).length;
         if (cancelled) return;
 
+        const waitingJobs = inFlight
+          .filter(isWaitingIngestJob)
+          .sort((a, b) => Date.parse(a.next_attempt_at ?? '') - Date.parse(b.next_attempt_at ?? ''));
         setIngest({
           running: inFlight.length,
           done: doneCount,
           failed: failedCount,
           pages: inFlight.reduce((sum, job) => sum + job.touched_pages.length, 0),
+          waiting: waitingJobs[0] ?? null,
+          allWaiting: waitingJobs.length === inFlight.length,
+          failure: null,
         });
         previous = inFlight.length;
       } catch {
@@ -1261,17 +1301,44 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
           role="status"
           aria-live="polite"
         >
-          <Loader2 size={14} className="shrink-0 animate-spin" />
+          {ingest.failure ? (
+            <AlertCircle size={14} className="shrink-0" />
+          ) : ingest.allWaiting ? (
+            <Clock3 size={14} className="shrink-0" />
+          ) : (
+            <Loader2 size={14} className="shrink-0 animate-spin" />
+          )}
           <span className="min-w-0 flex-1 truncate">
-            {[
-              t('workspace.ingestRunning', { files: ingest.running, pages: ingest.pages }),
-              t('workspace.ingestBatchDone', { count: ingest.done }),
-              ingest.failed > 0 ? t('workspace.ingestBatchFailed', { count: ingest.failed }) : null,
-              t('workspace.maintenanceBackgroundHint'),
-            ]
-              .filter(Boolean)
-              .join(' · ')}
+            {ingest.failure
+              ? t('workspace.ingestLastFailed', {
+                  title: ingest.failure.source_title ?? t('common.untitled'),
+                  error: ingest.failure.error ?? t('ingest.failedGeneric'),
+                })
+              : [
+                  ingest.allWaiting
+                    ? t('workspace.ingestWaiting', { files: ingest.running, pages: ingest.pages })
+                    : t('workspace.ingestRunning', { files: ingest.running, pages: ingest.pages }),
+                  ingest.waiting ? describeIngestWait(t, ingest.waiting) : null,
+                  t('workspace.ingestBatchDone', { count: ingest.done }),
+                  ingest.failed > 0 ? t('workspace.ingestBatchFailed', { count: ingest.failed }) : null,
+                  t('workspace.maintenanceBackgroundHint'),
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
           </span>
+          {ingest.failure && (
+            <button
+              type="button"
+              onClick={() => {
+                writeFailureDismissedAt(Date.now());
+                setIngest(null);
+              }}
+              className="flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-md transition-opacity hover:opacity-70 focus-visible:outline-2 focus-visible:outline-offset-2"
+              aria-label={t('common.close')}
+            >
+              <X size={14} />
+            </button>
+          )}
         </div>
       )}
 

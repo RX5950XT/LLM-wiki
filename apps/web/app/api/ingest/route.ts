@@ -1,37 +1,28 @@
-import { createHash } from 'crypto';
 import { NextRequest, NextResponse, after } from 'next/server';
 import { z } from 'zod';
-import { generateText } from 'ai';
-import { writeDriveFile, findFile } from '@/lib/drive/client';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { getRequestUser } from '@/lib/supabase/request';
 import {
   createDriveClientForUser,
   GOOGLE_DRIVE_REAUTH_MESSAGE,
   isGoogleDriveAuthError,
 } from '@/lib/google/drive-auth';
-import { createLLMClient } from '@/lib/ai/client';
-import { routeToWorkspace } from '@/lib/ai/route-workspace';
 import {
+  loadRunnableIngestJobs,
+  recoverDeadIngestJobs,
   runPendingIngestJob,
-  trashIngestSourceFile,
 } from '@/lib/ai/ingest-job-runner';
 import {
-  failureUpdate,
   INGEST_JOB_ERROR_CODES,
-  isStaleRunning,
+  isDeadRunning,
   transitionIngestJob,
 } from '@/lib/ai/ingest-job-state';
+import { RUNNER_LEASE_MS } from '@/lib/ai/ingest-retry';
 import { resolveUiLocaleFromRequest } from '@/lib/i18n/ui-locale';
 import type { UiLocale } from '@llm-wiki/drive-schema';
-import { toPublicUrlFetchFailure, urlToMarkdown } from '@/lib/fetch/url-to-markdown';
 import { localizeIngestError } from '@/lib/ai/ingest-error-i18n';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import {
-  extractDocument,
-  MAX_INPUT_BYTES,
-  type ImageToDescribe,
-} from '@/lib/ingest/document-parser';
-import type { LLMProfile } from '@llm-wiki/shared-types';
+import { MAX_INPUT_BYTES } from '@/lib/ingest/document-parser';
 
 export const maxDuration = 300;
 
@@ -39,13 +30,16 @@ const MAX_TEXT_LENGTH = 2 * 1024 * 1024;
 const REQUEST_OVERHEAD_BYTES = 64 * 1024;
 const MAX_JSON_REQUEST_BYTES = MAX_TEXT_LENGTH + REQUEST_OVERHEAD_BYTES;
 const MAX_MULTIPART_REQUEST_BYTES = MAX_INPUT_BYTES + REQUEST_OVERHEAD_BYTES;
-const STALE_JOB_MS = 8 * 60 * 1000;
+/** One user rarely has more; the rest start on the next poll or worker tick. */
+const JOBS_STARTED_PER_POLL = 3;
 
 const TargetFields = {
   workspace_id: z.string().uuid().optional(),
   auto_route: z.boolean().optional(),
   fallback_workspace_id: z.string().uuid().optional(),
   profile_id: z.string().uuid().nullish(),
+  /** Same id = same job, so a client re-sending after a lost response cannot import twice. */
+  client_request_id: z.string().uuid().optional(),
 };
 
 const IngestSchema = z.discriminatedUnion('kind', [
@@ -72,6 +66,7 @@ const MultipartFieldsSchema = z.object({
   fallback_workspace_id: z.string().uuid().optional(),
   auto_route: z.enum(['true', 'false']).optional().transform((value) => value === 'true'),
   profile_id: z.string().uuid().optional(),
+  client_request_id: z.string().uuid().optional(),
 });
 
 export type MultipartIngestFields = {
@@ -80,6 +75,7 @@ export type MultipartIngestFields = {
   fallback_workspace_id?: string;
   auto_route?: boolean;
   profile_id?: string;
+  client_request_id?: string;
 };
 
 export type IngestRequestBodyKind = 'json' | 'multipart';
@@ -122,6 +118,7 @@ export function parseMultipartIngestFields(
     fallback_workspace_id: formData.get('fallback_workspace_id') || undefined,
     auto_route: formData.get('auto_route') || undefined,
     profile_id: formData.get('profile_id') || undefined,
+    client_request_id: formData.get('client_request_id') || undefined,
   });
   if (!parsed.success) return { ok: false, message: 'invalid multipart ingest fields' };
   return { ok: true, data: { file, ...parsed.data } };
@@ -146,7 +143,7 @@ export function parseIngestJobAction(
 }
 
 const JOB_FIELDS =
-  'id, workspace_id, source_id, status, phase, result, attempt_count, error, touched_pages, started_at, finished_at, updated_at';
+  'id, workspace_id, source_id, status, phase, result, attempt_count, error, touched_pages, started_at, finished_at, updated_at, next_attempt_at, wait_reason, retry_count';
 
 type WorkspaceRow = {
   id: string;
@@ -154,24 +151,6 @@ type WorkspaceRow = {
   drive_folder_id: string;
   ingest_profile_id: string | null;
   default_profile_id: string | null;
-};
-
-type ProfileRow = {
-  id: string;
-  name: string;
-  base_url: string;
-  model: string;
-  api_key_encrypted: string;
-  extra_headers: Record<string, string>;
-  extra_headers_encrypted?: string | null;
-  owner_id: string;
-};
-
-type SourceRow = {
-  id: string;
-  workspace_id: string;
-  title: string | null;
-  ingested_at: string | null;
 };
 
 type JobRow = {
@@ -187,42 +166,13 @@ type JobRow = {
   started_at: string | null;
   finished_at: string | null;
   updated_at: string | null;
+  next_attempt_at: string | null;
+  wait_reason: 'usage_limit' | 'retry' | 'continue' | null;
+  retry_count: number;
 };
-
-function buildImageDescriber(profile: ProfileRow) {
-  const model = createLLMClient(profile as LLMProfile);
-  return async (image: ImageToDescribe): Promise<string> => {
-    const result = await generateText({
-      model,
-      messages: [
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'text',
-              text: 'Describe this image accurately in concise plain text for a personal knowledge wiki.',
-            },
-            {
-              type: 'image',
-              image: `data:${image.mime};base64,${Buffer.from(image.data).toString('base64')}`,
-            },
-          ],
-        },
-      ],
-      abortSignal: image.signal,
-    });
-    const text = result.text.trim();
-    if (!text) throw new Error('Image model returned no description');
-    return text;
-  };
-}
 
 function errorResponse(status: number, code: string, message: string): NextResponse {
   return NextResponse.json({ error: { code, message } }, { status });
-}
-
-function hashContent(content: string): string {
-  return createHash('sha256').update(content, 'utf8').digest('hex');
 }
 
 function isUniqueViolation(error: { code?: string } | null | undefined): boolean {
@@ -244,21 +194,6 @@ async function loadWorkspace(
   return (data as WorkspaceRow | null) ?? null;
 }
 
-async function loadProfile(
-  supabase: SupabaseClient,
-  id: string,
-  ownerId: string,
-): Promise<ProfileRow | null> {
-  const { data, error } = await supabase
-    .from('llm_profiles')
-    .select('id, name, base_url, model, api_key_encrypted, extra_headers, extra_headers_encrypted, owner_id')
-    .eq('id', id)
-    .eq('owner_id', ownerId)
-    .maybeSingle();
-  if (error) throw new Error(`LLM profile lookup failed: ${error.message}`);
-  return (data as ProfileRow | null) ?? null;
-}
-
 async function loadDefaultProfileId(
   supabase: SupabaseClient,
   ownerId: string,
@@ -273,110 +208,6 @@ async function loadDefaultProfileId(
   return data?.id ?? null;
 }
 
-async function loadSourceByHash(
-  supabase: SupabaseClient,
-  workspaceId: string,
-  sourceSha256: string,
-  ingestedOnly = false,
-): Promise<SourceRow | null> {
-  let query = supabase
-    .from('sources')
-    .select('id, workspace_id, title, ingested_at')
-    .eq('workspace_id', workspaceId)
-    .eq('content_sha256', sourceSha256);
-  if (ingestedOnly) query = query.not('ingested_at', 'is', null);
-  const { data, error } = await query.maybeSingle();
-  if (error) throw new Error(`source duplicate lookup failed: ${error.message}`);
-  return (data as SourceRow | null) ?? null;
-}
-
-async function loadLatestSourceJob(
-  supabase: SupabaseClient,
-  sourceId: string,
-): Promise<JobRow | null> {
-  const { data, error } = await supabase
-    .from('ingest_jobs')
-    .select(JOB_FIELDS)
-    .eq('source_id', sourceId)
-    .order('updated_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (error) throw new Error(`source job lookup failed: ${error.message}`);
-  return (data as JobRow | null) ?? null;
-}
-
-async function insertDoneJob(
-  supabase: SupabaseClient,
-  workspaceId: string,
-  sourceId: string,
-  profileId: string | null,
-  sourceSha256: string,
-): Promise<JobRow> {
-  const now = new Date().toISOString();
-  const { data, error } = await supabase
-    .from('ingest_jobs')
-    .insert({
-      workspace_id: workspaceId,
-      source_id: sourceId,
-      profile_id: profileId,
-      status: 'done',
-      phase: 'done',
-      result: 'unchanged',
-      source_sha256: sourceSha256,
-      checkpoint: { written_pages: [] },
-      touched_pages: [],
-      attempt_count: 0,
-      started_at: now,
-      finished_at: now,
-    })
-    .select(JOB_FIELDS)
-    .single();
-  if (error || !data) {
-    throw new Error(`unchanged ingest job insert failed: ${error?.message ?? 'empty response'}`);
-  }
-  return data as JobRow;
-}
-
-async function insertPendingJob(
-  supabase: SupabaseClient,
-  workspaceId: string,
-  sourceId: string,
-  profileId: string,
-  sourceSha256: string,
-): Promise<JobRow> {
-  const { data, error } = await supabase
-    .from('ingest_jobs')
-    .insert({
-      workspace_id: workspaceId,
-      source_id: sourceId,
-      profile_id: profileId,
-      status: 'pending',
-      phase: 'analysis',
-      result: null,
-      source_sha256: sourceSha256,
-      checkpoint: { written_pages: [] },
-      touched_pages: [],
-      attempt_count: 0,
-      started_at: null,
-      finished_at: null,
-    })
-    .select(JOB_FIELDS)
-    .single();
-  if (error || !data) throw new Error(`ingest job insert failed: ${error?.message ?? 'empty response'}`);
-  return data as JobRow;
-}
-
-async function trashBestEffort(
-  drive: Awaited<ReturnType<typeof createDriveClientForUser>>,
-  fileId: string,
-): Promise<void> {
-  try {
-    await trashIngestSourceFile(drive, fileId);
-  } catch (error) {
-    console.error('[ingest] failed to trash orphan source file', { fileId, error });
-  }
-}
-
 function schedulePendingJob(jobId: string, ownerId: string, locale: string, startedAt?: number): void {
   after(async () => {
     try {
@@ -387,7 +218,7 @@ function schedulePendingJob(jobId: string, ownerId: string, locale: string, star
   });
 }
 
-function publicJob(job: JobRow, locale: UiLocale) {
+function publicJob(job: JobRow, locale: UiLocale, workspaceName?: string) {
   return {
     id: job.id,
     status: job.status,
@@ -398,9 +229,13 @@ function publicJob(job: JobRow, locale: UiLocale) {
     touched_pages: job.touched_pages ?? [],
     source_id: job.source_id,
     workspace_id: job.workspace_id,
+    ...(workspaceName ? { workspace_name: workspaceName } : {}),
     started_at: job.started_at,
     finished_at: job.finished_at,
     updated_at: job.updated_at,
+    next_attempt_at: job.next_attempt_at,
+    wait_reason: job.wait_reason,
+    retry_count: job.retry_count,
   };
 }
 
@@ -456,240 +291,109 @@ export async function POST(request: NextRequest) {
       overrideProfileId = data?.id ?? null;
     }
 
-    let sourceContent: string;
-    let sourceTitle: string;
-    let sourceUrl: string | undefined;
-    let sourceKind: 'url' | 'text' | 'file';
-    let sourceMimeType: string;
-    let sourceByteSize: number;
-    let sourceMetadata: Record<string, unknown> | null = null;
-    if (input.kind === 'file') {
-      const file = input.file;
-      const parserProfileId =
-        overrideProfileId ??
-        gateWorkspace.ingest_profile_id ??
-        gateWorkspace.default_profile_id ??
-        (await loadDefaultProfileId(supabase, user.id));
-      if (!parserProfileId) {
-        return errorResponse(422, 'LLM_PROFILE_REQUIRED', 'No LLM profile configured. Go to Settings to add one.');
-      }
-      const parserProfile = await loadProfile(supabase, parserProfileId, user.id);
-      if (!parserProfile) return errorResponse(404, 'LLM_PROFILE_NOT_FOUND', 'LLM profile not found');
-      const extracted = await extractDocument({
-        filename: file.name,
-        mime: file.type,
-        data: new Uint8Array(await file.arrayBuffer()),
-        describeImage: buildImageDescriber(parserProfile),
-      });
-      if (!extracted.ok) return errorResponse(422, `DOCUMENT_${extracted.error.code}`, extracted.error.message);
-      if (extracted.text.includes('[Image description unavailable]')) {
-        return errorResponse(422, 'IMAGE_DESCRIPTION_FAILED', 'The image could not be described.');
-      }
-      sourceContent = extracted.text;
-      if (!sourceContent.trim()) return errorResponse(422, 'EMPTY_DOCUMENT', 'The document has no readable text.');
-      sourceTitle = file.name.replace(/\.[^.]+$/, '') || file.name;
-      sourceKind = 'file';
-      sourceMimeType = file.type;
-      sourceByteSize = file.size;
-      sourceMetadata = {
-        filename: file.name,
-        mime: file.type,
-        byte_size: file.size,
-      };
-    } else if (input.kind === 'url') {
-      try {
-        const article = await urlToMarkdown(input.url);
-        sourceContent = article.markdown;
-        sourceTitle = article.title;
-        sourceUrl = input.url;
-      } catch (error) {
-        const failure = toPublicUrlFetchFailure(error);
-        console.warn('[ingest] url fetch failed:', error instanceof Error ? error.message : error);
-        return errorResponse(
-          failure.status,
-          failure.code,
-          localizeIngestError(failure.message, locale) ?? failure.message,
-        );
-      }
-      sourceKind = 'url';
-      sourceMimeType = 'text/markdown';
-      sourceByteSize = Buffer.byteLength(sourceContent, 'utf8');
-    } else {
-      sourceContent = input.content;
-      sourceTitle = input.title;
-      sourceKind = 'text';
-      sourceMimeType = 'text/plain';
-      sourceByteSize = Buffer.byteLength(sourceContent, 'utf8');
-    }
-    const sourceSha256 = hashContent(sourceContent);
-    if (sourceMetadata) sourceMetadata = { ...sourceMetadata, content_sha256: sourceSha256 };
-
-    let drive: Awaited<ReturnType<typeof createDriveClientForUser>> | null = null;
-    let workspace: WorkspaceRow = gateWorkspace;
-    let routedWorkspaceName: string | undefined;
-    let routedWorkspaceCreated = false;
-
-    if (autoRoute) {
-      try {
-        drive = await createDriveClientForUser(user.id);
-      } catch (error) {
-        if (isGoogleDriveAuthError(error)) {
-          return errorResponse(403, 'DRIVE_RECONNECT_REQUIRED', GOOGLE_DRIVE_REAUTH_MESSAGE);
-        }
-        throw error;
-      }
-      const routingProfileId =
-        overrideProfileId ??
-        gateWorkspace.ingest_profile_id ??
-        gateWorkspace.default_profile_id ??
-        (await loadDefaultProfileId(supabase, user.id));
-      if (!routingProfileId) {
-        return errorResponse(422, 'LLM_PROFILE_REQUIRED', 'No LLM profile configured. Go to Settings to add one.');
-      }
-      const routingProfile = await loadProfile(supabase, routingProfileId, user.id);
-      if (!routingProfile) return errorResponse(404, 'LLM_PROFILE_NOT_FOUND', 'LLM profile not found');
-      const routing = await routeToWorkspace(
-        supabase,
-        drive,
-        user.id,
-        routingProfile as Parameters<typeof createLLMClient>[0],
-        sourceTitle,
-        sourceContent,
-        gateWorkspace.id,
-        locale,
-      );
-      const routed = await loadWorkspace(supabase, routing.workspaceId, user.id);
-      if (!routed) return errorResponse(404, 'WORKSPACE_NOT_FOUND', 'Workspace not found');
-      workspace = routed;
-      routedWorkspaceCreated = routing.created;
-      if (routing.decided) routedWorkspaceName = workspace.name;
-    }
-
-    const profileId =
+    // Only what the user alone can fix is answered here; the reconnect flow depends on this 403.
+    const hasProfile =
       overrideProfileId ??
-      workspace.ingest_profile_id ??
-      workspace.default_profile_id ??
       gateWorkspace.ingest_profile_id ??
       gateWorkspace.default_profile_id ??
       (await loadDefaultProfileId(supabase, user.id));
-    const duplicate = await loadSourceByHash(supabase, workspace.id, sourceSha256, true);
-    if (duplicate) {
-      const job = await insertDoneJob(supabase, workspace.id, duplicate.id, profileId, sourceSha256);
-      return NextResponse.json(
-        {
-          jobId: job.id,
-          status: job.status,
-          result: job.result,
-          ...(routedWorkspaceName
-            ? {
-                routed_workspace_id: workspace.id,
-                routed_workspace_name: routedWorkspaceName,
-                routed_workspace_created: routedWorkspaceCreated,
-              }
-            : {}),
-        },
-        { status: 202 },
-      );
-    }
-
-    if (!profileId) {
+    if (!hasProfile) {
       return errorResponse(422, 'LLM_PROFILE_REQUIRED', 'No LLM profile configured. Go to Settings to add one.');
     }
-    const profile = await loadProfile(supabase, profileId, user.id);
-    if (!profile) return errorResponse(404, 'LLM_PROFILE_NOT_FOUND', 'LLM profile not found');
-
-    if (!drive) {
-      try {
-        drive = await createDriveClientForUser(user.id);
-      } catch (error) {
-        if (isGoogleDriveAuthError(error)) {
-          return errorResponse(403, 'DRIVE_RECONNECT_REQUIRED', GOOGLE_DRIVE_REAUTH_MESSAGE);
-        }
-        throw error;
-      }
-    }
-    const sourcesFolderId = await findFile(
-      drive,
-      'sources',
-      workspace.drive_folder_id,
-      'application/vnd.google-apps.folder',
-    );
-    if (!sourcesFolderId) return errorResponse(500, 'DRIVE_SOURCES_FOLDER_NOT_FOUND', 'Drive sources folder not found');
-
-    const sourceFileId = await writeDriveFile(drive, sourceContent, {
-      name: `${Date.now()}.md`,
-      parentId: sourcesFolderId,
-    });
-    const { data: insertedSource, error: sourceError } = await supabase
-      .from('sources')
-      .insert({
-        workspace_id: workspace.id,
-        kind: sourceKind,
-        title: sourceTitle,
-        url: sourceUrl ?? null,
-        drive_file_id: sourceFileId,
-        content_sha256: sourceSha256,
-        mime_type: sourceMimeType,
-        byte_size: sourceByteSize,
-        metadata: sourceMetadata ?? {},
-      })
-      .select('id')
-      .single();
-    if (sourceError || !insertedSource) {
-      await trashBestEffort(drive, sourceFileId);
-      if (isUniqueViolation(sourceError)) {
-        const racedSource = await loadSourceByHash(supabase, workspace.id, sourceSha256);
-        if (racedSource?.ingested_at) {
-          const job = await insertDoneJob(supabase, workspace.id, racedSource.id, profile.id, sourceSha256);
-          return NextResponse.json({ jobId: job.id, status: job.status, result: job.result }, { status: 202 });
-        }
-        if (racedSource) {
-          const existingJob = await loadLatestSourceJob(supabase, racedSource.id);
-          if (existingJob && ['pending', 'running', 'paused'].includes(existingJob.status)) {
-            return NextResponse.json(
-              { jobId: existingJob.id, status: existingJob.status, result: existingJob.result },
-              { status: 202 },
-            );
-          }
-          const job = await insertPendingJob(supabase, workspace.id, racedSource.id, profile.id, sourceSha256);
-          schedulePendingJob(job.id, user.id, locale, startedAt);
-          return NextResponse.json({ jobId: job.id, status: job.status, result: job.result }, { status: 202 });
-        }
-      }
-      throw new Error(`source insert failed: ${sourceError?.message ?? 'empty response'}`);
-    }
-    const source = insertedSource as { id: string };
-
-    let job: JobRow;
     try {
-      job = await insertPendingJob(supabase, workspace.id, source.id, profile.id, sourceSha256);
+      await createDriveClientForUser(user.id);
     } catch (error) {
-      await trashBestEffort(drive, sourceFileId);
-      const { error: cleanupError } = await supabase
-        .from('sources')
-        .delete()
-        .eq('id', source.id)
-        .eq('workspace_id', workspace.id);
-      if (cleanupError) console.error('[ingest] orphan source row cleanup failed', cleanupError);
+      if (isGoogleDriveAuthError(error)) {
+        return errorResponse(403, 'DRIVE_RECONNECT_REQUIRED', GOOGLE_DRIVE_REAUTH_MESSAGE);
+      }
       throw error;
     }
 
-    schedulePendingJob(job.id, user.id, locale, startedAt);
-    return NextResponse.json(
-      {
-        jobId: job.id,
-        status: job.status,
-        result: job.result,
-        ...(routedWorkspaceName
+    const started = (job: Pick<JobRow, 'id' | 'status' | 'result'>) =>
+      NextResponse.json({ jobId: job.id, status: job.status, result: job.result }, { status: 202 });
+    const clientRequestId = input.client_request_id ?? null;
+    const findExisting = async (): Promise<JobRow | null> => {
+      if (!clientRequestId) return null;
+      const { data, error } = await supabase
+        .from('ingest_jobs')
+        .select(JOB_FIELDS)
+        .eq('client_request_id', clientRequestId)
+        .maybeSingle();
+      if (error) throw new Error(`ingest request lookup failed: ${error.message}`);
+      return (data as JobRow | null) ?? null;
+    };
+    const replay = await findExisting();
+    if (replay) return started(replay);
+
+    // Everything slow (fetching the URL, parsing, routing, Drive) happens after the response. The
+    // request is durable from here on: closing the app or the tab cannot lose it any more.
+    const placeholder =
+      input.kind === 'file'
+        ? { kind: 'file', title: input.file.name.replace(/\.[^.]+$/, '') || input.file.name, url: null, mime_type: input.file.type }
+        : input.kind === 'url'
+          ? { kind: 'url', title: input.url, url: input.url, mime_type: 'text/markdown' }
+          : { kind: 'text', title: input.title, url: null, mime_type: 'text/plain' };
+    const { data: sourceRow, error: sourceError } = await supabase
+      .from('sources')
+      .insert({ workspace_id: gateWorkspace.id, ...placeholder })
+      .select('id')
+      .single();
+    if (sourceError || !sourceRow) throw new Error(`source insert failed: ${sourceError?.message ?? 'empty response'}`);
+    const sourceId = (sourceRow as { id: string }).id;
+    const dropSource = async () => {
+      const { error } = await supabase.from('sources').delete().eq('id', sourceId);
+      if (error) console.error('[ingest] placeholder source cleanup failed', { sourceId, error: error.message });
+    };
+
+    const { data: jobRow, error: jobError } = await supabase
+      .from('ingest_jobs')
+      .insert({
+        workspace_id: gateWorkspace.id,
+        source_id: sourceId,
+        profile_id: overrideProfileId,
+        status: 'pending',
+        phase: 'intake',
+        checkpoint: { written_pages: [] },
+        touched_pages: [],
+        attempt_count: 0,
+        client_request_id: clientRequestId,
+      })
+      .select(JOB_FIELDS)
+      .single();
+    if (jobError || !jobRow) {
+      await dropSource();
+      if (isUniqueViolation(jobError)) {
+        const raced = await findExisting();
+        if (raced) return started(raced);
+      }
+      throw new Error(`ingest job insert failed: ${jobError?.message ?? 'empty response'}`);
+    }
+    const job = jobRow as JobRow;
+
+    const { error: intakeError } = await createAdminClient()
+      .from('ingest_intakes')
+      .insert({
+        job_id: job.id,
+        kind: input.kind,
+        auto_route: autoRoute,
+        locale,
+        ...(input.kind === 'file'
           ? {
-              routed_workspace_id: workspace.id,
-              routed_workspace_name: routedWorkspaceName,
-              routed_workspace_created: routedWorkspaceCreated,
+              filename: input.file.name,
+              mime: input.file.type,
+              file_base64: Buffer.from(await input.file.arrayBuffer()).toString('base64'),
             }
-          : {}),
-      },
-      { status: 202 },
-    );
+          : input.kind === 'url'
+            ? { url: input.url }
+            : { title: input.title, content: input.content }),
+      });
+    if (intakeError) {
+      await dropSource(); // the job cascades with it
+      throw new Error(`ingest intake insert failed: ${intakeError.message}`);
+    }
+
+    schedulePendingJob(job.id, user.id, locale, startedAt);
+    return started(job);
   } catch (error) {
     console.error('[ingest] POST failed', { error });
     return errorResponse(500, 'INGEST_REQUEST_FAILED', 'Unable to start ingest job');
@@ -719,49 +423,6 @@ async function loadJobForUser(
   return workspace ? job : null;
 }
 
-async function updateStaleJob(supabase: SupabaseClient, job: JobRow, ownerId: string): Promise<JobRow> {
-  const now = new Date().toISOString();
-  const cutoff = new Date(Date.now() - STALE_JOB_MS).toISOString();
-  const { data, error } = await supabase
-    .from('ingest_jobs')
-    .update(failureUpdate('Ingest timed out', now))
-    .eq('id', job.id)
-    .eq('workspace_id', job.workspace_id)
-    .eq('status', 'running')
-    .lt('updated_at', cutoff)
-    .select(JOB_FIELDS)
-    .maybeSingle();
-  if (error) throw new Error(`stale ingest job update failed: ${error.message}`);
-  if (data) return data as JobRow;
-  return (await loadJobForUser(supabase, job.id, ownerId)) ?? job;
-}
-
-export function findStaleRunningJobs<T extends Pick<JobRow, 'status' | 'updated_at'>>(
-  jobs: readonly T[],
-  now = Date.now(),
-): T[] {
-  return jobs.filter((job) => isStaleRunning(job.status, job.updated_at, now, STALE_JOB_MS));
-}
-
-async function sweepStaleJobs(
-  supabase: SupabaseClient,
-  workspaceIds: readonly string[],
-  ownerId: string,
-): Promise<void> {
-  if (workspaceIds.length === 0) return;
-  const cutoff = new Date(Date.now() - STALE_JOB_MS).toISOString();
-  const { data, error } = await supabase
-    .from('ingest_jobs')
-    .select(JOB_FIELDS)
-    .in('workspace_id', workspaceIds)
-    .eq('status', 'running')
-    .lt('updated_at', cutoff);
-  if (error) throw new Error(`stale ingest jobs lookup failed: ${error.message}`);
-  for (const job of findStaleRunningJobs((data ?? []) as JobRow[])) {
-    await updateStaleJob(supabase, job, ownerId);
-  }
-}
-
 export async function GET(request: NextRequest) {
   const locale = resolveUiLocaleFromRequest(request);
   const { supabase, user } = await getRequestUser(request);
@@ -778,7 +439,10 @@ export async function GET(request: NextRequest) {
       if (!parsedJobId.success) return errorResponse(400, 'INVALID_JOB_ID', 'Invalid job_id');
       let job = await loadJobForUser(supabase, parsedJobId.data, user.id);
       if (!job) return errorResponse(404, INGEST_JOB_ERROR_CODES.notFound, 'Job not found');
-      if (isStaleRunning(job.status, job.updated_at)) job = await updateStaleJob(supabase, job, user.id);
+      if (isDeadRunning(job.status, job.started_at, Date.now(), RUNNER_LEASE_MS)) {
+        await recoverDeadIngestJobs(supabase, [job.workspace_id]);
+        job = (await loadJobForUser(supabase, job.id, user.id)) ?? job;
+      }
       if (job.status === 'pending') schedulePendingJob(job.id, user.id, locale);
       return NextResponse.json({ jobId: job.id, ...publicJob(job, locale) });
     }
@@ -788,16 +452,21 @@ export async function GET(request: NextRequest) {
     const workspace = await loadWorkspace(supabase, parsedWorkspaceId.data, user.id);
     if (!workspace) return errorResponse(404, 'WORKSPACE_NOT_FOUND', 'Workspace not found');
     const ownerScope = request.nextUrl.searchParams.get('scope') === 'owner';
-    let workspaceIds = [workspace.id];
-    if (ownerScope) {
-      const { data, error } = await supabase
-        .from('workspaces')
-        .select('id')
-        .eq('owner_id', user.id);
-      if (error) throw new Error(`owned workspaces lookup failed: ${error.message}`);
-      workspaceIds = (data ?? []).map((row) => row.id);
+    const { data: owned, error: ownedError } = await supabase
+      .from('workspaces')
+      .select('id, name')
+      .eq('owner_id', user.id);
+    if (ownedError) throw new Error(`owned workspaces lookup failed: ${ownedError.message}`);
+    const workspaceNames = new Map((owned ?? []).map((row) => [row.id as string, row.name as string]));
+    const ownedIds = [...workspaceNames.keys()];
+    const workspaceIds = ownerScope ? ownedIds : [workspace.id];
+
+    // A client watching is one of two things keeping the queue moving; pg_cron is the other.
+    await recoverDeadIngestJobs(supabase, ownedIds);
+    for (const runnable of await loadRunnableIngestJobs(supabase, JOBS_STARTED_PER_POLL, ownedIds)) {
+      schedulePendingJob(runnable.id, user.id, locale);
     }
-    await sweepStaleJobs(supabase, workspaceIds, user.id);
+
     const { data: rows, error: jobsError } = await supabase
       .from('ingest_jobs')
       .select(JOB_FIELDS)
@@ -806,13 +475,6 @@ export async function GET(request: NextRequest) {
       .limit(50);
     if (jobsError) throw new Error(`workspace ingest jobs lookup failed: ${jobsError.message}`);
     const jobs = (rows ?? []) as JobRow[];
-    // Nothing else starts a job queued behind a busy workspace; Android only polls this list, never job_id.
-    const busy = new Set(jobs.filter((job) => job.status === 'running').map((job) => job.workspace_id));
-    for (const job of [...jobs].reverse()) {
-      if (job.status !== 'pending' || busy.has(job.workspace_id)) continue;
-      busy.add(job.workspace_id);
-      schedulePendingJob(job.id, user.id, locale);
-    }
     const sourceIds =[...new Set(jobs.map((job) => job.source_id))];
     const sourceMap = new Map<string, { id: string; title: string | null; mime_type: string | null }>();
     if (sourceIds.length > 0) {
@@ -831,7 +493,7 @@ export async function GET(request: NextRequest) {
       jobs: jobs.map((job) => {
         const source = sourceMap.get(job.source_id) ?? null;
         return {
-          ...publicJob(job, locale),
+          ...publicJob(job, locale, workspaceNames.get(job.workspace_id)),
           source,
           source_title: source?.title ?? null,
           source_mime_type: source?.mime_type ?? null,
@@ -867,7 +529,10 @@ export async function PATCH(request: NextRequest) {
     if (parsed.data.action === 'resume' || parsed.data.action === 'retry') {
       // finished_at stays: it tells the claim that the previous runner has stopped.
       values.error = null;
+      values.next_attempt_at = null;
+      values.wait_reason = null;
     }
+    if (parsed.data.action === 'retry') values.retry_count = 0;
     const { data: updated, error } = await supabase
       .from('ingest_jobs')
       .update(values)

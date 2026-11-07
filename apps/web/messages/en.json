@@ -54,7 +54,9 @@
     "initFailed": "Auto-setup failed. Please try creating your workspace manually.",
     "ingestRunning": "Importing… {files} in progress, {pages} pages updated",
     "ingestBatchDone": "{count} done in this batch",
-    "ingestBatchFailed": "{count} failed (re-ingest from Sources)"
+    "ingestBatchFailed": "{count} failed (retry from the import queue)",
+    "ingestWaiting": "Import waiting… {files} queued, {pages} pages updated",
+    "ingestLastFailed": "Import of \"{title}\" failed: {error}"
   },
   "wiki": {
     "index": "Index",
@@ -133,7 +135,7 @@
     "uploadQueue": "Upload queue",
     "queueQueued": "Job created",
     "queueTitle": "Recent import jobs",
-    "queueEmpty": "No import jobs for this workspace",
+    "queueEmpty": "No import jobs",
     "refreshQueue": "Refresh import jobs",
     "retry": "Retry",
     "pause": "Pause",
@@ -156,7 +158,12 @@
     "invalidJobResponse": "The import job response was invalid",
     "invalidStartResponse": "The import server returned an invalid job",
     "jobActionFailed": "Could not update this import job",
-    "batchQueued": "{count} import jobs created"
+    "batchQueued": "{count} import jobs created",
+    "phaseIntake": "Reading source",
+    "retryNow": "Retry now",
+    "waitUsageLimit": "Model usage limit reached; continues by itself at {time} when it resets",
+    "waitRetry": "Temporary failure; retries by itself at {time}",
+    "waitContinue": "Out of time for this run; continuing shortly"
   },
   "sources": {
     "open": "Sources",

@@ -30,7 +30,8 @@ export function transitionIngestJob(
   const next: Partial<Record<IngestJobAction, Partial<Record<IngestStatus, IngestStatus>>>> = {
     pause: { pending: 'paused', running: 'paused' },
     resume: { paused: 'pending' },
-    retry: { failed: 'pending' },
+    // A job waiting out a retry delay or quota window can be retried right now.
+    retry: { failed: 'pending', pending: 'pending' },
   };
   const target = next[action]?.[status];
   return target ? { ok: true, status: target } : { ok: false, code: INGEST_JOB_ERROR_CODES.invalidTransition };
@@ -50,13 +51,14 @@ export function nextAttemptCount(value: unknown): number {
   return (Number.isFinite(count) ? Math.max(0, count) : 0) + 1;
 }
 
-export function isStaleRunning(
+/** A run cannot outlive its Vercel invocation; past the lease it was killed. */
+export function isDeadRunning(
   status: IngestStatus,
-  updatedAt: string | null | undefined,
+  startedAt: string | null | undefined,
   now = Date.now(),
-  staleAfterMs = 8 * 60 * 1000,
+  leaseMs = 330_000,
 ): boolean {
-  if (status !== 'running' || !updatedAt) return false;
-  const timestamp = Date.parse(updatedAt);
-  return Number.isFinite(timestamp) && now - timestamp > staleAfterMs;
+  if (status !== 'running' || !startedAt) return false;
+  const timestamp = Date.parse(startedAt);
+  return Number.isFinite(timestamp) && now - timestamp > leaseMs;
 }

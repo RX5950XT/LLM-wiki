@@ -54,7 +54,9 @@
     "initFailed": "自動初始化失敗，請手動建立工作區。",
     "ingestRunning": "匯入中…{files} 篇處理中，已更新 {pages} 個頁面",
     "ingestBatchDone": "本批已完成 {count} 篇",
-    "ingestBatchFailed": "失敗 {count} 篇（可在來源清單重新整合）"
+    "ingestBatchFailed": "失敗 {count} 篇（可在匯入佇列重試）",
+    "ingestWaiting": "匯入等待中…{files} 篇，已更新 {pages} 個頁面",
+    "ingestLastFailed": "「{title}」匯入失敗：{error}"
   },
   "wiki": {
     "index": "Wiki 索引",
@@ -133,7 +135,7 @@
     "uploadQueue": "上傳佇列",
     "queueQueued": "已建立工作",
     "queueTitle": "最近匯入工作",
-    "queueEmpty": "此工作區目前沒有匯入工作",
+    "queueEmpty": "目前沒有匯入工作",
     "refreshQueue": "重新整理匯入工作",
     "retry": "重試",
     "pause": "暫停",
@@ -156,7 +158,12 @@
     "invalidJobResponse": "匯入工作回應格式錯誤",
     "invalidStartResponse": "匯入伺服器回傳的工作格式錯誤",
     "jobActionFailed": "無法更新這個匯入工作",
-    "batchQueued": "已建立 {count} 個匯入工作"
+    "batchQueued": "已建立 {count} 個匯入工作",
+    "phaseIntake": "讀取來源",
+    "retryNow": "立即重試",
+    "waitUsageLimit": "模型額度已用完，{time} 額度重置後會自動繼續",
+    "waitRetry": "暫時失敗，{time} 會自動重試",
+    "waitContinue": "單次執行時間用完，馬上自動接著做"
   },
   "sources": {
     "open": "來源清單",

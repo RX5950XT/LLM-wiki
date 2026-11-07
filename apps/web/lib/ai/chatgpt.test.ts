@@ -56,6 +56,22 @@ describe('toCodexRequestBody', () => {
     expect(body).toMatchObject({ store: false, stream: true });
     expect('max_output_tokens' in body).toBe(false);
   });
+
+  // Left unset the Responses API defaults to strict: optional params come back as null, zod
+  // rejects the call and the tool never runs. An ingest then writes 0 pages with no error at all.
+  test('sends function tools as non-strict so the model can leave optional params out', () => {
+    const body = toCodexRequestBody({
+      input: [],
+      tools: [
+        { type: 'function', name: 'writePage', parameters: {} },
+        { type: 'web_search' },
+      ],
+    });
+    expect(body.tools).toEqual([
+      { type: 'function', name: 'writePage', parameters: {}, strict: false },
+      { type: 'web_search' },
+    ]);
+  });
 });
 
 describe('tokensFromResponse', () => {

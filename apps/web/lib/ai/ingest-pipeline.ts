@@ -1,8 +1,9 @@
 import { createHash } from 'crypto';
-import { APICallError, stepCountIs, streamText, type ModelMessage } from 'ai';
+import { stepCountIs, streamText, type ModelMessage } from 'ai';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { drive_v3 } from 'googleapis';
-import { createLLMClient, FIRST_DATA_TIMEOUT_MESSAGE } from './client';
+import { createLLMClient } from './client';
+import { classifyIngestFailure } from './ingest-retry';
 import { buildWikiTools } from './tools';
 import {
   buildIngestWritePrompt,
@@ -25,6 +26,8 @@ import type {
   LLMProfile,
 } from '@llm-wiki/shared-types';
 
+export { publicIngestError } from './ingest-retry';
+
 const NUDGE_PROMPT =
   'No writePage call has completed yet. Continue the validated plan now; do not answer with prose.';
 
@@ -38,6 +41,7 @@ export function nudgeForRemaining(remaining: readonly string[]): string {
 }
 // Bounded by the time budget too; a stalled provider call costs one attempt, not the run.
 const MAX_WRITE_ATTEMPTS = 4;
+const MAX_PAGE_WRITE_FAILURES = 3;
 /**
  * Vercel kills the whole invocation at maxDuration = 300s, and a killed run
  * never writes its job row: the job sits in `running` until the 8-minute stale
@@ -101,31 +105,6 @@ export class IngestLeaseLostError extends Error {
   }
 }
 
-/** Public job-row text: the provider's message only, never its URL/body/keys. */
-export function publicIngestError(error: unknown): string {
-  const message = error instanceof Error ? error.message : '';
-  if (message === 'The model wrote no pages for this source.') return message;
-  if (message === 'SUSPECTED_TRUNCATION') return message;
-  if (message.startsWith('Ingest ran out of time')) return message;
-  if (message === FIRST_DATA_TIMEOUT_MESSAGE) return message;
-  // A non-streaming call (plan/review) that hit the whole-request cap is the same stall.
-  if (error instanceof Error && error.name === 'TimeoutError') return FIRST_DATA_TIMEOUT_MESSAGE;
-  if (message.startsWith('Ingest review incomplete')) return 'Ingest review incomplete';
-  if (message.startsWith('Invalid ingest target page slug')) return 'Ingest plan contains an invalid page target';
-  if (message.startsWith('Ingest plan exceeds')) return 'Ingest plan contains too many page targets';
-  if (/No LLM profile configured/i.test(message)) return 'No LLM profile configured';
-  if (/Google Drive.*(authori[sz]|reauthor|access)/i.test(message)) {
-    return 'Google Drive authorization required';
-  }
-  // A bad model id or provider outage fails every retry identically. Showing the
-  // provider's own words is the only way the user can tell retrying is pointless.
-  if (APICallError.isInstance(error)) {
-    const status = error.statusCode ? ` (${error.statusCode})` : '';
-    return `Model call failed${status}: ${message.slice(0, 200)}`;
-  }
-  return 'Ingest failed';
-}
-
 function hashSource(content: string): string {
   return createHash('sha256').update(content, 'utf8').digest('hex');
 }
@@ -144,6 +123,9 @@ function checkpointFrom(value: unknown, touchedPages: readonly string[]): Ingest
   return {
     ...(planResult.success ? { plan: normalizeIngestPlan(planResult.data as IngestPlan) } : {}),
     written_pages: uniqueSlugs([...touchedPages, ...written]),
+    ...(Array.isArray(raw.skipped_pages)
+      ? { skipped_pages: raw.skipped_pages.filter((item): item is string => typeof item === 'string') }
+      : {}),
     ...(reviewResult.success ? { review: reviewResult.data as IngestReview } : {}),
   };
 }
@@ -191,6 +173,17 @@ async function saveCheckpoint(
   });
 }
 
+/** Real progress: the retry budget only counts runs that got nowhere. */
+async function saveProgress(ctx: IngestContext, phase: IngestPhase, checkpoint: IngestCheckpoint): Promise<void> {
+  await updateJob(ctx, {
+    status: 'running',
+    phase,
+    checkpoint,
+    touched_pages: checkpoint.written_pages,
+    retry_count: 0,
+  });
+}
+
 async function isPaused(ctx: IngestContext): Promise<boolean> {
   if (ctx.signal?.aborted) return true;
   return Boolean(await ctx.pauseRequested?.());
@@ -230,22 +223,6 @@ async function markPaused(
   return checkpoint.written_pages;
 }
 
-async function markFailed(
-  ctx: IngestContext,
-  error: Error,
-  checkpoint: IngestCheckpoint,
-  phase: IngestPhase,
-): Promise<void> {
-  await updateJob(ctx, {
-    phase,
-    checkpoint,
-    touched_pages: checkpoint.written_pages,
-    status: 'failed',
-    error: publicIngestError(error),
-    finished_at: new Date().toISOString(),
-  }, 'running');
-}
-
 function planInventory(
   pages: Array<{ slug: string; title: string | null; kind: string }>,
 ): string {
@@ -260,8 +237,10 @@ async function auditWrittenPages(
   sourceId: string,
   plan: IngestPlan,
   writtenPages: readonly string[],
+  skippedPages: readonly string[] = [],
 ): Promise<{ audit: IngestPageAudit[]; issues: string[] }> {
-  const requested = uniqueSlugs([...plan.target_pages, ...writtenPages]);
+  const skipped = new Set(skippedPages);
+  const requested = uniqueSlugs([...plan.target_pages.filter((slug) => !skipped.has(slug)), ...writtenPages]);
   const { data, error } = await ctx.supabase
     .from('pages')
     .select('slug, drive_file_id')
@@ -400,7 +379,7 @@ export async function runIngestPipeline(ctx: IngestContext): Promise<string[]> {
         ),
       });
       checkpoint = { ...checkpoint, plan, written_pages: uniqueSlugs(checkpoint.written_pages) };
-      await saveCheckpoint(ctx, 'writing', checkpoint);
+      await saveProgress(ctx, 'writing', checkpoint);
     }
 
     if (!plan) throw new Error('Ingest analysis produced no plan.');
@@ -437,7 +416,21 @@ export async function runIngestPipeline(ctx: IngestContext): Promise<string[]> {
     let lastWriteError: unknown = null;
     const toolStartedAt = new Map<string, number>();
     const plannedTargets = plan.target_pages;
-    const unwrittenTargets = () => plannedTargets.filter((slug) => !touched.has(slug));
+    const skipped = new Set(checkpoint.skipped_pages ?? []);
+    const writeFailures = new Map<string, number>();
+    const writeErrors: string[] = [];
+    let lastModelText = '';
+    /** A page the model cannot write must not sink the other pages of the import. */
+    const recordWriteFailure = (rawSlug: unknown, reason: string) => {
+      writeErrors.push(`${String(rawSlug)}: ${reason}`.slice(0, 200));
+      if (typeof rawSlug !== 'string') return;
+      const slug = normalizeWikiSlug(rawSlug);
+      if (!plannedTargets.includes(slug)) return;
+      const failures = (writeFailures.get(slug) ?? 0) + 1;
+      writeFailures.set(slug, failures);
+      if (/locked by the user/i.test(reason) || failures >= MAX_PAGE_WRITE_FAILURES) skipped.add(slug);
+    };
+    const unwrittenTargets = () => plannedTargets.filter((slug) => !touched.has(slug) && !skipped.has(slug));
     // index.md / log.md are not plan targets, so a model that stopped after the targets left the
     // new pages unindexed and the import unlogged. Nudge for them too, but never fail the job on them.
     const unwrittenWrites = () => [
@@ -470,19 +463,39 @@ export async function runIngestPipeline(ctx: IngestContext): Promise<string[]> {
               if (tookMs > 15_000) console.warn('[ingest] slow tool', { jobId: ctx.jobId, tool: chunk.toolName, tookMs });
             }
             if (chunk.type !== 'tool-result' || chunk.toolName !== 'writePage') return;
-            const output = chunk.output as { ok?: boolean; slug?: string; result?: string };
-            if (!output?.ok || !output.slug) return;
+            const output = chunk.output as { ok?: boolean; slug?: string; result?: string; error?: unknown };
+            if (!output?.ok || !output.slug) {
+              recordWriteFailure((chunk.input as { slug?: unknown } | undefined)?.slug, String(output?.error ?? 'write refused'));
+              return;
+            }
             if (output.result !== 'unchanged') wroteUpdatedPage = true;
             if (touched.has(output.slug)) return;
             touched.add(output.slug);
             checkpoint = { ...checkpoint, plan, written_pages: [...touched] };
-            await saveCheckpoint(ctx, 'writing', checkpoint);
+            await saveProgress(ctx, 'writing', checkpoint);
           },
           system: ctx.systemPrompt,
           messages,
           tools,
-          stopWhen: [stepCountIs(30), () => Date.now() > deadline],
+          // Some models answer the write prompt in prose and never touch a tool: 4 such replies were
+          // a whole failed import. Until every planned page is written, a tool call is mandatory.
+          prepareStep: () => ({ toolChoice: unwrittenWrites().length > 0 ? 'required' : 'auto' }),
+          stopWhen: [
+            stepCountIs(30),
+            () => Date.now() > deadline,
+            () => pauseAfterStep,
+            () => unwrittenWrites().length === 0,
+          ],
           onStepFinish: async (step) => {
+            if (step.text.trim()) lastModelText = step.text.trim().slice(0, 500);
+            // A tool that threw arrives here, not in onChunk.
+            for (const part of step.content) {
+              if (part.type !== 'tool-error' || part.toolName !== 'writePage') continue;
+              recordWriteFailure(
+                (part.input as { slug?: unknown } | undefined)?.slug,
+                part.error instanceof Error ? part.error.message : String(part.error),
+              );
+            }
             // Where a slow write spends its time (model vs. failing tools) — read it, don't guess.
             console.info('[ingest] step', {
               jobId: ctx.jobId,
@@ -513,38 +526,53 @@ export async function runIngestPipeline(ctx: IngestContext): Promise<string[]> {
         lastWriteError = error;
         // A newer attempt owns the job now; writing on would race it page by page.
         if (error instanceof IngestLeaseLostError || attempt + 1 >= MAX_WRITE_ATTEMPTS) throw error;
+        // Out of quota or a bad model: another attempt in this run cannot help.
+        if (classifyIngestFailure(error).kind !== 'transient') throw error;
       }
     }
 
-    checkpoint = { ...checkpoint, plan, written_pages: [...touched] };
+    checkpoint = {
+      ...checkpoint,
+      plan,
+      written_pages: [...touched],
+      ...(skipped.size > 0 ? { skipped_pages: [...skipped] } : {}),
+    };
     if (pauseAfterStep || (await isPaused(ctx))) {
       return markPaused(ctx, 'writing', checkpoint);
     }
     if (lastWriteError && touched.size === 0) throw lastWriteError;
     if (unwrittenTargets().length > 0 && Date.now() > deadline) {
-      const error = budgetExhaustedError(touched.size, plannedTargets.length);
-      await markFailed(ctx, error, checkpoint, 'writing');
-      throw error;
+      await saveCheckpoint(ctx, 'writing', checkpoint);
+      throw budgetExhaustedError(touched.size, plannedTargets.length);
     }
     if (touched.size === 0) {
-      const error = new Error('The model wrote no pages for this source.');
-      await markFailed(ctx, error, checkpoint, 'writing');
-      throw error;
+      // Vercel keeps logs for an hour on this plan; the reason must outlive that.
+      await saveCheckpoint(ctx, 'writing', {
+        ...checkpoint,
+        diagnostics: { last_text: lastModelText, write_errors: writeErrors.slice(-5) },
+      });
+      throw new Error('The model wrote no pages for this source.');
     }
+    if (skipped.size > 0) console.warn('[ingest] skipped pages', { jobId: ctx.jobId, skipped: [...skipped], writeErrors: writeErrors.slice(-5) });
 
     // A retry keeps a passed review; an incomplete one is re-checked (the pages may have
     // landed since), and still fails rather than reaching a false done status.
     if (!checkpoint.review?.complete) {
       await saveCheckpoint(ctx, 'review', checkpoint);
       if (await isPaused(ctx)) return markPaused(ctx, 'review', checkpoint);
-      const pageAudit = await auditWrittenPages(ctx, sourceId, plan, [...touched]);
+      const pageAudit = await auditWrittenPages(ctx, sourceId, plan, [...touched], [...skipped]);
+      // The verdict below comes from the audit. The model's opinion is a nice-to-have and must
+      // not cost a finished import when the provider hiccups or the quota runs out right here.
       const review = await generateIngestReview(
         model,
         ctx.sourceTitle,
         plan,
         [...touched],
         pageAudit.audit,
-      );
+      ).catch((error: unknown): IngestReview => {
+        console.warn('[ingest] model review skipped', { jobId: ctx.jobId, error: error instanceof Error ? error.message : error });
+        return { written_pages: [...touched], missing_pages: [], contradictions: [], issues: [], complete: true, summary: '' };
+      });
       checkpoint = {
         ...checkpoint,
         review: {
@@ -565,9 +593,7 @@ export async function runIngestPipeline(ctx: IngestContext): Promise<string[]> {
       const completedReview = checkpoint.review;
       if (!completedReview) throw new Error('Ingest review produced no result.');
       if (!completedReview.complete) {
-        const error = new Error(`Ingest review incomplete: ${completedReview.issues.join('; ')}`);
-        await markFailed(ctx, error, checkpoint, 'review');
-        throw error;
+        throw new Error(`Ingest review incomplete: ${completedReview.issues.join('; ')}`);
       }
     }
 

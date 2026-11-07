@@ -10,7 +10,7 @@ const Icon = () => React.createElement('span');
 const iconNames = [
   'PanelLeft', 'PanelRight', 'Ellipsis', 'GitFork', 'ChevronDown', 'LogOut', 'Plus', 'Settings', 'Search',
   'Loader2', 'HelpCircle', 'Pencil', 'Trash2', 'GripVertical', 'Library', 'Wrench',
-  'CheckCircle2', 'AlertCircle', 'X', 'Check',
+  'CheckCircle2', 'Clock3', 'AlertCircle', 'X', 'Check',
 ];
 
 mock.module('next/link', () => ({
@@ -39,7 +39,11 @@ mock.module('@/components/wiki/conversation-panel', () => ({
 mock.module('@/components/wiki/graph-view', () => ({ GraphView: () => null }));
 mock.module('@/components/wiki/help-dialog', () => ({ HelpDialog: () => null }));
 mock.module('@/components/wiki/sources-dialog', () => ({ SourcesDialog: () => null }));
-mock.module('@/components/wiki/ingest-queue', () => ({ parseIngestJobsResponse: () => [] }));
+mock.module('@/components/wiki/ingest-queue', () => ({
+  describeIngestWait: () => '',
+  isWaitingIngestJob: () => false,
+  parseIngestJobsResponse: () => [],
+}));
 mock.module('@/lib/sync/realtime', () => ({ useRealtimePages: () => undefined }));
 mock.module('@/lib/supabase/client', () => ({
   createClient: () => ({ auth: { signOut: async () => ({ error: null }) } }),

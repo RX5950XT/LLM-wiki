@@ -6,7 +6,7 @@ import { toPublicUrlFetchFailure } from '@/lib/fetch/url-to-markdown';
 describe('localizeIngestError', () => {
   it('translates the messages the server actually produces', () => {
     expect(localizeIngestError(budgetExhaustedError(11, 16).message, 'zh-TW')).toBe(
-      '匯入時間用完：已完成 11/16 頁，按「重試」會從這裡接著做。',
+      '單次執行時間用完：已完成 11/16 頁，會自動從這裡接著做。',
     );
     const refused = toPublicUrlFetchFailure(new Error('Failed to fetch https://x.test: HTTP 403')).message;
     expect(localizeIngestError(refused, 'zh-TW')).toContain('HTTP 403');

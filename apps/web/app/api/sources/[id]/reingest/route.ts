@@ -151,7 +151,21 @@ export async function POST(
     if (workspaceError) throw new Error(`workspace lookup failed: ${workspaceError.message}`);
     const workspace = workspaceData as WorkspaceRow | null;
     if (!workspace) return errorResponse(404, 'WORKSPACE_NOT_FOUND', 'Workspace not found');
-    if (!source.drive_file_id) return errorResponse(422, 'SOURCE_CONTENT_UNAVAILABLE', 'Source content is no longer available in Drive');
+    if (!source.drive_file_id) {
+      // Failed before its content reached Drive (e.g. the URL was unreachable): run that job again.
+      const { data: retried, error: retryError } = await supabase
+        .from('ingest_jobs')
+        .update({ status: 'pending', error: null, next_attempt_at: null, wait_reason: null, retry_count: 0 })
+        .eq('source_id', source.id)
+        .eq('status', 'failed')
+        .select('id, status, result')
+        .limit(1)
+        .maybeSingle();
+      if (retryError) throw new Error(`failed job retry failed: ${retryError.message}`);
+      if (!retried) return errorResponse(422, 'SOURCE_CONTENT_UNAVAILABLE', 'Source content is no longer available in Drive');
+      schedulePendingJob(retried.id as string, user.id, locale);
+      return NextResponse.json({ jobId: retried.id, status: retried.status, result: retried.result }, { status: 202 });
+    }
 
     const profileId =
       workspace.ingest_profile_id ??

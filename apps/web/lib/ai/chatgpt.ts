@@ -215,6 +215,11 @@ function itemText(content: unknown): string {
  * The Codex backend only accepts stateless streamed requests: `instructions` is
  * required (system prompts may not sit in `input`), `store` must be false, and
  * output-token caps are rejected.
+ *
+ * Tools go out with `strict: false`, as the Codex CLI sends them. Left unset, the Responses API
+ * defaults to strict: every optional parameter becomes required, so the model fills what it does
+ * not know with null, zod rejects the call and the tool never runs. That is how an ingest asked
+ * for 9 pages wrote none and reported no error: it has no workspace_id to give writePage.
  */
 export function toCodexRequestBody(body: Record<string, unknown>): Record<string, unknown> {
   const input = Array.isArray(body.input) ? (body.input as InputItem[]) : [];
@@ -223,8 +228,12 @@ export function toCodexRequestBody(body: Record<string, unknown>): Record<string
     .filter(Boolean)
     .join('\n\n');
   const { max_output_tokens: _max, ...rest } = body;
+  const tools = Array.isArray(body.tools)
+    ? (body.tools as Record<string, unknown>[]).map((tool) => (tool.type === 'function' ? { ...tool, strict: false } : tool))
+    : undefined;
   return {
     ...rest,
+    ...(tools ? { tools } : {}),
     instructions: instructions || 'You are a helpful assistant.',
     input: input.filter((item) => !isSystem(item)),
     store: false,

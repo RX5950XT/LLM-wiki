@@ -1,10 +1,11 @@
 export const INGEST_STATUSES = ['pending', 'running', 'paused', 'done', 'failed'] as const;
 export type IngestQueueStatus = (typeof INGEST_STATUSES)[number];
 
-export const INGEST_PHASES = ['analysis', 'writing', 'review', 'done'] as const;
+export const INGEST_PHASES = ['intake', 'analysis', 'writing', 'review', 'done'] as const;
 export type IngestQueuePhase = (typeof INGEST_PHASES)[number];
 
 export type IngestQueueResult = 'updated' | 'unchanged' | null;
+export type IngestWaitReason = 'usage_limit' | 'retry' | 'continue';
 
 export interface IngestQueueJob {
   id: string;
@@ -22,6 +23,9 @@ export interface IngestQueueJob {
   source_title: string | null;
   source_mime_type: string | null;
   workspace_name?: string;
+  /** Pending until this time; the server resumes by itself. */
+  next_attempt_at?: string | null;
+  wait_reason?: IngestWaitReason | null;
 }
 
 export interface IngestStartResponse {
@@ -42,6 +46,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function optionalString(value: unknown): string | null {
   return value === null || value === undefined ? null : typeof value === 'string' ? value : null;
+}
+
+function waitReason(value: unknown): IngestWaitReason | null {
+  return value === 'usage_limit' || value === 'retry' || value === 'continue' ? value : null;
 }
 
 function isValidResult(value: unknown): value is Exclude<IngestQueueResult, null> {
@@ -87,7 +95,29 @@ export function parseIngestQueueJob(value: unknown): IngestQueueJob | null {
     updated_at: optionalString(value.updated_at),
     source_title: optionalString(value.source_title),
     source_mime_type: optionalString(value.source_mime_type),
+    ...(typeof value.workspace_name === 'string' ? { workspace_name: value.workspace_name } : {}),
+    next_attempt_at: optionalString(value.next_attempt_at),
+    wait_reason: waitReason(value.wait_reason),
   };
+}
+
+/** A job the server has parked until `next_attempt_at`. */
+export function isWaitingIngestJob(job: Pick<IngestQueueJob, 'status' | 'next_attempt_at' | 'wait_reason'>): boolean {
+  return job.status === 'pending' && Boolean(job.next_attempt_at && job.wait_reason);
+}
+
+/** Why a parked job is waiting and when it continues by itself. */
+export function describeIngestWait(
+  t: (key: string, values?: Record<string, string>) => string,
+  job: Pick<IngestQueueJob, 'wait_reason' | 'next_attempt_at'>,
+): string {
+  const at = job.next_attempt_at ? new Date(job.next_attempt_at) : null;
+  const time = at
+    ? at.toLocaleString(undefined, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+    : '';
+  if (job.wait_reason === 'usage_limit') return t('ingest.waitUsageLimit', { time });
+  if (job.wait_reason === 'continue') return t('ingest.waitContinue');
+  return t('ingest.waitRetry', { time });
 }
 
 export function parseIngestJobsResponse(value: unknown, workspaceId: string): IngestQueueJob[] | null {

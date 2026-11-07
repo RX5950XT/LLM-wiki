@@ -13,6 +13,7 @@ import type { drive_v3 } from 'googleapis';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { generateText } from 'ai';
 import { createLLMClient } from './client';
+import { isModelUnavailable } from './ingest-retry';
 import { createWorkspaceForUser } from '@/lib/workspaces/manage';
 import { SCAFFOLDING_SLUGS } from './organize-mechanical';
 
@@ -183,6 +184,9 @@ export async function routeToWorkspace(
       // Swallowed silently, this failure looks exactly like "the AI filed it here" —
       // the log line is the only way anyone finds out routing never ran.
       .catch((err: unknown) => {
+        // Out of quota or signed out: the job has to wait anyway, and when it resumes it should
+        // still be filed properly rather than landing wherever the user happened to be.
+        if (isModelUnavailable(err)) throw err;
         console.warn('[route-workspace] provider call failed', {
           attempt,
           message: err instanceof Error ? err.message : String(err),

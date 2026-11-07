@@ -10,16 +10,19 @@ import {
 import { createAdminClient } from '@/lib/supabase/admin';
 import {
   IngestLeaseLostError,
-  publicIngestError,
   runIngestPipeline,
 } from './ingest-pipeline';
+import { isDeadRunning, nextAttemptCount } from './ingest-job-state';
+import { runIntake } from './ingest-intake';
 import {
-  failureUpdate,
-  nextAttemptCount,
-} from './ingest-job-state';
+  classifyIngestFailure,
+  decideRetry,
+  OUT_OF_TIME_MESSAGE,
+  RUNNER_LEASE_MS,
+} from './ingest-retry';
 
 const JOB_FIELDS =
-  'id, workspace_id, source_id, profile_id, status, phase, checkpoint, touched_pages, attempt_count';
+  'id, workspace_id, source_id, profile_id, status, phase, checkpoint, touched_pages, attempt_count, next_attempt_at, retry_count';
 // Keep background source snapshots bounded to the same 2 MiB contract as uploads.
 export const MAX_SOURCE_SNAPSHOT_BYTES = 2 * 1024 * 1024;
 
@@ -33,6 +36,8 @@ type JobRow = {
   checkpoint: unknown;
   touched_pages: string[] | null;
   attempt_count: number;
+  next_attempt_at?: string | null;
+  retry_count?: number;
 };
 
 type WorkspaceRow = {
@@ -87,7 +92,7 @@ export interface ClaimPendingResult {
 export interface RunPendingResult {
   claimed: boolean;
   status: IngestStatus | 'not_found';
-  reason: ClaimPendingResult['reason'] | 'not_found';
+  reason: ClaimPendingResult['reason'] | 'not_found' | 'not_due';
 }
 
 function databaseError(operation: string, error: { message: string }): Error {
@@ -113,6 +118,8 @@ export async function claimPendingIngestJob(
       attempt_count: nextAttemptCount(expectedAttemptCount),
       started_at: new Date().toISOString(),
       finished_at: null,
+      next_attempt_at: null,
+      wait_reason: null,
       error: null,
     })
     .eq('id', jobId)
@@ -235,7 +242,6 @@ async function resolveProfile(
 }
 
 const INVOCATION_GUARD_MS = 280_000;
-export const INVOCATION_GUARD_MESSAGE = 'Ingest ran out of time. Retry to continue from here.';
 
 /** Record that this attempt's runner stopped after a pause, so a resumed job may be claimed. */
 async function markAttemptStopped(supabase: SupabaseClient, jobId: string, attemptToken: number): Promise<void> {
@@ -251,26 +257,51 @@ async function markAttemptStopped(supabase: SupabaseClient, jobId: string, attem
   if (error) console.warn('[ingest] stop marker failed', { jobId, error: error.message });
 }
 
-export async function markFailedIfActive(
+/**
+ * Settle an attempt that did not finish: wait and try again, or fail for good. A failed
+ * attempt keeps its checkpoint, so the next run continues from the committed pages.
+ */
+export async function settleFailedAttempt(
   supabase: SupabaseClient,
   jobId: string,
   workspaceId: string,
   attemptToken: number,
   reason: unknown,
 ): Promise<void> {
-  const { error, data } = await supabase
+  const { data: current, error: lookupError } = await supabase
     .from('ingest_jobs')
-    .update(failureUpdate(publicIngestError(reason), new Date().toISOString()))
+    .select('retry_count')
+    .eq('id', jobId)
+    .maybeSingle();
+  if (lookupError) throw databaseError('ingest job lookup failed', lookupError);
+  const decision = decideRetry(classifyIngestFailure(reason), Number(current?.retry_count ?? 0));
+  const now = new Date().toISOString();
+  const values = decision.requeue
+    ? {
+        status: 'pending',
+        error: decision.message,
+        wait_reason: decision.waitReason,
+        next_attempt_at: decision.nextAttemptAt,
+        retry_count: decision.retryCount,
+        finished_at: now,
+      }
+    : {
+        status: 'failed',
+        error: decision.message,
+        wait_reason: null,
+        next_attempt_at: null,
+        finished_at: now,
+      };
+  const { error } = await supabase
+    .from('ingest_jobs')
+    .update(values)
     .eq('id', jobId)
     .eq('workspace_id', workspaceId)
     .eq('attempt_count', attemptToken)
-    .eq('status', 'running')
-    .select('id')
-    .maybeSingle();
+    .eq('status', 'running');
+  // No row matched means pause/retry/new attempt won the race. The old invocation
+  // must not change the new attempt's state.
   if (error) throw databaseError('ingest job failure update failed', error);
-  // No row means pause/retry/new attempt won the race. The old invocation must
-  // not change the new attempt's state.
-  if (!data) return;
 }
 
 async function runClaimedJob(
@@ -359,7 +390,11 @@ export async function runPendingIngestJob(
   if (initial.status !== 'pending') {
     return { claimed: false, status: initial.status, reason: 'not_pending' };
   }
+  if (initial.next_attempt_at && Date.parse(initial.next_attempt_at) > Date.now()) {
+    return { claimed: false, status: 'pending', reason: 'not_due' };
+  }
 
+  const startedAt = options.startedAt ?? Date.now();
   const claim = await claimPendingIngestJob(supabase, initial.id, initial.attempt_count);
   if (!claim.claimed) {
     return { claimed: false, status: 'pending', reason: claim.reason };
@@ -376,19 +411,25 @@ export async function runPendingIngestJob(
       };
     }
     // Vercel kills the invocation at 300s and runs no cleanup, leaving the row in `running`.
-    // Fail it first; the checkpoint already holds every committed page, so retry resumes.
+    // Settle it first; the checkpoint already holds every committed page, so the next run resumes.
     let guardTimer: ReturnType<typeof setTimeout> | undefined;
     const guard = new Promise<never>((_, reject) => {
       guardTimer = setTimeout(
-        () => reject(new Error(INVOCATION_GUARD_MESSAGE)),
-        Math.max(0, (options.startedAt ?? Date.now()) + INVOCATION_GUARD_MS - Date.now()),
+        () => reject(new Error(OUT_OF_TIME_MESSAGE)),
+        Math.max(0, startedAt + INVOCATION_GUARD_MS - Date.now()),
       );
     });
     try {
-      await Promise.race([
-        runClaimedJob(supabase, claimed, options.ownerId, options.locale, dependencies, options.startedAt),
-        guard,
-      ]);
+      if (claimed.phase === 'intake') {
+        const outcome = await Promise.race([runIntake(supabase, claimed, options.ownerId), guard]);
+        // Now an ordinary queued job: start it in this same invocation when its workspace is free.
+        if (outcome === 'queued') return await runPendingIngestJob({ ...options, startedAt });
+      } else {
+        await Promise.race([
+          runClaimedJob(supabase, claimed, options.ownerId, options.locale, dependencies, startedAt),
+          guard,
+        ]);
+      }
     } finally {
       clearTimeout(guardTimer);
     }
@@ -408,12 +449,89 @@ export async function runPendingIngestJob(
     } else {
       console.error('[ingest] pending job failed', { jobId: options.jobId, error });
     }
-    await markFailedIfActive(supabase, options.jobId, workspace.id, claim.attemptCount!, error);
+    await settleFailedAttempt(supabase, options.jobId, workspace.id, claim.attemptCount!, error);
     const failed = await loadJob(supabase, options.jobId);
     return { claimed: true, status: failed?.status ?? 'failed', reason: 'claimed' };
   } finally {
     await markAttemptStopped(supabase, options.jobId, claim.attemptCount!);
   }
+}
+
+interface ActiveJobRow {
+  id: string;
+  workspace_id: string;
+  status: IngestStatus;
+  phase: string;
+  started_at: string | null;
+  next_attempt_at: string | null;
+  attempt_count: number;
+  updated_at: string | null;
+}
+
+/**
+ * A run that was killed never reports back. Past the lease it cannot be alive, so put
+ * the job back in line instead of leaving it `running` forever.
+ */
+export async function recoverDeadIngestJobs(
+  supabase: SupabaseClient,
+  workspaceIds?: readonly string[],
+  now = Date.now(),
+): Promise<void> {
+  let query = supabase
+    .from('ingest_jobs')
+    .select('id, workspace_id, status, started_at, attempt_count')
+    .eq('status', 'running')
+    .lt('started_at', new Date(now - RUNNER_LEASE_MS).toISOString());
+  if (workspaceIds) query = query.in('workspace_id', [...workspaceIds]);
+  const { data, error } = await query;
+  if (error) throw databaseError('dead ingest job lookup failed', error);
+  for (const job of (data ?? []) as ActiveJobRow[]) {
+    if (!isDeadRunning(job.status, job.started_at, now, RUNNER_LEASE_MS)) continue;
+    await settleFailedAttempt(supabase, job.id, job.workspace_id, job.attempt_count, new Error(OUT_OF_TIME_MESSAGE));
+  }
+}
+
+/**
+ * Oldest due job per workspace. An intake never writes to the wiki, so it does not wait
+ * for a workspace that is busy, and it does not make one busy.
+ */
+export function pickRunnableIngestJobs<T extends Pick<ActiveJobRow, 'workspace_id' | 'status' | 'phase' | 'next_attempt_at' | 'updated_at'>>(
+  jobs: readonly T[],
+  limit: number,
+  now = Date.now(),
+): T[] {
+  const isWriter = (job: T) => job.phase !== 'intake';
+  const busy = new Set(jobs.filter((job) => job.status === 'running' && isWriter(job)).map((job) => job.workspace_id));
+  const due = jobs
+    .filter((job) => job.status === 'pending' && (!job.next_attempt_at || Date.parse(job.next_attempt_at) <= now))
+    .sort((a, b) => Date.parse(a.updated_at ?? '') - Date.parse(b.updated_at ?? ''));
+  const picked: T[] = [];
+  for (const job of due) {
+    if (picked.length >= limit) break;
+    if (isWriter(job)) {
+      if (busy.has(job.workspace_id)) continue;
+      busy.add(job.workspace_id);
+    }
+    picked.push(job);
+  }
+  return picked;
+}
+
+/** The jobs to start now, optionally only among one user's workspaces. */
+export async function loadRunnableIngestJobs(
+  supabase: SupabaseClient,
+  limit: number,
+  workspaceIds?: readonly string[],
+): Promise<Array<ActiveJobRow & { owner_id: string }>> {
+  let query = supabase
+    .from('ingest_jobs')
+    .select('id, workspace_id, status, phase, started_at, next_attempt_at, attempt_count, updated_at, workspaces!inner(owner_id)')
+    .in('status', ['pending', 'running']);
+  if (workspaceIds) query = query.in('workspace_id', [...workspaceIds]);
+  const { data, error } = await query;
+  if (error) throw databaseError('active ingest jobs lookup failed', error);
+  const rows = (data ?? []) as unknown as Array<ActiveJobRow & { workspaces: { owner_id: string } }>;
+  return pickRunnableIngestJobs(rows, limit).map((row) => ({ ...row, owner_id: row.workspaces.owner_id }));
 }
 
 /** Move a newly-created source snapshot to Drive trash when its DB insert fails. */

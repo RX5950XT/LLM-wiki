@@ -19,7 +19,7 @@ export type UpdatedBy = 'llm' | 'human';
 export type SourceKind = 'url' | 'file' | 'text';
 
 export type IngestStatus = 'pending' | 'running' | 'paused' | 'done' | 'failed';
-export type IngestPhase = 'analysis' | 'writing' | 'review' | 'done';
+export type IngestPhase = 'intake' | 'analysis' | 'writing' | 'review' | 'done';
 export type IngestResult = 'updated' | 'unchanged';
 
 export type LogKind = 'ingest' | 'query' | 'lint' | 'manual_edit';
@@ -135,7 +135,11 @@ export interface IngestReview {
 export interface IngestCheckpoint {
   plan?: IngestPlan;
   written_pages: string[];
+  /** Planned pages given up on (locked, or refused repeatedly) so the rest could finish. */
+  skipped_pages?: string[];
   review?: IngestReview;
+  /** Why a run wrote nothing; kept here because runtime logs expire within the hour. */
+  diagnostics?: { last_text: string; write_errors: string[] };
 }
 
 export interface QueryCitation {

@@ -7,7 +7,8 @@ import {
 import {
   claimPendingIngestJob,
   MAX_SOURCE_SNAPSHOT_BYTES,
-  markFailedIfActive,
+  pickRunnableIngestJobs,
+  settleFailedAttempt,
   runPendingIngestJob,
 } from './ingest-job-runner';
 
@@ -175,8 +176,19 @@ describe('ingest failure handling', () => {
         return builder;
       },
     } as unknown as SupabaseClient;
-    await markFailedIfActive(supabase, 'job-1', 'workspace-1', 4, new Error('provider failed with https://secret.example/key'));
-    expect(updates).toEqual([{ status: 'failed', error: 'Ingest failed', finished_at: expect.any(String) }]);
+    await settleFailedAttempt(supabase, 'job-1', 'workspace-1', 4, new Error('provider failed with https://secret.example/key'));
+    // The update is fenced on attempt_count + status, so it cannot land on the paused row. It is a
+    // retry rather than a failure, and the provider's URL does not reach the job row.
+    expect(updates).toEqual([
+      {
+        status: 'pending',
+        error: 'Ingest failed',
+        wait_reason: 'retry',
+        next_attempt_at: expect.any(String),
+        retry_count: 1,
+        finished_at: expect.any(String),
+      },
+    ]);
   });
 });
 
@@ -336,5 +348,67 @@ describe('background source bounds', () => {
     expect(result.status).toBe('done');
     expect(sourceReads[0]?.options).toEqual({ maxBytes: MAX_SOURCE_SNAPSHOT_BYTES });
     expect(MAX_SOURCE_SNAPSHOT_BYTES).toBe(2 * 1024 * 1024);
+  });
+});
+
+describe('pickRunnableIngestJobs', () => {
+  const now = Date.parse('2026-11-07T12:00:00.000Z');
+  const job = (id: string, values: Partial<Parameters<typeof pickRunnableIngestJobs>[0][number]>) => ({
+    id,
+    workspace_id: 'w1',
+    status: 'pending' as const,
+    phase: 'analysis',
+    next_attempt_at: null,
+    updated_at: '2026-11-07T11:00:00.000Z',
+    ...values,
+  });
+
+  it('starts the oldest job per workspace and leaves a busy workspace alone', () => {
+    const picked = pickRunnableIngestJobs(
+      [
+        job('newer', { updated_at: '2026-11-07T11:30:00.000Z' }),
+        job('older', { updated_at: '2026-11-07T11:10:00.000Z' }),
+        job('busy-writer', { workspace_id: 'w2', status: 'running' }),
+        job('blocked', { workspace_id: 'w2' }),
+      ],
+      5,
+      now,
+    );
+    expect(picked.map((item) => item.id)).toEqual(['older']);
+  });
+
+  it('never starts a job before its retry time', () => {
+    const picked = pickRunnableIngestJobs(
+      [
+        job('later', { next_attempt_at: '2026-11-07T12:00:01.000Z' }),
+        job('due', { workspace_id: 'w2', next_attempt_at: '2026-11-07T11:59:59.000Z' }),
+      ],
+      5,
+      now,
+    );
+    expect(picked.map((item) => item.id)).toEqual(['due']);
+  });
+
+  it('runs intakes alongside a writer since they do not touch the wiki', () => {
+    const picked = pickRunnableIngestJobs(
+      [
+        job('writer', { status: 'running' }),
+        job('intake-1', { phase: 'intake' }),
+        job('intake-2', { phase: 'intake' }),
+        job('blocked'),
+      ],
+      5,
+      now,
+    );
+    expect(picked.map((item) => item.id).sort()).toEqual(['intake-1', 'intake-2']);
+  });
+
+  it('honours the limit', () => {
+    const picked = pickRunnableIngestJobs(
+      [job('a', { phase: 'intake' }), job('b', { phase: 'intake' }), job('c', { phase: 'intake' })],
+      2,
+      now,
+    );
+    expect(picked).toHaveLength(2);
   });
 });
