@@ -14,6 +14,7 @@ import { SourcesDialog } from '@/components/wiki/sources-dialog';
 import { describeIngestWait, isWaitingIngestJob, parseIngestJobsResponse, type IngestQueueJob } from '@/components/wiki/ingest-queue';
 import { useRealtimePages, type PageChangedEvent } from '@/lib/sync/realtime';
 import { createClient } from '@/lib/supabase/client';
+import { isImeKey } from '@/lib/ime';
 
 interface PageEntry {
   slug: string;
@@ -1174,6 +1175,7 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     onKeyDown={(e) => {
+                      if (isImeKey(e)) return;
                       if (e.key === 'Escape') {
                         setShowSearch(false);
                         setSearchQuery('');
@@ -1631,6 +1633,7 @@ function InlineRenameField({
           onChange={(event) => setName(event.target.value)}
           onFocus={(event) => event.currentTarget.select()}
           onKeyDown={(event) => {
+            if (isImeKey(event)) return;
             if (event.key === 'Enter') { event.preventDefault(); submit(); }
             if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); cancel(); }
           }}

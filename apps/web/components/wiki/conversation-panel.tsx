@@ -24,6 +24,7 @@ import type { ActionProposal } from '@/lib/ai/tools';
 import type { RawSourceCitation } from '@/lib/ai/source-tools';
 import { isDriveReconnectError, reconnectGoogleDrive } from '@/lib/google/drive-reconnect';
 import { wikiLinksToMarkdown } from '@/lib/wiki/slug';
+import { isImeKey } from '@/lib/ime';
 import { ImportDialog } from './import-dialog';
 
 type ProposalStatus = 'pending' | 'running' | 'done' | 'error' | 'dismissed';
@@ -812,6 +813,7 @@ export function ConversationPanel({
               updateMentionState(e.target.value);
             }}
             onKeyDown={(e) => {
+              if (isImeKey(e)) return;
               if (mentionQuery !== null && mentionCandidates.length > 0) {
                 if (e.key === 'ArrowDown') {
                   e.preventDefault();
@@ -833,8 +835,7 @@ export function ConversationPanel({
                   return;
                 }
               }
-              // Enter also confirms a Chinese IME candidate, and that must not send the message.
-              if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && e.keyCode !== 229) {
+              if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
                 e.currentTarget.form?.requestSubmit();
               }
