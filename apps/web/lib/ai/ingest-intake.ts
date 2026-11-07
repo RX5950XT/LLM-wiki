@@ -7,7 +7,7 @@ import { toPublicUrlFetchFailure, urlToMarkdown } from '@/lib/fetch/url-to-markd
 import { createDriveClientForUser } from '@/lib/google/drive-auth';
 import { extractDocument, type ImageToDescribe } from '@/lib/ingest/document-parser';
 import { createLLMClient } from './client';
-import { IntakeRejectedError } from './ingest-retry';
+import { IntakeRejectedError, RUNNER_LEASE_MS } from './ingest-retry';
 import { routeToWorkspace } from './route-workspace';
 
 export interface IntakeJob {
@@ -56,6 +56,8 @@ interface ExistingSource {
 export type IntakeOutcome = 'queued' | 'unchanged' | 'lost_lease';
 
 const ACTIVE_STATUSES = ['pending', 'running', 'paused'];
+const EARLIER_INTAKE_WAIT_MS = 120_000;
+const EARLIER_INTAKE_POLL_MS = 2_000;
 
 function failure(operation: string, error: { message: string } | null): Error {
   return new Error(`${operation}: ${error?.message ?? 'empty response'}`);
@@ -245,6 +247,71 @@ async function adoptExistingSource(
 }
 
 /**
+ * Whether an earlier intake can still open a workspace soon. A dead run, or a job parked until a
+ * quota reset, must not hold up everything behind it. Pending jobs get a little over the 60s hold
+ * that POST /api/ingest sets, since a job in that hold is about to run.
+ */
+export function isLiveIntake(
+  job: { status: string; started_at: string | null; next_attempt_at: string | null },
+  now: number,
+): boolean {
+  if (job.status === 'running') {
+    return job.started_at !== null && now - Date.parse(job.started_at) < RUNNER_LEASE_MS;
+  }
+  return job.status === 'pending' && (job.next_attempt_at === null || Date.parse(job.next_attempt_at) - now < 70_000);
+}
+
+async function hasEarlierLiveIntake(supabase: SupabaseClient, job: IntakeJob, ownerId: string): Promise<boolean> {
+  const { data: workspaces, error: workspaceError } = await supabase
+    .from('workspaces')
+    .select('id')
+    .eq('owner_id', ownerId);
+  if (workspaceError) throw failure('ingest workspace lookup failed', workspaceError);
+
+  const { data: rows, error: jobError } = await supabase
+    .from('ingest_jobs')
+    .select('id, source_id, status, started_at, next_attempt_at')
+    .eq('phase', 'intake')
+    .in('status', ['pending', 'running'])
+    .in('workspace_id', (workspaces ?? []).map((w) => w.id))
+    .neq('id', job.id);
+  if (jobError) throw failure('ingest queue lookup failed', jobError);
+  const live = (rows ?? []).filter((row) => isLiveIntake(row, Date.now()));
+  if (live.length === 0) return false;
+
+  // The source row is written first in POST, so its timestamp is the file's place in line.
+  const { data: sources, error: sourceError } = await supabase
+    .from('sources')
+    .select('id, created_at')
+    .in('id', [job.source_id, ...live.map((row) => row.source_id)]);
+  if (sourceError) throw failure('ingest source lookup failed', sourceError);
+  const createdAt = new Map((sources ?? []).map((s) => [s.id as string, s.created_at as string]));
+  const place = (id: string, sourceId: string) => `${createdAt.get(sourceId) ?? ''}|${id}`;
+  const mine = place(job.id, job.source_id);
+  const earlier = live.filter((row) => place(row.id, row.source_id) < mine).map((row) => row.id);
+  if (earlier.length === 0) return false;
+
+  // Only auto-routed files can open a workspace.
+  const { data: routed, error: intakeError } = await supabase
+    .from('ingest_intakes')
+    .select('job_id')
+    .eq('auto_route', true)
+    .in('job_id', earlier)
+    .limit(1);
+  if (intakeError) throw failure('ingest intake lookup failed', intakeError);
+  return (routed ?? []).length > 0;
+}
+
+/** Past the limit the job goes back in the queue and resumes shortly, keeping its place in line. */
+async function waitForEarlierIntakes(supabase: SupabaseClient, job: IntakeJob, ownerId: string): Promise<void> {
+  const deadline = Date.now() + EARLIER_INTAKE_WAIT_MS;
+  while (await hasEarlierLiveIntake(supabase, job, ownerId)) {
+    if (Date.now() > deadline) throw new Error('Ingest ran out of time.');
+    await new Promise((resolve) => setTimeout(resolve, EARLIER_INTAKE_POLL_MS));
+  }
+}
+
+/**
  * First stage of a job: read the source, choose its workspace, store it on Drive,
  * then hand it to the writing queue as an ordinary `analysis` job. Everything it
  * needs lives in `ingest_intakes`, so a killed run simply starts this stage over.
@@ -281,6 +348,7 @@ export async function runIntake(
       source.content,
       gate.id,
       locale,
+      () => waitForEarlierIntakes(supabase, job, ownerId),
     );
     workspace = await loadWorkspace(supabase, routing.workspaceId, ownerId);
   }

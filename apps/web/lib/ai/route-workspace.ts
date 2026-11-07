@@ -147,6 +147,7 @@ export async function routeToWorkspace(
   sourceContent: string,
   fallbackId: string,
   locale: string,
+  beforeCreating?: () => Promise<void>,
   rechecks = 2,
 ): Promise<RoutingResult> {
   const stay: RoutingResult = { workspaceId: fallbackId, created: false, decided: false };
@@ -235,12 +236,15 @@ export async function routeToWorkspace(
     if (twin) return { workspaceId: twin.id, created: false, decided: true };
 
     // Uploads return at once, so every file in a batch routes at the same time, each taking
-    // about 20s to answer. If another file opened a shelf meanwhile, this answer never saw it.
+    // about 20s to answer. Checking the list is not enough: three files once decided within
+    // seconds, before any workspace row existed, and made three named 攀岩. So earlier files
+    // go first, and if one of them opened a shelf, this answer never saw it and is redone.
+    await beforeCreating?.();
     if (rechecks > 0) {
       const known = new Set(allWorkspaces.map((w) => w.id));
       const { data: latest } = await supabase.from('workspaces').select('id').eq('owner_id', userId);
       if (latest?.some((w) => !known.has(w.id))) {
-        return routeToWorkspace(supabase, drive, userId, profileRow, sourceTitle, sourceContent, fallbackId, locale, rechecks - 1);
+        return routeToWorkspace(supabase, drive, userId, profileRow, sourceTitle, sourceContent, fallbackId, locale, beforeCreating, rechecks - 1);
       }
     }
 
