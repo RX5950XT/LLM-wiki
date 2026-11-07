@@ -14,6 +14,7 @@
   - Android 傳檔一律失敗（`file is required`）：`Content-Disposition` 重複。舊版程式也是同樣寫法，應該早就壞了，但沒有舊版實測佐證。
   - 大檔競態：輪詢可能在內容存好前啟動 job，造成永久失敗（job `ea8a666e`）。**這是本輪改成先存檔後才出現的 bug**，已用 `next_attempt_at` 保留修正；1.95 MB 重測（job `5caccee6`）內容先存好、解析失敗訊息正確。不過那次測試期間只輪詢 2 次，不是高強度競爭測試。
   - 等待中的 job 會蓋掉失敗橫幅（Web／Android 都有）：Nvidia 那筆要等到 11/8，期間任何匯入失敗都看不到。
+  - 批次匯入開出多個工作區：**也是本輪快速 POST 造成的回歸**。只把工作區清單重查一次仍失敗（3 個同名「攀岩」），改成依送出順序等前面的檔案（`52fe6b8`）後，4 篇養蜂文章間隔 2 秒送出，全進同一個新工作區，全部完成。**重測前要先確認工作區數量低於 12（`MAX_AUTO_WORKSPACES`），否則根本不會開新工作區，測試會假通過。**
   - **production 每個 PDF 都解析失敗（Web 和手機都是，自 Phase 17 起）**：打包後找不到 `pdf.worker.mjs`，修掉後線上又撞到 `DOMMatrix is not defined`（本機有 `@napi-rs/canvas` 所以測不到），兩個錯誤都被 `failureCode` 吞掉，現在會印 log。之前用假 PDF 測，失敗訊息剛好一樣，把這個 bug 蓋住了，要用真 PDF 才測到。修好後另外發現中文 PDF 缺 `cMapUrl` 會抽不到字，並且空內容會被當成成功。
 - **手機匯入真 PDF（production 實測）**：內建字型的中文 PDF，OpenRouter Gemini，自動路由建了新工作區，寫入 6 篇知識頁加 index、log，內容確實來自 PDF（job `fa57f801`，已刪）。掃描檔與 Web 上傳 PDF 沒有在 production 實測（本機 `next start` 驗過空白 PDF 回傳空字串；Web 走同一支後端）。
 - **其他格式（production 實測，手機上傳）**：DOCX、PPTX、EPUB、PNG 都寫出頁面且內容正確；只有圖片的掃描 PDF 正確失敗（`The document has no readable text.`）。網頁上傳 PDF 也通過。
