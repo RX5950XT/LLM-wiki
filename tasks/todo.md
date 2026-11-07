@@ -195,3 +195,17 @@
 - 對齊：Android 新增知識圖譜（`GraphView.kt`，讀 `page_links`、alias 解析、kind 配色、孤兒空心、縮放拖曳、點節點開頁），圖譜洞察移到圖譜內，與 Web 相同。
 - 修 Codex 中斷遺留：`workspace-shell.probe.mjs` 的 lucide mock 缺新圖示導致 3 個測試失敗。
 - `bun run test` 149/149、`bun run typecheck --force` 5/5、`bun run build` 成功；`:app:testDebugUnitTest`、`:app:assembleDebug` 成功。
+
+# 匯入持久化（2026-11-07）
+
+- [x] 重現：POST 21.4 秒、錯誤只顯示 Ingest failed、有額度仍 0 頁
+- [x] 伺服器：先存檔再回應、背景 intake、pg_cron worker、失敗分類與自動重試、ChatGPT 工具 `strict:false`
+- [x] Web／Android：全帳號佇列、等待原因與時間、立即重試；Android WorkManager 上傳（0.8.1）
+- [x] production 實測背景流程（瀏覽器＋Pixel 6a），測試資料已清除
+- [ ] 額度重置後確認 job `a45d5c4f-…` 真的寫入頁面
+- [ ] 手機在請求送出前被殺、以及離線時的重送
+
+### Review
+
+- `bun test` 169 pass、`tsc` 無錯誤、`assembleRelease`／`assembleDebug` 成功；release APK 原地安裝，登入保留。
+- 細節與未驗證項目見 `CONTEXT.md`。

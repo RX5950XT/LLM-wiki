@@ -159,6 +159,7 @@ Android 呼叫與 Web 相同的後端 API（`/api/ingest`、`/api/query`、`/api
 - **Phase 16** ✅：維護合一 + AI 真權限 — 健康檢查與整理去重合併成單一按鈕／單一 pipeline（`/api/organize`），不再產生報告頁；維護 job 改 `confirmDestructive: false` 且保留 workspace 生命週期工具（真的能合併、刪除、改名、重排），新增 `reorderWorkspaces` AI 工具；刪除 `/api/lint` route、`vercel.json` cron 與 `CRON_SECRET`；`_schema/lint.md` 改為「檢查並直接修正」的清單並注入維護 pipeline
 - **Phase 15** ✅：連結修復 + 維護整合 + 來源重跑 — wiki 連結伺服器咽喉點 alias fallback（`lib/wiki/slug.ts` + `/api/pages` GET，修 `[PAGE_NOT_FOUND]`）、圖譜邊 alias 解析去幽靈節點、lint job 化（migration `0016`，與 organize 共用 agent_jobs 鎖）、維護按鈕整合（Web `Wrench` 選單 + 進度 pill + localStorage 背景續跑；Android `Build` 選單）、來源重新整合（`/api/sources/[id]/reingest`）
 - **Phase 17** ✅（2026-09-01）：六項知識編譯能力——兩階段可恢復 Ingest queue（SHA unchanged、pause/resume/retry、checkpoint）、安全 allowlist/fencing/CAS 寫入、多格式檔案解析（PDF/DOCX/PPTX/EPUB/text/image，2 MiB）、Faithful raw-source query、Graph Insights；Web/Android 對齊，Android APK `0.7.0`（versionCode `7`）。production 已套用並驗證 `recoverable_ingest` migration 的欄位與索引。
+- **Phase 18** 🚧（2026-11-07）：匯入持久化——送出先存檔、pg_cron 續跑、失敗自動重試、App 被殺仍會上傳；Android `0.8.1`（versionCode `13`）。背景流程已實測；ChatGPT `strict:false` 是否解決 0 頁待額度重置後驗證（見 `CONTEXT.md`）。
 
 ## 安全注意事項（Phase 10）
 
@@ -229,7 +230,8 @@ apps/android/app/src/main/java/com/llmwiki/
 │       ├── PageDao.kt        ← observePages(workspace_id, account_name) Flow + upsertAll
 │       └── PageEntity.kt     ← (workspace_id, account_name, slug) PK，確保每帳號 Room cache 隔離
 └── sync/
-    └── SyncWorker.kt         ← CoroutineWorker，schedule() 每小時 KEEP 策略
+    ├── SyncWorker.kt         ← CoroutineWorker，schedule() 每小時 KEEP 策略
+    └── IngestUploadWorker.kt ← 匯入上傳（outbox + WorkManager，殺 App 後會重送）
 
 ```
 
@@ -275,7 +277,7 @@ apps/android/app/src/main/java/com/llmwiki/
   - **頁被維護搬到別的工作區**（69 條）：`movePageToWorkspace` 只「回報」來源端反向連結會斷，沒有真的修。咽喉點在同工作區找不到時，會用同一套 alias 去**該使用者的其他工作區**找唯一匹配 → 回 `404 PAGE_MOVED_WORKSPACE` + `workspace_id`/`slug`；Web `PageViewer` 直接 `router.push` 過去，Android `selectPageBySlug` 查其他工作區並 `refreshWorkspaces(preferredWorkspaceId, preferredPageSlug)` 切過去（舊版連錯誤訊息都沒有，直接 `return`）。
   - **真的沒有那頁**（51 條）：交給健康檢查（見下）。
 - **`[[slug|顯示名]]` 的顯示名不是 slug 的一部分（Phase 16h，勿回退）**：後端 `extractWikiLinks` 一直有 `split('|')`，但**兩個渲染器都沒有**——`page-viewer.tsx` 與 Android `MarkdownViewer` 把整串 `entities/donald-trump|Donald Trump` 當 slug，href 變成 `?page=entities/donald-trump|Donald Trump.md`（那頁永遠不存在）。LLM 寫索引時幾乎每條都用這個形式，所以**整份 index.md 的藍色連結全是死的**，而 `page_links` 表看起來很健康（它有切）——這就是「連結還是失效但資料庫說沒事」的落差。解法：`lib/wiki/slug.ts` 的 `parseWikiLink()`（slug / label / anchor 三段，有單元測試）供 Web 渲染器使用，Android 同樣切；`GET /api/pages/[...slug]` 對含 `|` 的請求也切一次（舊 client、舊書籤一併救回）。
-- `ingestUrl()` / `ingestText()` 呼叫 Web app 的 `/api/ingest`，使用 Supabase session accessToken
+- `ingestUrl()` / `ingestText()` / `ingestFile()` 只把工作排進 `IngestUploadWorker`，由它帶 Supabase session accessToken 呼叫 `/api/ingest`
 - Web API 端點位址由 `BuildConfig.WEB_API_BASE_URL` 決定（從 `local.properties` 的 `WEB_API_BASE_URL` 或 `NEXT_PUBLIC_SITE_URL` 注入）
 - Chat 串流協定：POST `/api/query` → `text/plain` stream，結尾附 `\x00CITATIONS\x00[...]`（可再接 `\x00ACTIONS\x00[...]`）；Android 用 Ktor `bodyAsChannel()` + `readUTF8Line()` 消費，`parseStreamMeta()` 解析（未知 block 忽略）
 - Android chat sheet 的 `SmartToy` 按鈕是**多功能選單**（導入內容 / 從檔案匯入 / 選擇模型）；FAB 只剩一顆對話按鈕，匯入不再有獨立 FAB
@@ -384,19 +386,23 @@ GCP 專案 `my-project-1750440589634`（LLM Wiki）的 OAuth 同意畫面必須�
 
 ## 非同步 Ingest 協定（重要）
 
-`POST /api/ingest` **不再同步等待 LLM pipeline**：
-1. 驗證 + 抓取來源 + 建立 source / job 記錄後，立即回 `202 { jobId, status: 'running' }`
-2. Pipeline 透過 `after()`（`next/server`）在回應後繼續執行（Vercel Fluid Compute，maxDuration 300s）
-3. Client 輪詢 `GET /api/ingest?job_id=<uuid>` → `{ jobId, status, error, touched_pages }`
-4. `running` 超過 8 分鐘的 job 會在下次查詢時被掃成 `failed`（stale sweep）
+`POST /api/ingest` **只驗證並存檔，幾百毫秒內回應**，之後的事都在伺服器做，任何 client 關掉都不影響（2026-11-07 改版，勿回退）：
+1. 同步檢查只留 422（沒有 profile）與 403（Drive 要重新授權）。其餘先建 placeholder source、`phase:'intake'` 的 job 與 `ingest_intakes` 列，立即回 `202 { jobId, status: 'pending' }`。舊版要等讀網址、路由、寫 Drive，實測 21.4 秒，這段時間殺 App 匯入就遺失。
+2. `client_request_id` 是冪等鍵：同一個 id 重送回同一個 job，所以手機可以放心重試。
+3. `runIntake`（`lib/ai/ingest-intake.ts`）在背景讀來源、路由、用 hash 去重、寫 Drive，再把 job 轉成 `analysis`；intake 不佔工作區的單一 running 名額。
+4. **Supabase pg_cron 每分鐘檢查**（`ingest-worker`）：只有到期的 pending 或過期的 running 才呼叫 `POST /api/ingest/worker`。token 存 Vault，在 Postgres 內比對（`verify_ingest_worker_token`）。worker 一次最多啟動 3 筆。**生產環境的 `ingest_worker_url` secret 不在 migration 檔內，換網域要同步改 Vault。**
+5. `GET /api/ingest` 也會回收死掉的 job 並啟動到期的 job，所以有 client 開著時不必等 cron；`scope=owner` 回傳整個帳號的 job（仍要帶 `workspace_id`），Web 與 Android 都用它，切工作區也看得到進度。
 
-Web（`pollIngestJob`，3s 間隔）與 Android（`WikiViewModel.pollIngestJob`）都走這套協定；完成後顯示「已更新 N 頁」。
-**這是手機匯入不再逾時的關鍵**：舊版同步等待 300s，Android socket timeout 必炸；現在 POST 幾秒內返回，App 跳背景／切頁面都不影響伺服器端 job，回前景同步即見結果。
-向後相容：舊 server 回 `{ status: 'done' }` 時 client 直接視為完成。
+**失敗分類（`lib/ai/ingest-retry.ts`）**：`usage_limit` 等到 `resets_at` 且不消耗重試次數；`continue`（時間用完）很快接續；`transient` 依 1、3、10、30、60、120 分鐘退避；`permanent`（401、404、輸入有誤）直接失敗給使用者看。等待中的 job 是 `status='pending'` 加 `next_attempt_at` / `wait_reason`，UI 顯示原因與時間並提供「立即重試」。
+**死掉的 run**：`started_at` 超過 `RUNNER_LEASE_MS`（330 秒）還是 running，就由 `recoverDeadIngestJobs` 以 `continue` 收尾；舊的 8 分鐘 stale sweep 已移除。
+
+**ChatGPT 的工具必須送 `strict:false`（`toCodexRequestBody`，勿回退）**：Responses API 在沒設 `strict` 時把 function tools 當嚴格模式，選填欄位沒有值時模型只能送 `null`，我們的 zod 就拒絕每一次 `writePage`，結果是跑 165 秒、0 頁。判斷依據是 SDK 程式碼與症狀，**尚未用真模型驗證**（見 `CONTEXT.md`）。寫入階段 `prepareStep` 也會 `toolChoice:'required'` 直到計畫寫完；鎖定或多次被拒的頁會記入 `checkpoint.skipped_pages`，不拖垮整篇；寫 0 頁時診斷資訊存 `checkpoint.diagnostics`。
+
+Android 匯入走 `IngestUploadWorker`（WorkManager expedited）：內容先寫入 `filesDir/ingest_outbox/<requestId>`，App 被殺或離線後會重送；登出時 `cancelAll`。
 `urlToMarkdown` 有 20s fetch timeout、5 MB 頁面上限、逐跳 redirect SSRF 驗證（IP 正規化 + DNS 解析檢查，含 IPv6/link-local/CGNAT/metadata IP），並用 undici Agent 的 connect-time `lookup` 在建立連線當下驗證 IP（無 TOCTOU rebinding 窗口）。
 **即時進度**：pipeline 的 `onStepFinish` 會把 `touched_pages` 逐步寫回 job row，輪詢端在 `running` 期間即可顯示「已更新 N 頁」（Web `ingestProgress` state / Android `WikiUiState.ingestProgress`）。
 
-**寫入要寫完計畫，而且要在 Vercel 砍掉之前自己停（勿回退）**：舊版寫入迴圈 `if (touched.size > 0) break`——只要寫出**一頁**就進審查，於是計畫 11 頁只寫 4 頁，審查正確判定 incomplete，整個 job failed；使用者按「重新整合」又是**新 job、從零重新規劃**，再寫個 2-4 頁，永遠收斂不了。現在 nudge 會列出「計畫中還沒有成功 writePage 的頁」，迴圈直到 `unwrittenTargets()` 為空才 break。寫得完整之後撞到第二層：`maxDuration = 300s` 一到，Vercel 直接殺掉 invocation，**被殺的 run 來不及寫 job row → 停在 `running`，8 分鐘後才被 stale sweep 判 failed**，這段時間 UI 一直顯示「匯入中」。pipeline 因此有 `PIPELINE_BUDGET_MS = 210_000` 的 wall-clock 預算（`stopWhen` 與 nudge 迴圈都看它），到點就以 `Ingest ran out of time after N of M planned pages. Retry to continue from here.` 收尾。
+**寫入要寫完計畫，而且要在 Vercel 砍掉之前自己停（勿回退，下面提到的 8 分鐘 stale sweep 已由 330 秒 lease 取代）**：舊版寫入迴圈 `if (touched.size > 0) break`——只要寫出**一頁**就進審查，於是計畫 11 頁只寫 4 頁，審查正確判定 incomplete，整個 job failed；使用者按「重新整合」又是**新 job、從零重新規劃**，再寫個 2-4 頁，永遠收斂不了。現在 nudge 會列出「計畫中還沒有成功 writePage 的頁」，迴圈直到 `unwrittenTargets()` 為空才 break。寫得完整之後撞到第二層：`maxDuration = 300s` 一到，Vercel 直接殺掉 invocation，**被殺的 run 來不及寫 job row → 停在 `running`，8 分鐘後才被 stale sweep 判 failed**，這段時間 UI 一直顯示「匯入中」。pipeline 因此有 `PIPELINE_BUDGET_MS = 210_000` 的 wall-clock 預算（`stopWhen` 與 nudge 迴圈都看它），到點就以 `Ingest ran out of time after N of M planned pages. Retry to continue from here.` 收尾。
 
 **續寫用「重試」，不是「重新整合」**：`failureUpdate` 刻意不清 checkpoint 與 touched_pages，所以 `PATCH /api/ingest {action:'retry'}`（failed → pending）會**沿用 plan 與已寫頁面續做**；`POST /api/sources/[id]/reingest` 是建新 job、重新規劃。大來源要收斂必須走 retry——入口在 ImportDialog 的佇列列表（Web），Sources 清單的「重新整合」按鈕不是同一件事。
 

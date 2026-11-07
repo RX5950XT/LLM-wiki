@@ -2,6 +2,16 @@
 
 > 給下一個 AI Agent 的接手指南。架構與規範細節以 `CLAUDE.md` / `AGENTS.md` 為準，這裡只記「最近做了什麼、為什麼、還缺什麼」。
 
+## 2026-11-07 匯入改為持久化（Android 0.8.1 / versionCode 13）
+
+- **改了什麼**：POST 只存檔就回 202（`runIntake` 在背景讀來源）、pg_cron `ingest-worker` 每分鐘喚醒 worker、失敗分類與自動重試、Android `IngestUploadWorker`、佇列改看全帳號。規格見 `CLAUDE.md`「非同步 Ingest 協定」。migration `20261107090000_durable_ingest.sql` 已套用 production；Vault 的 `ingest_worker_url` 是手動寫入的，不在 migration 內。
+- **production 實測通過**：POST 0.39 秒（舊版 21.4 秒）；同一個 `client_request_id` 重送回同一個 job；額度用完時進入等待並顯示重置時間；手機與瀏覽器都關閉時 cron 打 worker 回 `200 {"started":1}`；模擬 running 被砍，cron 於下一分鐘救回成 `continue`；手機點匯入後緊接 force-stop，請求已先送出，伺服器只有一筆 job，且 log 有 `WM-ForceStopRunnable: rescheduling`；Web 與手機都看得到別的工作區的等待任務。
+- **尚未驗證**：
+  - **`strict:false` 是否真的解決 0 頁**。帳號只有 ChatGPT 設定檔，週額度用完（約 11/8 12:53 Taiwan 重置），沒有任何實際寫入的測試。Nvidia 文章 job `a45d5c4f-b5f5-4ec0-86bc-52066137cf7a` 已重新排隊，重置後會自動跑，它就是驗證：看 `touched_pages`；若仍 0 頁，讀 `checkpoint.diagnostics`。
+  - 手機「請求還沒送出就被殺」與離線時的重送。force-stop 那次請求已先到伺服器，所以 outbox 重送這條路徑沒有被實際走到。
+- **其他**：Android `assembleDebug` 曾有一次 `BUILD FAILED` 且沒有編譯錯誤，之後 `assembleRelease`、`assembleDebug` 都成功，原因不明。Drive 留有一個沒被任何資料列引用的測試檔 `187pJPuE1lxXzPMsQoZH_ynuBIucQJGjI`（`vercel env pull` 拿到的環境無法取得 Drive token，沒刪掉）。
+- **測試陷阱**：`GET /api/ingest` 也會啟動到期的 job。測 cron 時只要有 client 開著，任務就可能是被 client 推動的（實測發生兩次），要看 `net._http_response` 才算數。
+
 ## 2026-09-26 實機全面檢查（Pixel 6a ADB ＋ Web 手機寬度）
 
 - **對話逾時根因**：OpenRouter `gemini-3.8-flash` 在正式 prompt＋工具下常於 headers 後串流卡死（推理 `high` 必卡、預設值約 2/3）。`lib/ai/client.ts`：每請求 150s、串流 35s 無 `data:` 重送一次、OpenRouter 預設 `reasoning.effort=medium`、各流程帶 hard-stop signal；`/api/query` 70s 後強制作答、105s 收尾並說明逾時。修後實機 11.6 秒回答。
