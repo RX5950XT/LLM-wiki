@@ -36,8 +36,11 @@ const RETRY_DELAY_MS = 1_500;
  * The reply is one line, normally back in seconds. Without a cap a stalled call
  * waited out the 150s request timeout inside the POST, and the ingest that
  * followed was killed at Vercel's 300s limit (job stuck in `running`).
+ * Routing now runs in the background, so a slow answer costs little and a misfiled
+ * source costs a lot. At 20s, Gemini on Vertex was cut off mid-thought: 2 of 3 files
+ * in a production test fell back to the workspace the user was looking at.
  */
-const ROUTING_TIMEOUT_MS = 20_000;
+const ROUTING_TIMEOUT_MS = 45_000;
 
 /** How long a workspace with no pages yet still counts as "just created for a batch". */
 const NEW_WORKSPACE_GRACE_MS = 60 * 60 * 1000;
