@@ -47,7 +47,7 @@ describe('wikiLinksToMarkdown', () => {
 
   it('keeps an anchor out of the slug and leaves other text alone', () => {
     expect(wikiLinksToMarkdown('[[a/b#c]] and [text](https://x.y)')).toBe(
-      `[a/b](wiki://${encodeURIComponent('a/b')}#c) and [text](https://x.y)`,
+      `[a/b#c](wiki://${encodeURIComponent('a/b')}#c) and [text](https://x.y)`,
     );
   });
 });
