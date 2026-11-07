@@ -745,8 +745,8 @@ export function ConversationPanel({
       {/* Composer: one card holding the text, then the things that act on it */}
       <form onSubmit={handleSubmit} className="px-3 pb-3 pt-2">
         <div
-          className="relative rounded-2xl border transition-colors duration-150 focus-within:border-[var(--color-accent)]"
-          style={{ background: 'var(--surface-secondary)', borderColor: 'var(--border)' }}
+          className="relative rounded-2xl border border-[var(--border)] transition-colors duration-150 focus-within:border-[var(--color-accent)]"
+          style={{ background: 'var(--surface-secondary)' }}
         >
           {taggedWorkspaces.length > 0 && (
             <div className="flex flex-wrap gap-1 px-3 pt-2.5">
