@@ -420,6 +420,7 @@ Android 匯入走 `IngestUploadWorker`（WorkManager expedited）：內容先寫
 - **Queue stale-list invariant（勿回退）**：active job UI 必須以 server `GET /api/ingest?workspace_id=...` 先 stale sweep 後回傳的清單為準；Web／Android 不可直接查 `ingest_jobs`，也不可把 DB 的 `running` row 直接當成仍在執行。
 - **排隊中的 job 由清單查詢啟動（2026-10-18 實機修正，勿回退）**：工作區忙碌時新匯入只會建成 `pending`，伺服器不會在前一筆跑完後自動接下一筆。舊版只有 `GET ?job_id=` 會啟動它，而 Android 只輪詢 `GET ?workspace_id=`，所以手機連送兩篇時第二篇永遠卡在 pending。現在清單查詢會替「沒有 running job 的工作區」啟動最早的 pending（claim 是原子的，重複觸發無害）。
 - **安全寫入**：ingest LLM 只拿 plan allowlist 內的 `read/list/search/write`；`writePageForWorkspace` 用 DB version + `locked_by_human` CAS 保護，衝突回傳結構化錯誤並做 Drive 補償。
+- **PDF 在打包後才會壞（2026-11-07 實測，勿回退）**：pdf.js 從自己旁邊載入 worker，打包後路徑不存在，production 每個 PDF 都失敗（`Setting up fake worker failed`），而 `bun test` 不打包所以全過。`extractPdf` 必須先把 worker 註冊到 `globalThis.pdfjsWorker`。中文 PDF 另外需要 `cMapUrl`，檔案靠 `next.config.ts` 的 `outputFileTracingIncludes` 帶上 Vercel，否則每頁都抽不到字。只有頁碼標題、沒有文字的 PDF 回傳空字串，由 intake 判定失敗，不可把空內容送給模型。**改 PDF 解析要用 `next build` ＋ `next start` 驗證。**
 - **多格式解析**：`document-parser.ts` 支援 PDF、DOCX、PPTX、EPUB、純文字/Markdown 與 PNG/JPEG/WebP/GIF；輸入、解壓與 PDF 資源皆有 2 MiB/資源上限，圖片可由 profile 產生描述。
 - **Faithful Query**：`query_mode=faithful` 只讀 raw source，不注入 wiki/context、不提供 actions/file-back；citation 由實際讀取產生，模型輸出的 NUL 不會變成 metadata。
 - **Graph Insights**：`/api/graph/insights` 以 owner scope 計算孤立頁、群組、橋接頁與未解析連結；頁數/邊數超限明確回錯，不假裝空圖。

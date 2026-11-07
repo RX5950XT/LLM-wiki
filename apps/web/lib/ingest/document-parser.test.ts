@@ -66,12 +66,12 @@ function imageFixture(): Uint8Array {
   return new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 }
 
-function pdfFixture(): Uint8Array {
+function pdfFixture(content = 'BT /F1 12 Tf 72 720 Td (Hello PDF) Tj ET'): Uint8Array {
   const objects = [
     '<< /Type /Catalog /Pages 2 0 R >>',
     '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
     '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>',
-    '<< /Length 41 >>\nstream\nBT /F1 12 Tf 72 720 Td (Hello PDF) Tj ET\nendstream',
+    `<< /Length ${content.length} >>\nstream\n${content}\nendstream`,
     '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
   ];
   let source = '%PDF-1.4\n';
@@ -106,6 +106,11 @@ describe('extractDocument', () => {
       expect(result.text).toContain('## Page 1');
       expect(result.text).toContain('Hello PDF');
     }
+  });
+
+  it('returns no text for a PDF with no text, so a scan is not imported as page headings', async () => {
+    const result = await extractDocument({ filename: 'scan.pdf', mime: 'application/pdf', data: pdfFixture('') });
+    expect(result).toEqual({ ok: true, text: '' });
   });
 
   it('extracts DOCX paragraphs and table cells', async () => {

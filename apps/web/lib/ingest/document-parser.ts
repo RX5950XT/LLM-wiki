@@ -160,6 +160,7 @@ async function waitWithAbort<T>(promise: Promise<T>, context: ParseContext): Pro
 function failureCode(error: unknown, context: ParseContext): ParseFailure {
   if (error instanceof ParseFailure) return error;
   if (context.signal.aborted) return new ParseFailure(context.timedOut() ? 'TIMEOUT' : 'ABORTED');
+  console.error('[document-parser] parse failed', error);
   return new ParseFailure('PARSE_FAILED');
 }
 
@@ -757,10 +758,21 @@ async function appendArchiveImages(
   }
 }
 
+// Keep this in step with outputFileTracingIncludes, or Vercel ships the function without these files.
+const PDFJS_ASSETS = `${process.cwd().replaceAll('\\', '/')}/node_modules/pdfjs-dist/`;
+
 async function extractPdf(data: Uint8Array, context: ParseContext): Promise<string> {
   const pdfjs = await waitWithAbort(import('pdfjs-dist/legacy/build/pdf.mjs'), context);
+  // pdf.js loads its worker from a path next to itself, which does not exist once bundled.
+  // Registering it here is what makes PDF work in production; `bun test` runs unbundled and cannot see this.
+  const scope = globalThis as { pdfjsWorker?: unknown };
+  // @ts-expect-error pdf.js ships no types for its worker entry
+  scope.pdfjsWorker ??= await waitWithAbort(import('pdfjs-dist/legacy/build/pdf.worker.mjs'), context);
   const loadingTask = pdfjs.getDocument({
     data: data.slice(),
+    // Without these, CJK PDFs using a predefined CMap extract as empty pages. Traced in next.config.ts.
+    cMapUrl: `${PDFJS_ASSETS}cmaps/`,
+    standardFontDataUrl: `${PDFJS_ASSETS}standard_fonts/`,
     enableXfa: false,
     disableFontFace: true,
     isOffscreenCanvasSupported: false,
@@ -771,6 +783,7 @@ async function extractPdf(data: Uint8Array, context: ParseContext): Promise<stri
     const document = await waitWithAbort(loadingTask.promise, context);
     if (document.numPages > 100) throw new ParseFailure('PDF_PAGE_LIMIT');
     const output = new OutputBuffer();
+    let hasText = false;
     for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
       context.check();
       const page = await waitWithAbort(document.getPage(pageNumber), context);
@@ -781,11 +794,15 @@ async function extractPdf(data: Uint8Array, context: ParseContext): Promise<stri
         .join(' ')
         .trim();
       output.add(`## Page ${pageNumber}\n`);
-      if (text) output.add(`${text}\n`);
+      if (text) {
+        hasText = true;
+        output.add(`${text}\n`);
+      }
       output.add('\n');
       page.cleanup();
     }
-    return output.text();
+    // Page headings alone are not content: a scanned PDF must fail, not reach the model empty.
+    return hasText ? output.text() : '';
   } finally {
     try {
       await Promise.resolve(loadingTask.destroy());
