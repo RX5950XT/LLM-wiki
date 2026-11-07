@@ -762,6 +762,10 @@ async function appendArchiveImages(
 const PDFJS_ASSETS = `${process.cwd().replaceAll('\\', '/')}/node_modules/pdfjs-dist/`;
 
 async function extractPdf(data: Uint8Array, context: ParseContext): Promise<string> {
+  // pdf.js constructs a DOMMatrix while loading, and only rendering ever uses it. In Node it fills this
+  // from the native @napi-rs/canvas, which Vercel functions do not ship. We only read text.
+  const dom = globalThis as { DOMMatrix?: unknown };
+  dom.DOMMatrix ??= class DOMMatrix {};
   const pdfjs = await waitWithAbort(import('pdfjs-dist/legacy/build/pdf.mjs'), context);
   // pdf.js loads its worker from a path next to itself, which does not exist once bundled.
   // Registering it here is what makes PDF work in production; `bun test` runs unbundled and cannot see this.
