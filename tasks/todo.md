@@ -205,9 +205,10 @@
 - [ ] 額度重置後確認 job `a45d5c4f-…` 真的寫入頁面
 - [x] 手機在請求送出前被殺的重送（0.8.4 實測）
 - [x] Android 傳檔、大檔競態、等待中蓋掉失敗橫幅三個 bug
+- [x] 手機匯入真實 PDF 並寫出頁面（修掉 production 所有 PDF 都失敗的 bug）
 - [ ] 離線時的重送（需切飛航模式，屬手機系統設定，未測）
 
 ### Review
 
-- `bun test` 171 pass、`tsc` 無錯誤、`assembleRelease`／`assembleDebug` 成功；release APK 原地安裝，登入保留。
+- `bun test` 172 pass、`tsc` 無錯誤、`assembleRelease`／`assembleDebug` 成功；release APK 原地安裝，登入保留。
 - 細節與未驗證項目見 `CONTEXT.md`。
