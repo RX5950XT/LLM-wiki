@@ -147,6 +147,7 @@ export async function routeToWorkspace(
   sourceContent: string,
   fallbackId: string,
   locale: string,
+  rechecks = 2,
 ): Promise<RoutingResult> {
   const stay: RoutingResult = { workspaceId: fallbackId, created: false, decided: false };
 
@@ -229,12 +230,19 @@ export async function routeToWorkspace(
       return { workspaceId: decision.id, created: false, decided: true };
     }
 
-    // Name collision against EVERY workspace, not just the ones offered above: a
-    // workspace this batch created moments ago still has no pages, so it is not in
-    // `workspaces` — and creating "咖啡烘焙" twice because the first one has not
-    // been written to yet is exactly the twin the same-name guard exists to stop.
+    // Name collision against EVERY workspace, not just the ones offered above.
     const twin = findByName(allWorkspaces, decision.name);
     if (twin) return { workspaceId: twin.id, created: false, decided: true };
+
+    // Uploads return at once, so every file in a batch routes at the same time, each taking
+    // about 20s to answer. If another file opened a shelf meanwhile, this answer never saw it.
+    if (rechecks > 0) {
+      const known = new Set(allWorkspaces.map((w) => w.id));
+      const { data: latest } = await supabase.from('workspaces').select('id').eq('owner_id', userId);
+      if (latest?.some((w) => !known.has(w.id))) {
+        return routeToWorkspace(supabase, drive, userId, profileRow, sourceTitle, sourceContent, fallbackId, locale, rechecks - 1);
+      }
+    }
 
     const created = await createWorkspaceForUser(drive, userId, decision.name, locale);
     return created.ok
