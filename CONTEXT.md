@@ -10,7 +10,7 @@
 - **尚未驗證**：
   - **`strict:false` 是否真的解決 0 頁**。帳號只有 ChatGPT 設定檔，週額度用完（約 11/8 12:53 Taiwan 重置），沒有任何實際寫入的測試。Nvidia 文章 job `a45d5c4f-b5f5-4ec0-86bc-52066137cf7a` 已重新排隊，重置後會自動跑，它就是驗證：看 `touched_pages`；若仍 0 頁，讀 `checkpoint.diagnostics`。
   - 手機「請求還沒送出就被殺」與離線時的重送。force-stop 那次請求已先到伺服器，所以 outbox 重送這條路徑沒有被實際走到。
-- **其他**：Android `assembleDebug` 曾有一次 `BUILD FAILED` 且沒有編譯錯誤，之後 `assembleRelease`、`assembleDebug` 都成功，原因不明。Drive 留有一個沒被任何資料列引用的測試檔 `187pJPuE1lxXzPMsQoZH_ynuBIucQJGjI`（`vercel env pull` 拿到的環境無法取得 Drive token，沒刪掉）。
+- **其他**：Android `assembleDebug` 曾有一次 `BUILD FAILED`，daemon log 顯示 `checkDebugAarMetadata` 的 Gradle 快取搬移失敗（`Could not move temporary workspace`），與程式無關，重跑即過。預設模型已改為 OpenRouter，但 job `a45d5c4f` 綁定 ChatGPT profile，不受影響。Drive 留有一個沒被任何資料列引用的測試檔 `187pJPuE1lxXzPMsQoZH_ynuBIucQJGjI`（`vercel env pull` 拿到的環境無法取得 Drive token，沒刪掉）。
 - **測試陷阱**：`GET /api/ingest` 也會啟動到期的 job。測 cron 時只要有 client 開著，任務就可能是被 client 推動的（實測發生兩次），要看 `net._http_response` 才算數。
 
 ## 2026-09-26 實機全面檢查（Pixel 6a ADB ＋ Web 手機寬度）

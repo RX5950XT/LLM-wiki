@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { canonicalWikiAlias, normalizeWikiSlug, parseWikiLink } from './slug';
+import { canonicalWikiAlias, normalizeWikiSlug, parseWikiLink, wikiLinksToMarkdown } from './slug';
 
 describe('parseWikiLink', () => {
   it('keeps a plain target as both slug and label', () => {
@@ -35,5 +35,19 @@ describe('slug helpers still resolve the display form', () => {
   it('aliases the slug half, not the label', () => {
     expect(canonicalWikiAlias(parseWikiLink('entities/scott-bessent|Scott Bessent (斯科特)').slug))
       .toBe(canonicalWikiAlias('entities/Scott_Bessent.md'));
+  });
+});
+
+describe('wikiLinksToMarkdown', () => {
+  it('renders the label and links to the slug alone', () => {
+    expect(wikiLinksToMarkdown('由[[entities/james-watt|詹姆斯·瓦特]]發明')).toBe(
+      `由[詹姆斯·瓦特](wiki://${encodeURIComponent('entities/james-watt')})發明`,
+    );
+  });
+
+  it('keeps an anchor out of the slug and leaves other text alone', () => {
+    expect(wikiLinksToMarkdown('[[a/b#c]] and [text](https://x.y)')).toBe(
+      `[a/b](wiki://${encodeURIComponent('a/b')}#c) and [text](https://x.y)`,
+    );
   });
 });

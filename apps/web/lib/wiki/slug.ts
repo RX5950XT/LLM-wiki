@@ -37,3 +37,12 @@ export function parseWikiLink(target: string): { slug: string; label: string; an
   const label = (afterPipe ?? beforePipe).trim();
   return { slug: slug.trim(), label, anchor: anchor.trim() };
 }
+
+/** Turn `[[slug|label#anchor]]` into markdown links that use the `wiki://` scheme our renderers intercept. */
+export function wikiLinksToMarkdown(content: string): string {
+  return content.replace(/\[\[([^\]]+)\]\]/g, (_, target: string) => {
+    const { slug, label, anchor } = parseWikiLink(target);
+    const encodedAnchor = anchor ? `#${encodeURIComponent(anchor)}` : '';
+    return `[${label}](wiki://${encodeURIComponent(slug)}${encodedAnchor})`;
+  });
+}

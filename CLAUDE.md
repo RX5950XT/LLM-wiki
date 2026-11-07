@@ -563,7 +563,7 @@ Android 匯入走 `IngestUploadWorker`（WorkManager expedited）：內容先寫
 - **匯入錯誤由伺服器依語言翻譯（`lib/ai/ingest-error-i18n.ts`）**：DB 存英文原文，`GET/PATCH /api/ingest` 回應與網址抓取失敗訊息依 `x-llm-wiki-locale` / `NEXT_LOCALE` 翻成中文，Web 與 Android 不各自維護翻譯。新增錯誤訊息時要同步補對照表；未知訊息原樣傳出。
   - base URL 是 `openrouter.ai` 且請求沒指定推理強度時，預設 `reasoning: { effort: 'medium' }`。OpenAI 風格的 `reasoning_effort` 欄位 OpenRouter 會忽略（實測仍卡住）。
 - `/api/query`：70 秒後 `prepareStep` 改 `toolChoice: 'none'` 逼模型用已讀內容作答；105 秒 hard stop 並串流說明「逾時」，不再讓 Vercel 砍掉；每一步都印 `[query] step`（elapsedMs / tools / tokens）——慢的時候讀 log，不要猜。
-## 預設模型：Claude Haiku 5.5（2026-10-18 實機比較）
+## 預設模型（目前為 OpenRouter `google/gemini-3.8-flash`，2026-11-07 起；以下是 2026-10-18 的比較紀錄）
 
 production 預設 profile 已從 `google/gemini-3.8-flash` 換成 `anthropic/claude-haiku-5.5`（同一把 OpenRouter 金鑰；Gemini 與 `openai/gpt-6-luna` profile 保留可切換）。同一題對話：Haiku 16 秒、Luna 20 秒、Gemini 73.5 秒（第一步就等 57 秒）；匯入 9KB 文章 Haiku 一輪 163 秒寫完 14 頁，Gemini 常卡住要靠重送撐。價格 Haiku/Luna $0.1/$0.5 vs Gemini $0.825/$4.125（每百萬 token）。OpenRouter 公開 endpoint 統計中 Gemini 的 Google 端點 24h 可用率僅 74%。
 - **換預設模型要連 `workspaces.default_profile_id` 一起改**：舊工作區直接綁定 profile，只改 `is_default` 這些工作區仍用舊模型。
@@ -619,7 +619,7 @@ production 預設 profile 已從 `google/gemini-3.8-flash` 換成 `anthropic/cla
 
 ## 其他注意事項
 
-- **Markdown 渲染**：`page-viewer.tsx` 用 `react-markdown` + `remark-gfm`。YAML frontmatter 以 `stripFrontmatterAndWikilinks()` 手動 strip（不用 `remark-frontmatter`，那個不自動隱藏內容）。`[[slug]]` 轉成 `[slug](wiki://slug)` 供自訂 `<a>` renderer 攔截；ReactMarkdown 必須設定 `urlTransform` 放行 `wiki:`，否則預設 sanitizer 會把 href 清空。
+- **Markdown 渲染**：`page-viewer.tsx` 用 `react-markdown` + `remark-gfm`。YAML frontmatter 以 `stripFrontmatterAndWikilinks()` 手動 strip（不用 `remark-frontmatter`，那個不自動隱藏內容）。`[[slug]]` 經 `wikiLinksToMarkdown`（`lib/wiki/slug.ts`，頁面與對話共用）轉成 `[slug](wiki://slug)` 供自訂 `<a>` renderer 攔截；ReactMarkdown 必須設定 `urlTransform` 放行 `wiki:`，否則預設 sanitizer 會把 href 清空。
 - **`.env.vercel.tmp`**：`vercel env pull` 輸出的暫存檔，已加入 `.gitignore`，不應提交。
 - Lucide v3 已移除 icon 的 `title` prop，改用 `aria-label`
 - `packages/prompts` 的 `.md` import 需要 `markdown.d.ts` 宣告 + next.config webpack `asset/source` loader

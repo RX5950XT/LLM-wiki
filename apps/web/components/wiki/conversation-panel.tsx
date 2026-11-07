@@ -23,6 +23,7 @@ import { parseCitations } from '@/lib/ai/citation-parser';
 import type { ActionProposal } from '@/lib/ai/tools';
 import type { RawSourceCitation } from '@/lib/ai/source-tools';
 import { isDriveReconnectError, reconnectGoogleDrive } from '@/lib/google/drive-reconnect';
+import { wikiLinksToMarkdown } from '@/lib/wiki/slug';
 import { ImportDialog } from './import-dialog';
 
 type ProposalStatus = 'pending' | 'running' | 'done' | 'error' | 'dismissed';
@@ -565,7 +566,7 @@ export function ConversationPanel({
                     },
                   }}
                 >
-                  {m.content}
+                  {wikiLinksToMarkdown(m.content)}
                 </ReactMarkdown>
               ) : (
                 m.content
