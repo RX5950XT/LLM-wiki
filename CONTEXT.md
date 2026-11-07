@@ -16,6 +16,8 @@
   - 等待中的 job 會蓋掉失敗橫幅（Web／Android 都有）：Nvidia 那筆要等到 11/8，期間任何匯入失敗都看不到。
   - **production 每個 PDF 都解析失敗（Web 和手機都是，自 Phase 17 起）**：打包後找不到 `pdf.worker.mjs`，修掉後線上又撞到 `DOMMatrix is not defined`（本機有 `@napi-rs/canvas` 所以測不到），兩個錯誤都被 `failureCode` 吞掉，現在會印 log。之前用假 PDF 測，失敗訊息剛好一樣，把這個 bug 蓋住了，要用真 PDF 才測到。修好後另外發現中文 PDF 缺 `cMapUrl` 會抽不到字，並且空內容會被當成成功。
 - **手機匯入真 PDF（production 實測）**：內建字型的中文 PDF，OpenRouter Gemini，自動路由建了新工作區，寫入 6 篇知識頁加 index、log，內容確實來自 PDF（job `fa57f801`，已刪）。掃描檔與 Web 上傳 PDF 沒有在 production 實測（本機 `next start` 驗過空白 PDF 回傳空字串；Web 走同一支後端）。
+- **其他格式（production 實測，手機上傳）**：DOCX、PPTX、EPUB、PNG 都寫出頁面且內容正確；只有圖片的掃描 PDF 正確失敗（`The document has no readable text.`）。網頁上傳 PDF 也通過。
+- **費用走向（2026-11-07 查證）**：OpenRouter `2號萬能Key` 當天 Gemini 3.8 Flash 全部走 Google Vertex BYOK，逐筆 $0；GCP 帳單本月 Vertex AI $12.74 全被抵免額抵掉，實付 $0。OpenRouter「僅限 BYOK」是關閉的，Vertex 失敗時理論上可能改扣 OpenRouter 餘額，當天未發生。
 - **手機被殺重送（0.8.3–0.8.4 實測，測試檔是解析必敗的假 PDF，不花模型費用）**：選檔後約 0.75 秒殺（請求已到伺服器、回應沒收到）→ 重開後重送，同一個 `client_request_id` 仍只有一筆 job；選檔後約 0.1 秒殺（App 確認已死、伺服器確認沒收到）→ 重開後 `WM-ForceStopRunnable` 重排，檔案自動補送，一筆 job。
 - **其他**：Android `assembleDebug` 曾有一次 `BUILD FAILED`，daemon log 顯示 `checkDebugAarMetadata` 的 Gradle 快取搬移失敗（`Could not move temporary workspace`），與程式無關，重跑即過。預設模型已改為 OpenRouter，但 job `a45d5c4f` 綁定 ChatGPT profile，不受影響。Drive 留有一個沒被任何資料列引用的測試檔 `187pJPuE1lxXzPMsQoZH_ynuBIucQJGjI`（`vercel env pull` 拿到的環境無法取得 Drive token，沒刪掉）。
 - **測試陷阱**：`GET /api/ingest` 也會啟動到期的 job。測 cron 時只要有 client 開著，任務就可能是被 client 推動的（實測發生兩次），要看 `net._http_response` 才算數。

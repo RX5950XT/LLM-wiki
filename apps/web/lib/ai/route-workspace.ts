@@ -39,9 +39,30 @@ const RETRY_DELAY_MS = 1_500;
  */
 const ROUTING_TIMEOUT_MS = 20_000;
 
+/** How long a workspace with no pages yet still counts as "just created for a batch". */
+const NEW_WORKSPACE_GRACE_MS = 60 * 60 * 1000;
+
 export interface RoutableWorkspace {
   id: string;
   name: string;
+}
+
+/**
+ * An old empty husk is not a shelf to file things on: it holds no subject to match against,
+ * and maintenance deletes it. A just-created one is different. Its first import is still being
+ * written, and hiding it makes every later file in the batch open another workspace with a
+ * slightly different name (production test: 4 baking files, 3 workspaces).
+ */
+export function routingCandidates<T extends RoutableWorkspace & { created_at: string }>(
+  workspaces: readonly T[],
+  titlesByWorkspace: ReadonlyMap<string, readonly string[]>,
+  now: number,
+): T[] {
+  return workspaces.filter(
+    (w) =>
+      (titlesByWorkspace.get(w.id) ?? []).length > 0 ||
+      now - Date.parse(w.created_at) < NEW_WORKSPACE_GRACE_MS,
+  );
 }
 
 export type RoutingDecision =
@@ -128,7 +149,7 @@ export async function routeToWorkspace(
 
   const { data: allWorkspaces } = await supabase
     .from('workspaces')
-    .select('id, name')
+    .select('id, name, created_at')
     .eq('owner_id', userId);
   if (!allWorkspaces?.length) return stay;
 
@@ -148,17 +169,14 @@ export async function routeToWorkspace(
     titlesByWorkspace.set(row.workspace_id, list);
   }
 
-  // An empty husk is not a shelf to file things on: it holds no subject to match
-  // against, and maintenance deletes it anyway. Offering it as a target is how a
-  // source ends up in a workspace called "My Wiki".
-  const workspaces = allWorkspaces.filter((w) => (titlesByWorkspace.get(w.id) ?? []).length > 0);
+  const workspaces = routingCandidates(allWorkspaces, titlesByWorkspace, Date.now());
 
   // Nothing in the base yet — the first import stays put rather than spawning a
   // second workspace next to the empty one.
-  if (workspaces.length === 0) return stay;
+  if (titlesByWorkspace.size === 0 || workspaces.length === 0) return stay;
 
   const workspaceSummary = workspaces
-    .map((w) => `- id: ${w.id}\n  name: ${w.name}\n  pages: ${(titlesByWorkspace.get(w.id) ?? []).join(', ')}`)
+    .map((w) => `- id: ${w.id}\n  name: ${w.name}\n  pages: ${(titlesByWorkspace.get(w.id) ?? []).join(', ') || '(just created, judge by its name)'}`)
     .join('\n');
 
   const canCreate = allWorkspaces.length < MAX_AUTO_WORKSPACES;

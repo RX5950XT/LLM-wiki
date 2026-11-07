@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { parseRoutingReply, type RoutableWorkspace } from './route-workspace';
+import { parseRoutingReply, routingCandidates, type RoutableWorkspace } from './route-workspace';
 
 const WORKSPACES: RoutableWorkspace[] = [
   { id: '11111111-1111-4111-8111-111111111111', name: 'AI' },
@@ -75,5 +75,21 @@ describe('parseRoutingReply', () => {
 
   it('returns null on an unusable reply so the caller retries', () => {
     expect(parseRoutingReply('I am not sure about this one.', WORKSPACES, true)).toBeNull();
+  });
+});
+
+describe('routingCandidates', () => {
+  const now = Date.parse('2026-11-07T12:00:00Z');
+  const ws = (id: string, created_at: string) => ({ id, name: id, created_at });
+
+  it('offers a workspace created moments ago so a batch does not open a second one', () => {
+    const fresh = ws('fresh', '2026-11-07T11:59:30Z');
+    expect(routingCandidates([fresh], new Map(), now)).toEqual([fresh]);
+  });
+
+  it('hides an old empty husk but keeps old workspaces that have pages', () => {
+    const husk = ws('husk', '2026-11-01T00:00:00Z');
+    const shelf = ws('shelf', '2026-11-01T00:00:00Z');
+    expect(routingCandidates([husk, shelf], new Map([['shelf', ['A page']]]), now)).toEqual([shelf]);
   });
 });
