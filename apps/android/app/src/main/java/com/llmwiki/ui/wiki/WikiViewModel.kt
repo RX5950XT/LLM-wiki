@@ -818,60 +818,6 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
             _uiState.value.activePage,
         )
 
-    fun toggleLock(slug: String, currentLocked: Boolean) {
-        val newLocked = !currentLocked
-        // Optimistic update — immediate visual feedback before network round-trip
-        _uiState.update { state ->
-            if (state.activePage?.slug == slug) {
-                state.copy(activePage = state.activePage.copy(lockedByHuman = newLocked))
-            } else state
-        }
-        viewModelScope.launch {
-            val wsId = workspaceId.value ?: run {
-                // No workspace; revert the optimistic update
-                _uiState.update { state ->
-                    if (state.activePage?.slug == slug) {
-                        state.copy(activePage = state.activePage.copy(lockedByHuman = currentLocked))
-                    } else state
-                }
-                return@launch
-            }
-            db.pageDao().updateLock(wsId, accountName, slug, newLocked)
-            try {
-                val response = sendAuthorizedRequest { accessToken ->
-                    AndroidHttpClient.instance.patch(webApiUrl("/api/pages/$wsId/${slug.encodePathSegments()}")) {
-                        header("Authorization", "Bearer $accessToken")
-                        contentType(ContentType.Application.Json)
-                        setBody("""{"locked_by_human":$newLocked}""")
-                    }
-                }
-                if (response == null || response.status.value !in 200..299) {
-                    // Rollback Room and UI
-                    db.pageDao().updateLock(wsId, accountName, slug, currentLocked)
-                    _uiState.update { state ->
-                        val rolled = if (state.activePage?.slug == slug) {
-                            state.copy(activePage = state.activePage.copy(lockedByHuman = currentLocked))
-                        } else state
-                        if (response != null) {
-                            rolled.copy(syncError = parseApiError(response.bodyAsText(), str(R.string.error_op_lock)))
-                        } else {
-                            rolled
-                        }
-                    }
-                }
-            } catch (e: Exception) {
-                // Rollback Room and UI
-                db.pageDao().updateLock(wsId, accountName, slug, currentLocked)
-                _uiState.update { state ->
-                    val rolled = if (state.activePage?.slug == slug) {
-                        state.copy(activePage = state.activePage.copy(lockedByHuman = currentLocked))
-                    } else state
-                    rolled.copy(syncError = e.toUserFacingMessage(str(R.string.error_op_lock)))
-                }
-            }
-        }
-    }
-
     fun toggleSearch() {
         _uiState.update { it.copy(showSearch = !it.showSearch, searchQuery = "", searchResults = emptyList()) }
     }

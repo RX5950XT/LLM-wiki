@@ -46,7 +46,7 @@ apps/web/
 │   ├── wiki/
 │   │   ├── conversation-panel.tsx  ← 對話中心：citations + 確認卡片 + @ 工作區標記 + Bot 多功能選單
 │   │   ├── import-dialog.tsx       ← 統一導入入口（貼上/拖曳/檔案 + 自動判斷工作區）
-│   │   ├── page-viewer.tsx         ← staleness banner + lock toggle + ReactMarkdown（GFM、frontmatter strip、[[wikilink]] 路由）
+│   │   ├── page-viewer.tsx         ← staleness banner + ReactMarkdown（GFM、frontmatter strip、[[wikilink]] 路由）
 │   │   ├── page-tree.tsx           ← 左側導航樹（只顯示 wiki zone；無 icon）
 │   │   └── graph-view.tsx          ← react-force-graph-2d（動態 import；degree sizing + hover 高亮）
 │   └── workspace/
@@ -291,7 +291,7 @@ Query API 文字串流結尾依序附加 `\x00CITATIONS\x00[...]`、`\x00ACTIONS
 - Android Wiki drawer 使用工作區下拉選單；建立工作區整合在下拉內，並支援從手機附加文字檔直接 ingest
 - Android workspace 下拉選單需提供切換、新建、重新命名、刪除；刪除時清掉該 workspace 的 Room cache 並選下一個 workspace 或回建立頁
 - Android workspace 下拉選單的切換區與 rename/delete action 區必須分離，且 action hit target 至少 44dp；否則容易誤觸成切換 workspace
-- Android 頁面鎖定狀態需以 `Lock` / `LockOpen` 區分，因為鎖頭本身可點擊切換
+- **頁面不再有鎖頭（2026-11-07 使用者要求）**：Web 與 Android 都拿掉了鎖定按鈕與清單上的鎖定標記。`locked_by_human` 欄位、工具層 guard 與 `PATCH /api/pages/{wid}/{slug}` 都保留：系統頁（`_schema/*`、`notes/*`）靠它防止 AI 改寫，舊版 APK 也還在呼叫這個 API。
 - Android `MarkdownViewer` 用 Markwon + `TextView` 時必須在 Compose update 內同步 `MaterialTheme` 的文字與連結顏色，否則深色模式會出現黑底黑字
 - Android FAB 要明確設定 `containerColor` / `contentColor`，不要依賴預設 primaryContainer；淺色模式容易出現不自然白色塊
 - Web API 若要服務 Android，需支援 `Authorization: Bearer <token>`；不要只依賴 cookie session

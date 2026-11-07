@@ -60,8 +60,6 @@
     <string name="wiki_send">傳送</string>
     <string name="wiki_imported_file">匯入檔案</string>
     <string name="wiki_untitled">未命名</string>
-    <string name="wiki_locked">已鎖定</string>
-    <string name="wiki_unlocked">未鎖定</string>
     <string name="wiki_ingest_title">匯入來源</string>
     <string name="wiki_ingest_hint">貼上 URL、純文字或 Markdown</string>
     <string name="wiki_ingest_placeholder">https://… 或貼上文字 / Markdown</string>
@@ -126,8 +124,6 @@
     <string name="graph_legend_other">其他</string>
     <string name="wiki_tools">工具</string>
     <string name="wiki_page_actions">頁面操作</string>
-    <string name="wiki_lock_page">鎖定頁面</string>
-    <string name="wiki_unlock_page">解除鎖定</string>
     <string name="error_op_graph">載入圖譜失敗</string>
     <string name="graph_count_pages">頁面：%1$d</string>
     <string name="graph_count_links">連結：%1$d</string>
@@ -206,7 +202,7 @@
     <!-- 使用說明 -->
     <string name="help_title">使用說明</string>
     <string name="help_workspace_title">工作區與頁面</string>
-    <string name="help_workspace_body">用工作區選單切換、排序或建立工作區。知識頁全部由 AI 維護；鎖頭可保護該頁不被 AI 覆寫。也可以直接在對話中請 AI 建立、重新命名或刪除工作區。</string>
+    <string name="help_workspace_body">用工作區選單切換、排序或建立工作區。知識頁全部由 AI 維護。也可以直接在對話中請 AI 建立、重新命名或刪除工作區。</string>
     <string name="help_ingest_title">匯入內容</string>
     <string name="help_ingest_body">打開對話後，按輸入框左側的機器人按鈕 →「導入內容」或「從檔案匯入」。目標工作區預設「自動判斷」，由 AI 決定內容該進哪個工作區。</string>
     <string name="help_chat_title">對話與綜合頁</string>
@@ -260,7 +256,6 @@
     <string name="error_import_file_unreadable">無法讀取這個檔案。</string>
     <string name="error_op_load_sources">載入來源清單失敗</string>
     <string name="error_op_sync">同步失敗</string>
-    <string name="error_op_lock">更新頁面鎖定失敗</string>
     <string name="error_op_synthesis">儲存整合頁失敗</string>
     <string name="ingest_running_batch">匯入中…%1$d 篇處理中，已更新 %2$d 個頁面 · 本批已完成 %3$d 篇 · 失敗 %4$d 篇 · 可關閉 App，任務會在背景繼續</string>
     <string name="chat_thinking">思考中…</string>

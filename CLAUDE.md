@@ -112,7 +112,7 @@ apps/web/
 ├── components/wiki/
 │   ├── conversation-panel.tsx  ← 對話中心（citation chips、確認卡片、@ 工作區標記、Bot 多功能選單）
 │   ├── import-dialog.tsx       ← 統一導入入口（貼上／拖曳／檔案 + 自動判斷工作區）
-│   └── page-viewer.tsx         ← 含 staleness banner + lock toggle + ReactMarkdown（GFM、frontmatter strip、[[wikilink]] 路由）
+│   └── page-viewer.tsx         ← 含 staleness banner + ReactMarkdown（GFM、frontmatter strip、[[wikilink]] 路由）
 ├── lib/workspaces/manage.ts    ← create/rename/delete workspace 共用函式（REST route 與 AI 工具共用）
 └── lib/ai/
     ├── tools.ts                ← AI wiki 工具（跨工作區；read/write/search/list/delete/move + workspace 管理）
@@ -159,7 +159,7 @@ Android 呼叫與 Web 相同的後端 API（`/api/ingest`、`/api/query`、`/api
 - **Phase 16** ✅：維護合一 + AI 真權限 — 健康檢查與整理去重合併成單一按鈕／單一 pipeline（`/api/organize`），不再產生報告頁；維護 job 改 `confirmDestructive: false` 且保留 workspace 生命週期工具（真的能合併、刪除、改名、重排），新增 `reorderWorkspaces` AI 工具；刪除 `/api/lint` route、`vercel.json` cron 與 `CRON_SECRET`；`_schema/lint.md` 改為「檢查並直接修正」的清單並注入維護 pipeline
 - **Phase 15** ✅：連結修復 + 維護整合 + 來源重跑 — wiki 連結伺服器咽喉點 alias fallback（`lib/wiki/slug.ts` + `/api/pages` GET，修 `[PAGE_NOT_FOUND]`）、圖譜邊 alias 解析去幽靈節點、lint job 化（migration `0016`，與 organize 共用 agent_jobs 鎖）、維護按鈕整合（Web `Wrench` 選單 + 進度 pill + localStorage 背景續跑；Android `Build` 選單）、來源重新整合（`/api/sources/[id]/reingest`）
 - **Phase 17** ✅（2026-09-01）：六項知識編譯能力——兩階段可恢復 Ingest queue（SHA unchanged、pause/resume/retry、checkpoint）、安全 allowlist/fencing/CAS 寫入、多格式檔案解析（PDF/DOCX/PPTX/EPUB/text/image，2 MiB）、Faithful raw-source query、Graph Insights；Web/Android 對齊，Android APK `0.7.0`（versionCode `7`）。production 已套用並驗證 `recoverable_ingest` migration 的欄位與索引。
-- **Phase 18** 🚧（2026-11-07）：匯入持久化——送出先存檔、pg_cron 續跑、失敗自動重試、App 被殺仍會上傳；Android `0.8.4`（versionCode `16`）。背景流程已實測；ChatGPT `strict:false` 是否解決 0 頁待額度重置後驗證（見 `CONTEXT.md`）。
+- **Phase 18** 🚧（2026-11-07）：匯入持久化——送出先存檔、pg_cron 續跑、失敗自動重試、App 被殺仍會上傳；Android `0.8.5`（versionCode `17`）。背景流程已實測；ChatGPT `strict:false` 是否解決 0 頁待額度重置後驗證（見 `CONTEXT.md`）。
 
 ## 安全注意事項（Phase 10）
 
@@ -254,7 +254,6 @@ apps/android/app/src/main/java/com/llmwiki/
 - Android Wiki drawer 已改為工作區下拉選單；「建立工作區」整合進下拉內，檔案匯入除了文字/URL 也支援從手機選取文字檔直接 ingest
 - Android workspace 下拉選單需提供切換、新建、重新命名、刪除；刪除時清掉該 workspace 的 Room cache 並選下一個 workspace 或回建立頁
 - Android workspace 下拉選單的切換區與 rename/delete action 區必須分離，且 action hit target 至少 44dp；否則容易誤觸成切換 workspace
-- Android 頁面鎖定狀態需以 `Lock` / `LockOpen` 區分，因為鎖頭本身可點擊切換
 - Android `MarkdownViewer` 用 Markwon + `TextView` 時必須在 Compose update 內同步 `MaterialTheme` 的文字與連結顏色，否則深色模式會出現黑底黑字
 - Android FAB 要明確設定 `containerColor` / `contentColor`，不要依賴預設 primaryContainer；淺色模式容易出現不自然白色塊
 - Web API 若要同時服務 Web cookie 與 Android Bearer token，route 需經 `lib/supabase/request.ts` 取 user，不能只靠 `lib/supabase/server.ts`
@@ -283,7 +282,7 @@ apps/android/app/src/main/java/com/llmwiki/
 - Android chat sheet 的「＋」是導入選單（導入內容 / 從檔案匯入），模型晶片是模型與回答模式選單；FAB 只剩一顆對話按鈕，匯入不再有獨立 FAB
 - Android 破壞性確認卡片渲染在 `ChatBubble` 內；`executeProposal(messageIndex, proposalIndex)` 走 `/api/agent/execute`，刪除工作區成功後要清該 workspace 的 Room cache + cancel SyncWorker + `refreshWorkspaces()`
 - Android 設定頁的 AI 權限開關寫 `supabase.auth.updateUser { data { put("ai_confirm_destructive", …) } }`（與 Web 共用同一個 user_metadata 欄位）；LLM profile 編輯走 `PATCH /api/settings/profiles`，api_key 留空＝保留原金鑰
-- Lock toggle：PATCH `/api/pages/{wid}/{slug}` `{locked_by_human:bool}`，同步更新 Room cache（`PageDao.updateLock`）
+- **頁面不再有鎖頭（2026-11-07 使用者要求）**：Web 與 Android 都拿掉了鎖定按鈕與清單上的鎖定標記。`locked_by_human` 欄位、工具層 guard 與 `PATCH /api/pages/{wid}/{slug}` 都保留：系統頁（`_schema/*`、`notes/*`）靠它防止 AI 改寫，舊版 APK 也還在呼叫這個 API。
 - 登出後 NavController navigate("auth") popUpTo(0) inclusive=true
 - 登出時 `WikiViewModel.signOut()` 會清空 Room DB（`PageDao.deleteAll()`）並取消 WorkManager job（`SyncWorker.cancel()`）
 - `GOOGLE_CLIENT_ID` 必須使用 **Web OAuth client ID**（非 Android client ID），`requestIdToken()` 需要它來取得 ID token
@@ -310,7 +309,7 @@ apps/android/app/src/main/java/com/llmwiki/
 - 頁面內容由 Compose `verticalScroll` 捲動（TextView 自己捲只能拖、沒有慣性），反向連結放在文章末尾並顯示標題、底部留 88dp 給 FAB。
 - 匯入橫幅只在有 pending/running/paused 時顯示；「本批」完成／失敗數用與 Web 相同的 30 分鐘視窗（`ingestBatchCounts()`），舊的失敗不可永遠掛在畫面上。
 - 冷啟與切換工作區先顯示 Room 快取的 index，再背景同步。打開工作區選單時 `prefetchWorkspaceIndexes()` 先把其他工作區還沒快取的 index.md 抓進 Room；Web 同樣在滑過／打開切換按鈕時 `router.prefetch` ＋ `prefetchPage(ws, "index.md")`，切換不必等約 1 秒的 Drive 讀取。
-- **Android 按鈕收斂（2026-10-23）**：抽屜底部只有「工具」選單（來源／匯入佇列／知識圖譜／整理知識庫／說明／登出）＋「設定」；頁面頂列只有搜尋＋「⋮」（鎖定／編輯／重新整理）。新功能入口請加進既有選單，不要再加常駐圖示。知識圖譜在 `ui/wiki/GraphView.kt`（直查 `page_links`、經 `resolvePageSlug` 解析端點；上方類型 chip 同時是圖例與篩選，對齊 Web），圖譜洞察從圖譜右上角進入（Web 同）。
+- **Android 按鈕收斂（2026-10-23）**：抽屜底部只有「工具」選單（來源／匯入佇列／知識圖譜／整理知識庫／說明／登出）＋「設定」；頁面頂列只有搜尋＋「⋮」（編輯／重新整理）。新功能入口請加進既有選單，不要再加常駐圖示。知識圖譜在 `ui/wiki/GraphView.kt`（直查 `page_links`、經 `resolvePageSlug` 解析端點；上方類型 chip 同時是圖例與篩選，對齊 Web），圖譜洞察從圖譜右上角進入（Web 同）。
 - Chat/設定選擇（主題/語言）用 `FilterChip`（含勾選 + TalkBack selected 語意），不要用僅變文字色的 OutlinedButton
 
 ## Graph View 注意事項

@@ -52,8 +52,6 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
@@ -664,16 +662,6 @@ fun WikiScreen(
                                         expanded = showPageMenu,
                                         onDismissRequest = { showPageMenu = false },
                                     ) {
-                                        uiState.activePage?.let { page ->
-                                            DropdownMenuItem(
-                                                text = { Text(stringResource(if (page.lockedByHuman) R.string.wiki_unlock_page else R.string.wiki_lock_page)) },
-                                                leadingIcon = { Icon(if (page.lockedByHuman) Icons.Default.LockOpen else Icons.Default.Lock, contentDescription = null) },
-                                                onClick = {
-                                                    showPageMenu = false
-                                                    wikiViewModel.toggleLock(page.slug, page.lockedByHuman)
-                                                },
-                                            )
-                                        }
                                         if (editablePage != null) {
                                             DropdownMenuItem(
                                                 text = { Text(stringResource(R.string.action_edit)) },
@@ -1379,16 +1367,6 @@ private fun PageListItem(
         selected = isSelected,
         onClick = onClick,
         modifier = Modifier.padding(horizontal = 8.dp),
-        badge = {
-            if (page.lockedByHuman) {
-                Icon(
-                    Icons.Default.Lock,
-                    contentDescription = stringResource(R.string.wiki_locked),
-                    modifier = Modifier.size(16.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        },
     )
 }
 

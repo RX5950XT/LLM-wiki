@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
-import { Pencil, Lock, Unlock, RefreshCw, AlertTriangle, Check, X } from 'lucide-react';
+import { Pencil, RefreshCw, AlertTriangle, Check, X } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -149,7 +149,6 @@ interface PageData {
   kind: string;
   zone: string;
   updated_by: 'llm' | 'human';
-  locked_by_human: boolean;
   version: number;
 }
 
@@ -218,11 +217,10 @@ export function PageViewer({
     Boolean(slug && !pageCache.has(cacheKey(workspaceId, slug)))
   ));
   const [error, setError] = useState<string | null>(null);
-  // Non-fatal action failures (lock toggle, save) — shown inline, must NOT
+  // Non-fatal action failures (save) — shown inline, must NOT
   // trip the full-page error screen or the open editor would be unmounted
   const [actionError, setActionError] = useState<string | null>(null);
   const [seenRefreshKey, setSeenRefreshKey] = useState(0);
-  const [lockPending, setLockPending] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
   const [savePending, setSavePending] = useState(false);
@@ -376,37 +374,6 @@ export function PageViewer({
   }, [anchor, page]);
 
   const isEditable = page?.zone === 'notes' || page?.zone === 'schema';
-
-  const toggleLock = useCallback(async () => {
-    if (!page) return;
-    setLockPending(true);
-    try {
-      const res = await fetch(
-        `/api/pages/${workspaceId}/${encodeSlugPath(page.slug)}`,
-        {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ locked_by_human: !page.locked_by_human }),
-        },
-      );
-      if (!res.ok) {
-        const data = await res.json().catch(() => null) as { error?: { message?: string } | string } | null;
-        const message = typeof data?.error === 'string' ? data.error : data?.error?.message;
-        setActionError(message ?? t('wiki.lockFailed'));
-        return;
-      }
-      // Only reflect the lock in UI once the server accepted it — this flag is
-      // the "human owns this page" guarantee, a silent failure breaks trust
-      setActionError(null);
-      setPage((prev) =>
-        prev ? { ...prev, locked_by_human: !prev.locked_by_human } : prev,
-      );
-    } catch {
-      setActionError(t('wiki.lockFailed'));
-    } finally {
-      setLockPending(false);
-    }
-  }, [page, workspaceId, t]);
 
   const savePage = useCallback(async () => {
     if (!page) return;
@@ -592,23 +559,6 @@ export function PageViewer({
               <Pencil size={10} /> {t('wiki.human')}
             </span>
           )}
-
-          {/* Lock toggle */}
-          <button
-            onClick={toggleLock}
-            disabled={lockPending}
-            className="flex items-center gap-0.5 rounded px-1.5 py-0.5 text-xs transition-opacity hover:opacity-70 disabled:opacity-40"
-            style={{ color: page.locked_by_human ? 'var(--color-accent)' : 'var(--fg-muted)' }}
-            aria-pressed={page.locked_by_human}
-            aria-label={page.locked_by_human ? t('wiki.lockedTitle') : t('wiki.unlockedTitle')}
-            title={
-              page.locked_by_human
-                ? t('wiki.lockedTitle')
-                : t('wiki.unlockedTitle')
-            }
-          >
-            {page.locked_by_human ? <Lock size={12} /> : <Unlock size={12} />}
-          </button>
 
           {isEditable && (
             editing ? (

@@ -200,14 +200,6 @@ This guide page (notes/guide.md) is a system page and cannot be renamed or delet
 
 Click a note to open it, then click the pencil icon in the top-right of the viewer to edit it with a Markdown toolbar.
 
-## The lock icon
-
-Every page has a lock icon in the top-right corner.
-- **Locked (filled)**: the LLM will not overwrite this page — safe for personal notes.
-- **Unlocked (outlined)**: the LLM may update this page during ingest or health checks.
-
-Click the lock icon to toggle. Notes are locked by default.
-
 ## How notes differ from the wiki
 
 - \`wiki/\`: LLM-maintained knowledge pages
@@ -242,14 +234,6 @@ created: ${created}
 ## 如何編輯
 
 點選筆記開啟後，按右上角的鉛筆按鈕即可用內建 Markdown 工具列編輯。
-
-## 鎖頭是什麼
-
-每個頁面右上角都有一個鎖頭圖示：
-- **鎖定（實心鎖）**：LLM 不會覆寫這個頁面，適合個人筆記。
-- **未鎖定（空心鎖）**：LLM 在匯入或健康檢查時可能更新這個頁面。
-
-點鎖頭即可切換。筆記預設為鎖定狀態。
 
 ## 與 Wiki 的差別
 

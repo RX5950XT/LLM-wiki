@@ -2,7 +2,7 @@
 
 > 給下一個 AI Agent 的接手指南。架構與規範細節以 `CLAUDE.md` / `AGENTS.md` 為準，這裡只記「最近做了什麼、為什麼、還缺什麼」。
 
-## 2026-11-07 匯入改為持久化（Android 0.8.4 / versionCode 16）
+## 2026-11-07 匯入改為持久化（Android 0.8.5 / versionCode 17）
 
 - **改了什麼**：POST 只存檔就回 202（`runIntake` 在背景讀來源）、pg_cron `ingest-worker` 每分鐘喚醒 worker、失敗分類與自動重試、Android `IngestUploadWorker`、佇列改看全帳號。規格見 `CLAUDE.md`「非同步 Ingest 協定」。migration `20261107090000_durable_ingest.sql` 已套用 production；Vault 的 `ingest_worker_url` 是手動寫入的，不在 migration 內。
 - **production 實測通過**：POST 0.39 秒（舊版 21.4 秒）；同一個 `client_request_id` 重送回同一個 job；額度用完時進入等待並顯示重置時間；手機與瀏覽器都關閉時 cron 打 worker 回 `200 {"started":1}`；模擬 running 被砍，cron 於下一分鐘救回成 `continue`；手機點匯入後緊接 force-stop，請求已先送出，伺服器只有一筆 job，且 log 有 `WM-ForceStopRunnable: rescheduling`；Web 與手機都看得到別的工作區的等待任務。

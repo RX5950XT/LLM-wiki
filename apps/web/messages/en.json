@@ -89,8 +89,6 @@
     "pageUpdated": "This page was updated",
     "refresh": "Refresh",
     "human": "Human",
-    "lockedTitle": "Locked — LLM will not overwrite. Click to unlock.",
-    "unlockedTitle": "Unlocked — LLM may update. Click to lock.",
     "editorHeading": "H1",
     "editorBold": "Bold",
     "editorItalic": "Italic",
@@ -100,7 +98,6 @@
     "editorCode": "Code",
     "editorLink": "Link",
     "discardChangesConfirm": "You have unsaved changes. Discard them?",
-    "lockFailed": "Failed to update page lock",
     "backlinks": "Backlinks"
   },
   "ingest": {
@@ -251,7 +248,7 @@
     "open": "Open help",
     "close": "Close help",
     "workspaceTitle": "Workspaces and pages",
-    "workspaceBody": "Use the workspace menu to switch, drag to reorder, or create workspaces. Knowledge pages are AI-maintained; the lock icon on each page protects it from AI overwrites. You can also ask the AI in chat to create, rename, or delete workspaces.",
+    "workspaceBody": "Use the workspace menu to switch, drag to reorder, or create workspaces. Knowledge pages are AI-maintained. You can also ask the AI in chat to create, rename, or delete workspaces.",
     "ingestTitle": "Import content",
     "ingestBody": "Click the bot button left of the chat input → \"Import content\" to paste a URL or text, or drop / pick .txt, .md, .pdf, .docx, .pptx, .epub, or common image files. Import jobs keep running after you close the dialog; the target defaults to \"Auto\".",
     "chatTitle": "Chat and synthesis",

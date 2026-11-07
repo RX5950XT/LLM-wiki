@@ -60,8 +60,6 @@
     <string name="wiki_send">Send</string>
     <string name="wiki_imported_file">Imported file</string>
     <string name="wiki_untitled">Untitled</string>
-    <string name="wiki_locked">Locked</string>
-    <string name="wiki_unlocked">Unlocked</string>
     <string name="wiki_ingest_title">Ingest source</string>
     <string name="wiki_ingest_hint">Paste a URL, plain text, or Markdown</string>
     <string name="wiki_ingest_placeholder">https://… or paste text / Markdown</string>
@@ -126,8 +124,6 @@
     <string name="graph_legend_other">Other</string>
     <string name="wiki_tools">Tools</string>
     <string name="wiki_page_actions">Page actions</string>
-    <string name="wiki_lock_page">Lock page</string>
-    <string name="wiki_unlock_page">Unlock page</string>
     <string name="error_op_graph">Failed to load the graph</string>
     <string name="graph_count_pages">Pages: %1$d</string>
     <string name="graph_count_links">Links: %1$d</string>
@@ -206,7 +202,7 @@
     <!-- Help -->
     <string name="help_title">Help</string>
     <string name="help_workspace_title">Workspaces and pages</string>
-    <string name="help_workspace_body">Use the workspace menu to switch, reorder, or create a workspace. Knowledge pages are AI-maintained; the lock icon protects a page from AI overwrites. You can also ask the AI in chat to create, rename, or delete workspaces.</string>
+    <string name="help_workspace_body">Use the workspace menu to switch, reorder, or create a workspace. Knowledge pages are AI-maintained. You can also ask the AI in chat to create, rename, or delete workspaces.</string>
     <string name="help_ingest_title">Import content</string>
     <string name="help_ingest_body">Open chat, then tap the bot button left of the input → "Import content" or "Import from file". The target workspace defaults to "Auto", letting the AI decide where the content belongs.</string>
     <string name="help_chat_title">Chat and synthesis</string>
@@ -260,7 +256,6 @@
     <string name="error_import_file_unreadable">This file could not be read.</string>
     <string name="error_op_load_sources">Failed to load sources</string>
     <string name="error_op_sync">Sync failed</string>
-    <string name="error_op_lock">Failed to update page lock</string>
     <string name="error_op_synthesis">Failed to save synthesis</string>
     <string name="ingest_running_batch">Importing… %1$d in progress, %2$d pages updated · %3$d done · %4$d failed · runs in the background</string>
     <string name="chat_thinking">Thinking…</string>

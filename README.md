@@ -91,7 +91,7 @@ SHA-256：`97FF398DC4AA6B106925EEF7AAB277608C6BFE148C781A094D3ABE5A2C5389D7`
 2. **設定 LLM Profile** — 前往設定頁，新增 OpenAI-compatible endpoint（OpenRouter、OpenAI、本地 Ollama 等）
 3. **Ingest 來源** — 在右側面板貼上 URL、純文字或 Markdown，點「整合」，LLM 自動更新 wiki 頁面
 4. **查詢 Wiki** — 在對話欄輸入問題，回答底部顯示引用頁面，可一鍵存成 Synthesis 頁面
-5. **瀏覽 Wiki** — 左側頁面樹瀏覽知識頁與筆記，鎖定圖示可防止 LLM 覆寫特定頁面
+5. **瀏覽 Wiki** — 左側頁面樹瀏覽知識頁
 6. **搜尋** — 頂列 Search 按鈕展開搜尋框，輸入 2 字元以上自動全文搜尋，點擊結果直接跳轉
 7. **知識圖譜** — 頂列 GitFork 按鈕開啟力導向圖視圖：
    - 每個圓點代表一個頁面（紫色 = 目前頁面、藍色 = entity、綠色 = concept、琥珀色 = synthesis、灰色 = 其他）

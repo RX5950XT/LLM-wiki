@@ -56,7 +56,7 @@ function deferred<T>(): Deferred<T> {
   return { promise, resolve, reject };
 }
 
-function pageResponse(slug: string, content: string, zone = 'wiki', lockedByHuman = false): Response {
+function pageResponse(slug: string, content: string, zone = 'wiki'): Response {
   return new Response(
     JSON.stringify({
       slug,
@@ -65,7 +65,7 @@ function pageResponse(slug: string, content: string, zone = 'wiki', lockedByHuma
       kind: 'concept',
        zone,
       updated_by: 'llm',
-       locked_by_human: lockedByHuman,
+       locked_by_human: false,
       version: 1,
     }),
     { status: 200, headers: { 'Content-Type': 'application/json' } },
@@ -204,48 +204,6 @@ describe('PageViewer request ordering', () => {
     });
     expect(container.textContent).toContain('new-content');
     expect(container.textContent).not.toContain('unsaved-draft');
-  });
-
-  test('keeps a successful lock change visible while manual refresh is pending', async () => {
-    await renderViewer('refresh-lock', 'a.md', () => undefined);
-    await act(async () => {
-      pending.get('a.md')!.resolve(pageResponse('a.md', 'content', 'notes'));
-      await flushReact();
-    });
-
-    const previousFetch = globalThis.fetch;
-    const patchFetch = (input: RequestInfo | URL, init?: RequestInit) => {
-      if (init?.method === 'PATCH') {
-        return Promise.resolve(pageResponse('a.md', 'content', 'notes', true));
-      }
-      return previousFetch(input, init);
-    };
-    globalThis.fetch = patchFetch as typeof fetch;
-    dom.window.fetch = patchFetch as typeof dom.window.fetch;
-
-    const lockButton = container.querySelector('button[title="wiki.unlockedTitle"]') as HTMLButtonElement;
-    await act(async () => {
-      lockButton.click();
-      await flushReact();
-    });
-    expect(container.querySelector('button[title="wiki.lockedTitle"]')).not.toBeNull();
-
-    await renderViewer('refresh-lock', 'a.md', () => undefined, 1);
-    const refreshButton = Array.from(container.querySelectorAll('button')).find(
-      (button) => button.textContent?.includes('wiki.refresh'),
-    );
-    expect(refreshButton).not.toBeUndefined();
-    await act(async () => {
-      (refreshButton as HTMLButtonElement).click();
-      await flushReact();
-    });
-    expect(container.querySelector('button[title="wiki.lockedTitle"]')).not.toBeNull();
-
-    await act(async () => {
-      pending.get('a.md')!.resolve(pageResponse('a.md', 'content', 'notes'));
-      await flushReact();
-    });
-    expect(container.querySelector('button[title="wiki.unlockedTitle"]')).not.toBeNull();
   });
 
   test('keeps the newest page when an older response arrives late', async () => {
