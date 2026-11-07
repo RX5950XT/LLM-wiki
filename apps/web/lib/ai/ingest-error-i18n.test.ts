@@ -11,6 +11,7 @@ describe('localizeIngestError', () => {
     const refused = toPublicUrlFetchFailure(new Error('Failed to fetch https://x.test: HTTP 403')).message;
     expect(localizeIngestError(refused, 'zh-TW')).toContain('HTTP 403');
     expect(localizeIngestError('Model call failed (404): no such model', 'zh-TW')).toBe('模型呼叫失敗（404）：no such model');
+    expect(localizeIngestError('The document could not be parsed.', 'zh-TW')).toBe('無法解析這份文件，檔案可能已損毀。');
   });
 
   it('leaves English and unknown messages alone', () => {

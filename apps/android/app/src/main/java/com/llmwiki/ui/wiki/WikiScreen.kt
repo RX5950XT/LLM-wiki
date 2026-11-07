@@ -802,7 +802,7 @@ fun WikiScreen(
                 val hasActiveIngest = uiState.ingestLoading || uiState.activeIngestCount > 0
                 val hasPausedIngest = uiState.ingestJobs.any { it.status == "paused" }
                 val failureNotice = uiState.ingestFailureNotice
-                if (failureNotice != null && !hasActiveIngest && !hasPausedIngest) {
+                if (failureNotice != null && !uiState.ingestLoading) {
                     Surface(
                         color = MaterialTheme.colorScheme.errorContainer,
                         modifier = Modifier

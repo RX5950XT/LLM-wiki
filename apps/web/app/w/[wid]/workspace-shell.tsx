@@ -334,14 +334,17 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
 
         // Queued (pending) imports are part of the batch too — same rule as Android.
         const inFlight = jobs.filter((job) => job.status === 'running' || job.status === 'pending');
+        // A failure nobody saw must not vanish with the tab: it stays until dismissed or a day old.
+        // A job parked until tomorrow's quota reset must not hide it either.
+        const dismissedBefore = readFailureDismissedAt();
+        const failure = inFlight.every(isWaitingIngestJob)
+          ? jobs.find(
+              (job) =>
+                job.status === 'failed' &&
+                Date.parse(job.finished_at ?? '') > Math.max(Date.now() - FAILURE_NOTICE_MS, dismissedBefore),
+            )
+          : undefined;
         if (inFlight.length === 0) {
-          // A failure nobody saw must not vanish with the tab: it stays until dismissed or a day old.
-          const dismissedBefore = readFailureDismissedAt();
-          const failure = jobs.find(
-            (job) =>
-              job.status === 'failed' &&
-              Date.parse(job.finished_at ?? '') > Math.max(Date.now() - FAILURE_NOTICE_MS, dismissedBefore),
-          );
           setIngest(
             failure
               ? { running: 0, done: 0, failed: 1, pages: 0, waiting: null, allWaiting: false, failure }
@@ -381,7 +384,7 @@ export function WorkspaceShell({ workspaceId, workspaceName, workspaces, initial
           pages: inFlight.reduce((sum, job) => sum + job.touched_pages.length, 0),
           waiting: waitingJobs[0] ?? null,
           allWaiting: waitingJobs.length === inFlight.length,
-          failure: null,
+          failure: failure ?? null,
         });
         previous = inFlight.length;
       } catch {

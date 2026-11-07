@@ -203,9 +203,11 @@
 - [x] Web／Android：全帳號佇列、等待原因與時間、立即重試；Android WorkManager 上傳（0.8.1）
 - [x] production 實測背景流程（瀏覽器＋Pixel 6a），測試資料已清除
 - [ ] 額度重置後確認 job `a45d5c4f-…` 真的寫入頁面
-- [ ] 手機在請求送出前被殺、以及離線時的重送
+- [x] 手機在請求送出前被殺的重送（0.8.4 實測）
+- [x] Android 傳檔、大檔競態、等待中蓋掉失敗橫幅三個 bug
+- [ ] 離線時的重送（需切飛航模式，屬手機系統設定，未測）
 
 ### Review
 
-- `bun test` 169 pass、`tsc` 無錯誤、`assembleRelease`／`assembleDebug` 成功；release APK 原地安裝，登入保留。
+- `bun test` 171 pass、`tsc` 無錯誤、`assembleRelease`／`assembleDebug` 成功；release APK 原地安裝，登入保留。
 - 細節與未驗證項目見 `CONTEXT.md`。

@@ -1439,7 +1439,8 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
         val active = jobs.filter { it.status == "pending" || it.status == "running" }
         val (batchDone, batchFailed) = ingestBatchCounts(jobs)
         val waiting = active.filter { it.isWaiting }.sortedBy { it.nextAttemptAt }
-        val notice = if (active.isEmpty()) latestUnseenFailure(jobs) else null
+        // A job parked until the quota resets can wait for hours; it must not hide a failure.
+        val notice = if (active.all { it.isWaiting }) latestUnseenFailure(jobs) else null
         _uiState.update {
             it.copy(
                 ingestJobs = jobs,

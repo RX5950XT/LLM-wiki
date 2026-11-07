@@ -2,14 +2,19 @@
 
 > 給下一個 AI Agent 的接手指南。架構與規範細節以 `CLAUDE.md` / `AGENTS.md` 為準，這裡只記「最近做了什麼、為什麼、還缺什麼」。
 
-## 2026-11-07 匯入改為持久化（Android 0.8.1 / versionCode 13）
+## 2026-11-07 匯入改為持久化（Android 0.8.4 / versionCode 16）
 
 - **改了什麼**：POST 只存檔就回 202（`runIntake` 在背景讀來源）、pg_cron `ingest-worker` 每分鐘喚醒 worker、失敗分類與自動重試、Android `IngestUploadWorker`、佇列改看全帳號。規格見 `CLAUDE.md`「非同步 Ingest 協定」。migration `20261107090000_durable_ingest.sql` 已套用 production；Vault 的 `ingest_worker_url` 是手動寫入的，不在 migration 內。
 - **production 實測通過**：POST 0.39 秒（舊版 21.4 秒）；同一個 `client_request_id` 重送回同一個 job；額度用完時進入等待並顯示重置時間；手機與瀏覽器都關閉時 cron 打 worker 回 `200 {"started":1}`；模擬 running 被砍，cron 於下一分鐘救回成 `continue`；手機點匯入後緊接 force-stop，請求已先送出，伺服器只有一筆 job，且 log 有 `WM-ForceStopRunnable: rescheduling`；Web 與手機都看得到別的工作區的等待任務。
 - **真實模型實測**：OpenRouter `google/gemini-3.8-flash` 匯入一篇短文，送出後關閉分頁，9 頁全部寫入（job `0a6fc762`）。這證明流程能跑完，但**不代表 ChatGPT 的 strict 問題已解決**，那條路徑仍待額度重置後驗證。
 - **尚未驗證**：
   - **`strict:false` 是否真的解決 0 頁**。帳號只有 ChatGPT 設定檔，週額度用完（約 11/8 12:53 Taiwan 重置），沒有任何實際寫入的測試。Nvidia 文章 job `a45d5c4f-b5f5-4ec0-86bc-52066137cf7a` 已重新排隊，重置後會自動跑，它就是驗證：看 `touched_pages`；若仍 0 頁，讀 `checkpoint.diagnostics`。
-  - 手機「請求還沒送出就被殺」與離線時的重送。force-stop 那次請求已先到伺服器，所以 outbox 重送這條路徑沒有被實際走到。
+  - 手機離線時的重送。要切飛航模式，這是手機的系統設定，沒有動。
+- **實測找到並修掉的 bug**：
+  - Android 傳檔一律失敗（`file is required`）：`Content-Disposition` 重複。舊版程式也是同樣寫法，應該早就壞了，但沒有舊版實測佐證。
+  - 大檔競態：輪詢可能在內容存好前啟動 job，造成永久失敗（job `ea8a666e`）。**這是本輪改成先存檔後才出現的 bug**，已用 `next_attempt_at` 保留修正；1.95 MB 重測（job `5caccee6`）內容先存好、解析失敗訊息正確。不過那次測試期間只輪詢 2 次，不是高強度競爭測試。
+  - 等待中的 job 會蓋掉失敗橫幅（Web／Android 都有）：Nvidia 那筆要等到 11/8，期間任何匯入失敗都看不到。
+- **手機被殺重送（0.8.3–0.8.4 實測，測試檔是解析必敗的假 PDF，不花模型費用）**：選檔後約 0.75 秒殺（請求已到伺服器、回應沒收到）→ 重開後重送，同一個 `client_request_id` 仍只有一筆 job；選檔後約 0.1 秒殺（App 確認已死、伺服器確認沒收到）→ 重開後 `WM-ForceStopRunnable` 重排，檔案自動補送，一筆 job。
 - **其他**：Android `assembleDebug` 曾有一次 `BUILD FAILED`，daemon log 顯示 `checkDebugAarMetadata` 的 Gradle 快取搬移失敗（`Could not move temporary workspace`），與程式無關，重跑即過。預設模型已改為 OpenRouter，但 job `a45d5c4f` 綁定 ChatGPT profile，不受影響。Drive 留有一個沒被任何資料列引用的測試檔 `187pJPuE1lxXzPMsQoZH_ynuBIucQJGjI`（`vercel env pull` 拿到的環境無法取得 Drive token，沒刪掉）。
 - **測試陷阱**：`GET /api/ingest` 也會啟動到期的 job。測 cron 時只要有 client 開著，任務就可能是被 client 推動的（實測發生兩次），要看 `net._http_response` 才算數。
 
