@@ -27,6 +27,7 @@ import { MAX_INPUT_BYTES } from '@/lib/ingest/document-parser';
 export const maxDuration = 300;
 
 const MAX_TEXT_LENGTH = 2 * 1024 * 1024;
+const INTAKE_STORE_HOLD_MS = 60_000;
 const REQUEST_OVERHEAD_BYTES = 64 * 1024;
 const MAX_JSON_REQUEST_BYTES = MAX_TEXT_LENGTH + REQUEST_OVERHEAD_BYTES;
 const MAX_MULTIPART_REQUEST_BYTES = MAX_INPUT_BYTES + REQUEST_OVERHEAD_BYTES;
@@ -357,6 +358,9 @@ export async function POST(request: NextRequest) {
         touched_pages: [],
         attempt_count: 0,
         client_request_id: clientRequestId,
+        // Any polling client or the cron may start a due job, and a 2 MB intake takes
+        // about a second to store. Not due until its content is really there.
+        next_attempt_at: new Date(Date.now() + INTAKE_STORE_HOLD_MS).toISOString(),
       })
       .select(JOB_FIELDS)
       .single();
@@ -390,6 +394,14 @@ export async function POST(request: NextRequest) {
     if (intakeError) {
       await dropSource(); // the job cascades with it
       throw new Error(`ingest intake insert failed: ${intakeError.message}`);
+    }
+    const { error: releaseError } = await supabase
+      .from('ingest_jobs')
+      .update({ next_attempt_at: null })
+      .eq('id', job.id);
+    if (releaseError) {
+      await dropSource();
+      throw new Error(`ingest job release failed: ${releaseError.message}`);
     }
 
     schedulePendingJob(job.id, user.id, locale, startedAt);

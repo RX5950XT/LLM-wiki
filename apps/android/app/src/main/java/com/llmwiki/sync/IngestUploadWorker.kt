@@ -127,7 +127,9 @@ class IngestUploadWorker(
                                 "file",
                                 bytes,
                                 Headers.build {
-                                    append(HttpHeaders.ContentDisposition, "form-data; name=\"file\"; filename=\"$name\"")
+                                    // Ktor already adds `form-data; name="file"`. Repeating it makes a second
+                                    // header, the server reads the first, and the file arrives without a filename.
+                                    append(HttpHeaders.ContentDisposition, "filename=\"$name\"")
                                     append(HttpHeaders.ContentType, mime)
                                 },
                             )
