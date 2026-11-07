@@ -1,18 +1,19 @@
 'use client';
 
-import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useRouter } from 'next/navigation';
 import {
-  Send,
+  ArrowUp,
   Bookmark,
   Loader2,
   CheckCircle,
+  Check,
+  ChevronDown,
   ChevronRight,
-  Bot,
+  Plus,
   Square,
-  Import,
   AlertTriangle,
   X,
   ExternalLink,
@@ -26,6 +27,9 @@ import { ImportDialog } from './import-dialog';
 
 type ProposalStatus = 'pending' | 'running' | 'done' | 'error' | 'dismissed';
 type QueryMode = 'standard' | 'faithful';
+
+const COMPOSER_MAX_HEIGHT = 160;
+const QUERY_MODES: readonly QueryMode[] = ['standard', 'faithful'];
 
 interface MessageProposal extends ActionProposal {
   status: ProposalStatus;
@@ -96,6 +100,38 @@ function preserveWikiUrlTransform(url: string): string {
   return url.startsWith('wiki:') ? url : defaultUrlTransform(url);
 }
 
+function ComposerOption({
+  label,
+  hint,
+  selected,
+  onSelect,
+}: {
+  label: string;
+  hint: string;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={selected}
+      onClick={onSelect}
+      className="composer-option flex min-h-11 w-full items-center gap-2 rounded-xl px-2.5 py-1.5 text-left"
+    >
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm" style={{ color: 'var(--fg)' }}>
+          {label}
+        </span>
+        <span className="block truncate text-xs" style={{ color: 'var(--fg-muted)' }}>
+          {hint}
+        </span>
+      </span>
+      {selected && <Check size={15} className="shrink-0" style={{ color: 'var(--color-accent)' }} />}
+    </button>
+  );
+}
+
 export function ConversationPanel({
   workspaceId,
   workspaceName,
@@ -122,7 +158,7 @@ export function ConversationPanel({
   const [fileBackPendingId, setFileBackPendingId] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
@@ -193,6 +229,14 @@ export function ConversationPanel({
     document.addEventListener('mousedown', onClick);
     return () => document.removeEventListener('mousedown', onClick);
   }, []);
+
+  // The box grows with what is typed, then scrolls; it shrinks back after sending.
+  useLayoutEffect(() => {
+    const field = inputRef.current;
+    if (!field) return;
+    field.style.height = 'auto';
+    field.style.height = `${Math.min(field.scrollHeight, COMPOSER_MAX_HEIGHT)}px`;
+  }, [input]);
 
   // Detect an active "@..." mention fragment at the caret end of the input
   const updateMentionState = useCallback(
@@ -698,179 +742,38 @@ export function ConversationPanel({
         <div ref={bottomRef} />
       </div>
 
-      {/* Query input */}
-      <form
-        onSubmit={handleSubmit}
-        className="border-t px-4 py-3"
-        style={{ borderColor: 'var(--border)' }}
-      >
-        {/* Tagged workspace chips */}
-        {taggedWorkspaces.length > 0 && (
-          <div className="mb-2 flex flex-wrap gap-1">
-            {taggedWorkspaces.map((ws) => (
-              <span
-                key={ws.id}
-                className="flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs"
-                style={{
-                  borderColor: 'var(--color-accent)',
-                  background: 'var(--color-accent-glow)',
-                  color: 'var(--color-accent)',
-                }}
-              >
-                @{ws.name}
-                <button
-                  type="button"
-                  onClick={() => setTaggedWorkspaces((prev) => prev.filter((w) => w.id !== ws.id))}
-                  className="transition-opacity hover:opacity-70"
-                  aria-label={t('common.close')}
+      {/* Composer: one card holding the text, then the things that act on it */}
+      <form onSubmit={handleSubmit} className="px-3 pb-3 pt-2">
+        <div
+          className="relative rounded-2xl border transition-colors duration-150 focus-within:border-[var(--color-accent)]"
+          style={{ background: 'var(--surface-secondary)', borderColor: 'var(--border)' }}
+        >
+          {taggedWorkspaces.length > 0 && (
+            <div className="flex flex-wrap gap-1 px-3 pt-2.5">
+              {taggedWorkspaces.map((ws) => (
+                <span
+                  key={ws.id}
+                  className="flex max-w-full items-center gap-1 rounded-full px-2 py-0.5 text-xs"
+                  style={{ background: 'var(--color-accent-glow)', color: 'var(--color-accent)' }}
                 >
-                  <X size={11} />
-                </button>
-              </span>
-            ))}
-          </div>
-        )}
-
-        <div className="relative flex gap-2">
-          {/* Action menu: model selection + import */}
-          <div
-            className="relative shrink-0"
-            ref={actionMenuRef}
-            onKeyDown={(event) => {
-              if (event.key === 'Escape') {
-                setShowActionMenu(false);
-                actionMenuRef.current?.querySelector('button')?.focus();
-              }
-            }}
-          >
-            <button
-              type="button"
-              onClick={() => setShowActionMenu((s) => !s)}
-              disabled={isLoading}
-              className="flex h-11 w-11 items-center justify-center rounded-full transition-all duration-100 hover:opacity-80 active:scale-95 focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-40"
-              style={{
-                background: 'var(--surface-secondary)',
-                color: 'var(--color-accent)',
-              }}
-              title={t('query.actionMenu')}
-              aria-label={t('query.actionMenu')}
-              aria-expanded={showActionMenu}
-              aria-controls="query-action-menu"
-            >
-              <Bot size={18} />
-            </button>
-
-            {showActionMenu && (
-              <div
-                id="query-action-menu"
-                className="absolute bottom-full left-0 z-50 mb-1 w-60 overflow-hidden rounded-2xl border shadow-lg"
-                style={{
-                  background: 'var(--bg-2)',
-                  borderColor: 'var(--border)',
-                  maxHeight: 300,
-                  overflowY: 'auto',
-                }}
-              >
-                <button
-                  type="button"
-                  disabled={isLoading}
-                  onClick={() => {
-                    setShowActionMenu(false);
-                    setShowImport(true);
-                  }}
-                  className="flex min-h-11 w-full items-center gap-2 px-3 py-2.5 text-left text-xs font-medium transition-all duration-100 hover:opacity-70 focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                  style={{ color: 'var(--fg)', borderBottom: '1px solid var(--border)' }}
-                >
-                  <Import size={13} style={{ color: 'var(--color-accent)' }} />
-                  {t('ingest.dialogTitle')}
-                </button>
-
-                <div className="border-b px-2 py-2" role="group" aria-label={t('query.queryMode')}>
-                  <div className="px-1 pb-1.5 text-xs font-medium" style={{ color: 'var(--fg-muted)' }}>
-                    {t('query.queryMode')}
-                  </div>
-                  <div className="grid grid-cols-2 gap-1" role="radiogroup" aria-label={t('query.queryMode')}>
-                    {(['standard', 'faithful'] as const).map((mode) => {
-                      const selected = queryMode === mode;
-                      const label = mode === 'standard' ? t('query.modeStandard') : t('query.modeFaithful');
-                      const hint = mode === 'standard' ? t('query.modeStandardHint') : t('query.modeFaithfulHint');
-                      return (
-                        <button
-                          key={mode}
-                          type="button"
-                          role="radio"
-                          aria-checked={selected}
-                          disabled={isLoading}
-                          title={hint}
-                          onClick={() => setQueryMode(mode)}
-                          className="min-h-11 rounded-md px-2 py-1.5 text-left text-xs transition-opacity hover:opacity-80 focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                          style={{
-                            color: 'var(--fg)',
-                            border: `1px solid ${selected ? 'var(--color-accent)' : 'var(--border)'}`,
-                            background: selected ? 'var(--color-accent-glow)' : 'transparent',
-                          }}
-                        >
-                          <span className="flex items-center gap-1.5 font-medium">
-                            <span
-                              className="inline-flex h-3 w-3 items-center justify-center rounded-full border"
-                              style={{ borderColor: selected ? 'var(--color-accent)' : 'var(--fg-muted)' }}
-                              aria-hidden="true"
-                            >
-                              {selected && (
-                                <span className="h-1.5 w-1.5 rounded-full" style={{ background: 'var(--color-accent)' }} />
-                              )}
-                            </span>
-                            {label}
-                          </span>
-                          <span className="mt-0.5 block text-[10px]" style={{ color: 'var(--fg-muted)' }}>
-                            {hint}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {profiles.length > 0 && (
-                  <>
-                    <div className="px-3 py-2 text-xs font-medium" style={{ color: 'var(--fg-muted)' }}>
-                      {t('common.selectModel')}
-                    </div>
-                    {profiles.map((p) => {
-                      const isSelected = p.id === selectedProfileId;
-                      return (
-                        <button
-                          key={p.id}
-                          type="button"
-                          disabled={isLoading}
-                          onClick={() => {
-                            setSelectedProfileId(p.id);
-                            setShowActionMenu(false);
-                          }}
-                          className="flex min-h-11 w-full flex-col px-3 py-2 text-left text-xs transition-all duration-100 hover:opacity-70 focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                          style={{
-                            color: 'var(--fg)',
-                            fontWeight: isSelected ? 600 : undefined,
-                            background: isSelected ? 'var(--color-accent-glow)' : undefined,
-                          }}
-                        >
-                          <span className="font-medium">{p.name}</span>
-                          <span className="truncate" style={{ color: 'var(--fg-muted)', fontSize: 10 }}>
-                            {p.model}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </>
-                )}
-              </div>
-            )}
-          </div>
+                  <span className="truncate">@{ws.name}</span>
+                  <button
+                    type="button"
+                    onClick={() => setTaggedWorkspaces((prev) => prev.filter((w) => w.id !== ws.id))}
+                    className="shrink-0 transition-opacity hover:opacity-70"
+                    aria-label={t('common.close')}
+                  >
+                    <X size={11} />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
 
           {/* @-mention workspace dropdown */}
           {mentionQuery !== null && mentionCandidates.length > 0 && (
             <div
-              className="absolute bottom-full left-12 z-50 mb-1 w-56 overflow-hidden rounded-2xl border shadow-lg"
+              className="animate-dropup absolute bottom-full left-0 z-50 mb-2 w-full max-w-72 overflow-hidden rounded-2xl border shadow-lg"
               style={{ background: 'var(--bg-2)', borderColor: 'var(--border)' }}
               role="listbox"
             >
@@ -887,20 +790,21 @@ export function ConversationPanel({
                     e.preventDefault();
                     selectMention(ws);
                   }}
-                  className="flex w-full items-center px-3 py-2 text-left text-xs transition-all duration-100"
+                  className="flex w-full items-center px-3 py-2 text-left text-xs"
                   style={{
                     color: 'var(--fg)',
                     background: idx === mentionIndex ? 'var(--color-accent-glow)' : undefined,
                   }}
                 >
-                  @{ws.name}
+                  <span className="truncate">@{ws.name}</span>
                 </button>
               ))}
             </div>
           )}
 
-          <input
+          <textarea
             ref={inputRef}
+            rows={1}
             value={input}
             onChange={(e) => {
               setInput(e.target.value);
@@ -911,56 +815,152 @@ export function ConversationPanel({
                 if (e.key === 'ArrowDown') {
                   e.preventDefault();
                   setMentionIndex((i) => (i + 1) % mentionCandidates.length);
-                } else if (e.key === 'ArrowUp') {
+                  return;
+                }
+                if (e.key === 'ArrowUp') {
                   e.preventDefault();
                   setMentionIndex((i) => (i - 1 + mentionCandidates.length) % mentionCandidates.length);
-                } else if (e.key === 'Enter' || e.key === 'Tab') {
+                  return;
+                }
+                if (e.key === 'Enter' || e.key === 'Tab') {
                   e.preventDefault();
                   selectMention(mentionCandidates[mentionIndex]!);
-                } else if (e.key === 'Escape') {
-                  setMentionQuery(null);
+                  return;
                 }
+                if (e.key === 'Escape') {
+                  setMentionQuery(null);
+                  return;
+                }
+              }
+              // Enter also confirms a Chinese IME candidate, and that must not send the message.
+              if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && e.keyCode !== 229) {
+                e.preventDefault();
+                e.currentTarget.form?.requestSubmit();
               }
             }}
             placeholder={t('query.placeholder')}
-            className="h-11 min-w-0 flex-1 rounded-full border px-4 text-sm outline-none focus:border-[var(--color-accent)]"
-            style={{
-              background: 'var(--surface-secondary)',
-              borderColor: 'transparent',
-              color: 'var(--fg)',
-            }}
+            aria-label={t('query.placeholder')}
+            className="block w-full resize-none bg-transparent px-3.5 pb-1 pt-3 text-base leading-6 outline-none sm:text-sm"
+            style={{ color: 'var(--fg)', maxHeight: COMPOSER_MAX_HEIGHT }}
             disabled={driveReconnectPending}
           />
-          {isLoading ? (
+
+          <div className="flex items-center gap-1 px-2 pb-2">
             <button
               type="button"
-              onClick={stopStreaming}
-                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full focus-visible:outline-2 focus-visible:outline-offset-2"
-              style={{ background: 'var(--surface-secondary)', color: 'var(--fg)' }}
-              aria-label={t('query.stop')}
-              title={t('query.stop')}
+              onClick={() => setShowImport(true)}
+              disabled={isLoading}
+              className="composer-tool h-9 w-9 shrink-0 justify-center"
+              title={t('ingest.dialogTitle')}
+              aria-label={t('ingest.dialogTitle')}
             >
-              <Square size={14} />
+              <Plus size={18} />
             </button>
-          ) : (
-            <button
-              type="submit"
-              disabled={driveReconnectPending || !input.trim()}
-              aria-label={t('query.send')}
-              title={t('query.send')}
-              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-50"
-              style={{ background: 'var(--color-accent)', color: 'var(--on-accent)' }}
+
+            {/* Not positioned, so the menu anchors to the card and stays inside a narrow panel */}
+            <div
+              className="min-w-0"
+              ref={actionMenuRef}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') {
+                  setShowActionMenu(false);
+                  actionMenuRef.current?.querySelector('button')?.focus();
+                }
+              }}
             >
-              <Send size={16} />
-            </button>
-          )}
+              <button
+                type="button"
+                onClick={() => setShowActionMenu((open) => !open)}
+                disabled={isLoading}
+                className="composer-tool h-9 min-w-0 max-w-full gap-1 px-2 text-xs"
+                title={t('query.actionMenu')}
+                aria-label={t('query.actionMenu')}
+                aria-expanded={showActionMenu}
+                aria-controls="query-action-menu"
+              >
+                <span className="truncate">
+                  {selectedProfile?.name ?? t('query.modeStandard')}
+                  {queryMode === 'faithful' && ` · ${t('query.modeFaithful')}`}
+                </span>
+                <ChevronDown size={13} className="shrink-0" />
+              </button>
+
+              {showActionMenu && (
+                <div
+                  id="query-action-menu"
+                  className="animate-dropup absolute bottom-full left-0 z-50 mb-2 w-full max-w-80 overflow-y-auto rounded-2xl border p-1 shadow-lg"
+                  style={{ background: 'var(--bg-2)', borderColor: 'var(--border)', maxHeight: 360 }}
+                >
+                  {profiles.length > 0 && (
+                    <div role="radiogroup" aria-label={t('common.selectModel')}>
+                      <div className="px-2.5 pb-1 pt-1.5 text-xs" style={{ color: 'var(--fg-muted)' }}>
+                        {t('common.selectModel')}
+                      </div>
+                      {profiles.map((p) => (
+                        <ComposerOption
+                          key={p.id}
+                          label={p.name}
+                          hint={p.model}
+                          selected={p.id === selectedProfileId}
+                          onSelect={() => {
+                            setSelectedProfileId(p.id);
+                            setShowActionMenu(false);
+                          }}
+                        />
+                      ))}
+                      <div className="mx-2.5 my-1 border-t" style={{ borderColor: 'var(--border)' }} />
+                    </div>
+                  )}
+                  <div role="radiogroup" aria-label={t('query.queryMode')}>
+                    <div className="px-2.5 pb-1 pt-1.5 text-xs" style={{ color: 'var(--fg-muted)' }}>
+                      {t('query.queryMode')}
+                    </div>
+                    {QUERY_MODES.map((mode) => (
+                      <ComposerOption
+                        key={mode}
+                        label={mode === 'standard' ? t('query.modeStandard') : t('query.modeFaithful')}
+                        hint={mode === 'standard' ? t('query.modeStandardHint') : t('query.modeFaithfulHint')}
+                        selected={queryMode === mode}
+                        onSelect={() => {
+                          setQueryMode(mode);
+                          setShowActionMenu(false);
+                        }}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {isLoading ? (
+              <button
+                type="button"
+                onClick={stopStreaming}
+                className="composer-send ml-auto"
+                style={{ background: 'var(--fg)', color: 'var(--bg)' }}
+                aria-label={t('query.stop')}
+                title={t('query.stop')}
+              >
+                <Square size={12} fill="currentColor" />
+              </button>
+            ) : (
+              <button
+                type="submit"
+                disabled={driveReconnectPending || !input.trim()}
+                aria-label={t('query.send')}
+                title={t('query.send')}
+                className="composer-send ml-auto"
+                style={
+                  input.trim()
+                    ? { background: 'var(--color-accent)', color: 'var(--on-accent)' }
+                    : { background: 'var(--border)', color: 'var(--fg-muted)' }
+                }
+              >
+                <ArrowUp size={18} strokeWidth={2.25} />
+              </button>
+            )}
+          </div>
         </div>
-        {(selectedProfile || queryMode) && (
-          <p className="mt-1 truncate text-xs" style={{ color: 'var(--fg-muted)' }}>
-            {selectedProfile?.name} {selectedProfile ? '· ' : ''}
-            {queryMode === 'standard' ? t('query.modeStandard') : t('query.modeFaithful')}
-          </p>
-        )}
       </form>
 
       {showImport && (

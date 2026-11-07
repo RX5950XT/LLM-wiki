@@ -7,8 +7,9 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.runtime.DisposableEffect
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,23 +25,25 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Help
 import androidx.compose.material.icons.automirrored.filled.LibraryBooks
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material.icons.automirrored.filled.Help
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.ChatBubbleOutline
@@ -48,6 +51,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.MoreVert
@@ -55,7 +59,6 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
@@ -64,12 +67,12 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -80,8 +83,9 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.NavigationDrawerItem
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -89,11 +93,14 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -105,19 +112,18 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.TextFieldValue
@@ -128,17 +134,17 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.llmwiki.R
-import com.llmwiki.data.parseDriveReconnectSource
-import com.llmwiki.data.LlmProfile
-import com.llmwiki.data.IngestJobRow
-import java.time.OffsetDateTime
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 import com.llmwiki.data.GraphInsights
+import com.llmwiki.data.IngestJobRow
+import com.llmwiki.data.LlmProfile
 import com.llmwiki.data.SearchResult
 import com.llmwiki.data.SourceListItem
 import com.llmwiki.data.WorkspaceRow
+import com.llmwiki.data.parseDriveReconnectSource
 import com.llmwiki.data.room.PageEntity
+import java.time.OffsetDateTime
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.launch
 
 private val importMimeTypes = arrayOf(
@@ -1436,6 +1442,8 @@ private fun ChatBottomSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val listState = rememberLazyListState()
     var showActionMenu by remember { mutableStateOf(false) }
+    var showImportMenu by remember { mutableStateOf(false) }
+    var composerFocused by remember { mutableStateOf(false) }
 
     // "@..." fragment at the end of the input opens the workspace tag menu
     val mentionRegex = remember { Regex("(?:^|\\s)@([^\\s@]*)$") }
@@ -1464,22 +1472,6 @@ private fun ChatBottomSheet(
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 Text(stringResource(R.string.wiki_chat), style = MaterialTheme.typography.titleMedium)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        text = stringResource(
-                            if (selectedQueryMode == QUERY_MODE_FAITHFUL) {
-                                R.string.query_mode_faithful
-                            } else {
-                                R.string.query_mode_standard
-                            },
-                        ),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                    val selectedName = profiles.firstOrNull { it.id == selectedProfileId }?.name
-                        ?: profiles.firstOrNull { it.isDefault }?.name
-                    selectedName?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary) }
-                }
             }
             HorizontalDivider()
 
@@ -1558,8 +1550,6 @@ private fun ChatBottomSheet(
                 }
             }
 
-            HorizontalDivider()
-
             // @-tagged workspace chips (extra context for the next question)
             if (taggedWorkspaceIds.isNotEmpty()) {
                 Row(
@@ -1609,181 +1599,230 @@ private fun ChatBottomSheet(
                 }
             }
 
-            Row(
-                Modifier.fillMaxWidth().padding(8.dp),
-                // Bottom-aligned so the buttons stay put when the input grows to several lines
-                verticalAlignment = Alignment.Bottom,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            // One card holding the text, then the things that act on it (same layout as Web).
+            val composerProfile = profiles.firstOrNull { it.id == selectedProfileId }
+                ?: profiles.firstOrNull { it.isDefault }
+            val modeLabel = stringResource(
+                if (selectedQueryMode == QUERY_MODE_FAITHFUL) R.string.query_mode_faithful else R.string.query_mode_standard,
+            )
+            val composerLabel = when {
+                composerProfile == null -> modeLabel
+                selectedQueryMode == QUERY_MODE_FAITHFUL -> "${composerProfile.name} · $modeLabel"
+                else -> composerProfile.name
+            }
+            Surface(
+                modifier = Modifier.fillMaxWidth().padding(start = 12.dp, top = 8.dp, end = 12.dp, bottom = 12.dp),
+                shape = RoundedCornerShape(24.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                border = BorderStroke(
+                    1.dp,
+                    if (composerFocused) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
+                ),
             ) {
-                // Action menu: import content/file + model selection
-                Box(Modifier.padding(vertical = 4.dp)) {
-                    IconButton(
-                        onClick = { showActionMenu = true },
-                        modifier = Modifier.size(48.dp),
-                        colors = IconButtonDefaults.iconButtonColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                            contentColor = MaterialTheme.colorScheme.primary,
+                Column {
+                    TextField(
+                        value = input,
+                        onValueChange = onInputChange,
+                        placeholder = { Text(stringResource(R.string.wiki_chat_input_hint)) },
+                        modifier = Modifier.fillMaxWidth().onFocusChanged { composerFocused = it.isFocused },
+                        maxLines = 6,
+                        colors = TextFieldDefaults.colors(
+                            focusedContainerColor = Color.Transparent,
+                            unfocusedContainerColor = Color.Transparent,
+                            disabledContainerColor = Color.Transparent,
+                            focusedIndicatorColor = Color.Transparent,
+                            unfocusedIndicatorColor = Color.Transparent,
+                            disabledIndicatorColor = Color.Transparent,
                         ),
+                        keyboardOptions = KeyboardOptions(
+                            capitalization = KeyboardCapitalization.Sentences,
+                            imeAction = ImeAction.Send,
+                        ),
+                        keyboardActions = KeyboardActions(onSend = {
+                            if (input.isNotBlank() && !isLoading) onSend(input)
+                        }),
+                    )
+                    Row(
+                        Modifier.fillMaxWidth().padding(start = 4.dp, end = 8.dp, bottom = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Icon(
-                            Icons.Default.SmartToy,
-                            contentDescription = stringResource(R.string.wiki_chat_menu),
-                            modifier = Modifier.size(22.dp),
-                        )
-                    }
-                    DropdownMenu(
-                        expanded = showActionMenu,
-                        onDismissRequest = { showActionMenu = false },
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.wiki_import_content)) },
-                            leadingIcon = { Icon(Icons.Default.Add, contentDescription = null) },
-                            onClick = {
-                                showActionMenu = false
-                                onImportContent()
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.wiki_import_file)) },
-                            leadingIcon = { Icon(Icons.Default.AttachFile, contentDescription = null) },
-                            onClick = {
-                                showActionMenu = false
-                                onImportFile()
-                            },
-                        )
-                        HorizontalDivider()
-                        Text(
-                            stringResource(R.string.query_mode_title),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
-                        )
-                        DropdownMenuItem(
-                            text = {
-                                Column {
-                                    Text(stringResource(R.string.query_mode_standard))
-                                    Text(
-                                        stringResource(R.string.query_mode_standard_hint),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                            },
-                            onClick = {
-                                onQueryModeSelected(QUERY_MODE_STANDARD)
-                                showActionMenu = false
-                            },
-                            trailingIcon = {
-                                if (selectedQueryMode == QUERY_MODE_STANDARD) {
-                                    Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
-                                }
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = {
-                                Column {
-                                    Text(stringResource(R.string.query_mode_faithful))
-                                    Text(
-                                        stringResource(R.string.query_mode_faithful_hint),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                            },
-                            onClick = {
-                                onQueryModeSelected(QUERY_MODE_FAITHFUL)
-                                showActionMenu = false
-                            },
-                            trailingIcon = {
-                                if (selectedQueryMode == QUERY_MODE_FAITHFUL) {
-                                    Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
-                                }
-                            },
-                        )
-                        if (profiles.isNotEmpty()) {
-                            HorizontalDivider()
-                            Text(
-                                stringResource(R.string.wiki_select_model),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
-                            )
-                            profiles.forEach { profile ->
+                        Box {
+                            IconButton(
+                                onClick = { showImportMenu = true },
+                                modifier = Modifier.size(44.dp),
+                                colors = IconButtonDefaults.iconButtonColors(
+                                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                ),
+                            ) {
+                                Icon(
+                                    Icons.Default.Add,
+                                    contentDescription = stringResource(R.string.wiki_import_content),
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = showImportMenu,
+                                onDismissRequest = { showImportMenu = false },
+                            ) {
                                 DropdownMenuItem(
-                                    text = {
-                                        Column {
-                                            Text(profile.name)
-                                            Text(
-                                                profile.model,
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            )
-                                        }
-                                    },
+                                    text = { Text(stringResource(R.string.wiki_import_content)) },
+                                    leadingIcon = { Icon(Icons.Default.Add, contentDescription = null) },
                                     onClick = {
-                                        onProfileSelected(profile.id)
+                                        showImportMenu = false
+                                        onImportContent()
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.wiki_import_file)) },
+                                    leadingIcon = { Icon(Icons.Default.AttachFile, contentDescription = null) },
+                                    onClick = {
+                                        showImportMenu = false
+                                        onImportFile()
+                                    },
+                                )
+                            }
+                        }
+
+                        Box(Modifier.weight(1f)) {
+                            Row(
+                                Modifier
+                                    .heightIn(min = 44.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .clickable(onClickLabel = stringResource(R.string.wiki_chat_menu)) { showActionMenu = true }
+                                    .padding(horizontal = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    composerLabel,
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f, fill = false),
+                                )
+                                Icon(
+                                    Icons.Default.KeyboardArrowDown,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = showActionMenu,
+                                onDismissRequest = { showActionMenu = false },
+                            ) {
+                                if (profiles.isNotEmpty()) {
+                                    Text(
+                                        stringResource(R.string.wiki_select_model),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                                    )
+                                    profiles.forEach { profile ->
+                                        ComposerMenuOption(
+                                            label = profile.name,
+                                            hint = profile.model,
+                                            selected = profile.id == composerProfile?.id,
+                                            onClick = {
+                                                onProfileSelected(profile.id)
+                                                showActionMenu = false
+                                            },
+                                        )
+                                    }
+                                    HorizontalDivider()
+                                }
+                                Text(
+                                    stringResource(R.string.query_mode_title),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                                )
+                                ComposerMenuOption(
+                                    label = stringResource(R.string.query_mode_standard),
+                                    hint = stringResource(R.string.query_mode_standard_hint),
+                                    selected = selectedQueryMode == QUERY_MODE_STANDARD,
+                                    onClick = {
+                                        onQueryModeSelected(QUERY_MODE_STANDARD)
                                         showActionMenu = false
                                     },
-                                    trailingIcon = {
-                                        if (profile.id == selectedProfileId ||
-                                            (selectedProfileId == null && profile.isDefault)) {
-                                            Icon(
-                                                Icons.Default.Check,
-                                                contentDescription = null,
-                                                modifier = Modifier.size(16.dp),
-                                                tint = MaterialTheme.colorScheme.primary,
-                                            )
-                                        }
+                                )
+                                ComposerMenuOption(
+                                    label = stringResource(R.string.query_mode_faithful),
+                                    hint = stringResource(R.string.query_mode_faithful_hint),
+                                    selected = selectedQueryMode == QUERY_MODE_FAITHFUL,
+                                    onClick = {
+                                        onQueryModeSelected(QUERY_MODE_FAITHFUL)
+                                        showActionMenu = false
                                     },
+                                )
+                            }
+                        }
+
+                        if (isLoading) {
+                            IconButton(
+                                onClick = onStop,
+                                modifier = Modifier.size(44.dp),
+                                colors = IconButtonDefaults.iconButtonColors(
+                                    containerColor = MaterialTheme.colorScheme.onSurface,
+                                    contentColor = MaterialTheme.colorScheme.surface,
+                                ),
+                            ) {
+                                Icon(
+                                    Icons.Default.Stop,
+                                    contentDescription = stringResource(R.string.chat_stop),
+                                    modifier = Modifier.size(20.dp),
+                                )
+                            }
+                        } else {
+                            IconButton(
+                                onClick = { if (input.isNotBlank()) onSend(input) },
+                                enabled = input.isNotBlank(),
+                                modifier = Modifier.size(44.dp),
+                                colors = IconButtonDefaults.iconButtonColors(
+                                    containerColor = MaterialTheme.colorScheme.primary,
+                                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                                    disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                    disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                ),
+                            ) {
+                                Icon(
+                                    Icons.Default.ArrowUpward,
+                                    contentDescription = stringResource(R.string.wiki_send),
+                                    modifier = Modifier.size(20.dp),
                                 )
                             }
                         }
                     }
                 }
-
-                OutlinedTextField(
-                    value = input,
-                    onValueChange = onInputChange,
-                    placeholder = { Text(stringResource(R.string.wiki_chat_input_hint)) },
-                    modifier = Modifier.weight(1f).heightIn(min = 56.dp),
-                    maxLines = 4,
-                    shape = RoundedCornerShape(28.dp),
-                    colors = softFieldColors(),
-                    keyboardOptions = KeyboardOptions(
-                        capitalization = KeyboardCapitalization.Sentences,
-                        imeAction = ImeAction.Send,
-                    ),
-                    keyboardActions = KeyboardActions(onSend = {
-                        if (input.isNotBlank() && !isLoading) onSend(input)
-                    }),
-                )
-                if (isLoading) {
-                    IconButton(
-                        onClick = onStop,
-                        modifier = Modifier.padding(vertical = 4.dp).size(48.dp),
-                        colors = IconButtonDefaults.iconButtonColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                            contentColor = MaterialTheme.colorScheme.onSurface,
-                        ),
-                    ) {
-                        Icon(Icons.Default.Stop, contentDescription = stringResource(R.string.chat_stop))
-                    }
-                } else IconButton(
-                    onClick = { if (input.isNotBlank() && !isLoading) onSend(input) },
-                    enabled = input.isNotBlank() && !isLoading,
-                    modifier = Modifier.padding(vertical = 4.dp).size(48.dp),
-                    colors = IconButtonDefaults.iconButtonColors(
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary,
-                        disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                        disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                    ),
-                ) {
-                    Icon(Icons.AutoMirrored.Filled.Send, contentDescription = stringResource(R.string.wiki_send))
-                }
             }
         }
     }
+}
+
+@Composable
+private fun ComposerMenuOption(label: String, hint: String, selected: Boolean, onClick: () -> Unit) {
+    DropdownMenuItem(
+        text = {
+            Column {
+                Text(label)
+                Text(
+                    hint,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        onClick = onClick,
+        trailingIcon = {
+            if (selected) {
+                Icon(
+                    Icons.Default.Check,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+            }
+        },
+    )
 }
 
 // ── Chat bubble ────────────────────────────────────────────────────────────

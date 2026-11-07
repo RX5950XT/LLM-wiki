@@ -159,7 +159,7 @@ Android 呼叫與 Web 相同的後端 API（`/api/ingest`、`/api/query`、`/api
 - **Phase 16** ✅：維護合一 + AI 真權限 — 健康檢查與整理去重合併成單一按鈕／單一 pipeline（`/api/organize`），不再產生報告頁；維護 job 改 `confirmDestructive: false` 且保留 workspace 生命週期工具（真的能合併、刪除、改名、重排），新增 `reorderWorkspaces` AI 工具；刪除 `/api/lint` route、`vercel.json` cron 與 `CRON_SECRET`；`_schema/lint.md` 改為「檢查並直接修正」的清單並注入維護 pipeline
 - **Phase 15** ✅：連結修復 + 維護整合 + 來源重跑 — wiki 連結伺服器咽喉點 alias fallback（`lib/wiki/slug.ts` + `/api/pages` GET，修 `[PAGE_NOT_FOUND]`）、圖譜邊 alias 解析去幽靈節點、lint job 化（migration `0016`，與 organize 共用 agent_jobs 鎖）、維護按鈕整合（Web `Wrench` 選單 + 進度 pill + localStorage 背景續跑；Android `Build` 選單）、來源重新整合（`/api/sources/[id]/reingest`）
 - **Phase 17** ✅（2026-09-01）：六項知識編譯能力——兩階段可恢復 Ingest queue（SHA unchanged、pause/resume/retry、checkpoint）、安全 allowlist/fencing/CAS 寫入、多格式檔案解析（PDF/DOCX/PPTX/EPUB/text/image，2 MiB）、Faithful raw-source query、Graph Insights；Web/Android 對齊，Android APK `0.7.0`（versionCode `7`）。production 已套用並驗證 `recoverable_ingest` migration 的欄位與索引。
-- **Phase 18** 🚧（2026-11-07）：匯入持久化——送出先存檔、pg_cron 續跑、失敗自動重試、App 被殺仍會上傳；Android `0.8.1`（versionCode `13`）。背景流程已實測；ChatGPT `strict:false` 是否解決 0 頁待額度重置後驗證（見 `CONTEXT.md`）。
+- **Phase 18** 🚧（2026-11-07）：匯入持久化——送出先存檔、pg_cron 續跑、失敗自動重試、App 被殺仍會上傳；Android `0.8.2`（versionCode `14`，含新對話輸入區）。背景流程已實測；ChatGPT `strict:false` 是否解決 0 頁待額度重置後驗證（見 `CONTEXT.md`）。
 
 ## 安全注意事項（Phase 10）
 
@@ -254,7 +254,7 @@ apps/android/app/src/main/java/com/llmwiki/
 - Android Wiki drawer 已改為工作區下拉選單；「建立工作區」整合進下拉內，檔案匯入除了文字/URL 也支援從手機選取文字檔直接 ingest
 - Android workspace 下拉選單需提供切換、新建、重新命名、刪除；刪除時清掉該 workspace 的 Room cache 並選下一個 workspace 或回建立頁
 - Android workspace 下拉選單的切換區與 rename/delete action 區必須分離，且 action hit target 至少 44dp；否則容易誤觸成切換 workspace
-- Android Chat 模型選擇用模型/聊天語意 icon（例如 `SmartToy`），不要用設定齒輪；頁面鎖定狀態需以 `Lock` / `LockOpen` 區分，因為鎖頭本身可點擊切換
+- Android 頁面鎖定狀態需以 `Lock` / `LockOpen` 區分，因為鎖頭本身可點擊切換
 - Android `MarkdownViewer` 用 Markwon + `TextView` 時必須在 Compose update 內同步 `MaterialTheme` 的文字與連結顏色，否則深色模式會出現黑底黑字
 - Android FAB 要明確設定 `containerColor` / `contentColor`，不要依賴預設 primaryContainer；淺色模式容易出現不自然白色塊
 - Web API 若要同時服務 Web cookie 與 Android Bearer token，route 需經 `lib/supabase/request.ts` 取 user，不能只靠 `lib/supabase/server.ts`
@@ -280,7 +280,7 @@ apps/android/app/src/main/java/com/llmwiki/
 - `ingestUrl()` / `ingestText()` / `ingestFile()` 只把工作排進 `IngestUploadWorker`，由它帶 Supabase session accessToken 呼叫 `/api/ingest`
 - Web API 端點位址由 `BuildConfig.WEB_API_BASE_URL` 決定（從 `local.properties` 的 `WEB_API_BASE_URL` 或 `NEXT_PUBLIC_SITE_URL` 注入）
 - Chat 串流協定：POST `/api/query` → `text/plain` stream，結尾附 `\x00CITATIONS\x00[...]`（可再接 `\x00ACTIONS\x00[...]`）；Android 用 Ktor `bodyAsChannel()` + `readUTF8Line()` 消費，`parseStreamMeta()` 解析（未知 block 忽略）
-- Android chat sheet 的 `SmartToy` 按鈕是**多功能選單**（導入內容 / 從檔案匯入 / 選擇模型）；FAB 只剩一顆對話按鈕，匯入不再有獨立 FAB
+- Android chat sheet 的「＋」是導入選單（導入內容 / 從檔案匯入），模型晶片是模型與回答模式選單；FAB 只剩一顆對話按鈕，匯入不再有獨立 FAB
 - Android 破壞性確認卡片渲染在 `ChatBubble` 內；`executeProposal(messageIndex, proposalIndex)` 走 `/api/agent/execute`，刪除工作區成功後要清該 workspace 的 Room cache + cancel SyncWorker + `refreshWorkspaces()`
 - Android 設定頁的 AI 權限開關寫 `supabase.auth.updateUser { data { put("ai_confirm_destructive", …) } }`（與 Web 共用同一個 user_metadata 欄位）；LLM profile 編輯走 `PATCH /api/settings/profiles`，api_key 留空＝保留原金鑰
 - Lock toggle：PATCH `/api/pages/{wid}/{slug}` `{locked_by_human:bool}`，同步更新 Room cache（`PageDao.updateLock`）
@@ -363,9 +363,9 @@ GCP 專案 `my-project-1750440589634`（LLM Wiki）的 OAuth 同意畫面必須�
 
 ## 統一導入入口（Phase 14）
 
-導入不再有獨立輸入框。入口統一在對話輸入框左側的 `Bot` 多功能選單：
-- Web：選單 →「導入內容」→ `ImportDialog`（`components/wiki/import-dialog.tsx`）：貼上文字/URL/Markdown、拖曳檔案、選檔（多檔佇列）
-- Android：Chat sheet 的 `SmartToy` 選單 →「導入內容」/「從檔案匯入」
+導入不再有獨立輸入框。入口統一在對話輸入區工具列的「＋」：
+- Web：「＋」→ `ImportDialog`（`components/wiki/import-dialog.tsx`）：貼上文字/URL/Markdown、拖曳檔案、選檔（多檔佇列）
+- Android：Chat sheet 的「＋」→「導入內容」/「從檔案匯入」
 
 自動偵測輸入型別：URL（`http://` / `https://`）→ `{ kind: 'url' }`；其他 → `{ kind: 'text', title: 第一非空行 }`。text content 上限 2 MB（`MAX_TEXT_LENGTH`，與 client 端一致）。
 
@@ -437,9 +437,9 @@ Android 匯入走 `IngestUploadWorker`（WorkManager expedited）：內容先寫
 - 觸發 `supabase.auth.signInWithOAuth` with `prompt: consent, access_type: offline`
 - 重授權後 auth/callback 重新儲存 refresh token
 
-## 模型選擇器（Bot 多功能選單）
+## 對話輸入區與模型選擇器
 
-Conversation panel 輸入框左側的 `Bot` 按鈕是**多功能選單**：「導入內容」＋「選擇模型」（Android：`SmartToy` icon，含「從檔案匯入」）。
+對話輸入區是**單一卡片**（Web `conversation-panel.tsx`、Android `ChatBottomSheet`，版面相同）：上方是會長高的輸入框，下方工具列左邊是「＋」（導入）與模型晶片（顯示目前模型，非預設模式才加上模式名；點開選模型與回答模式），右邊是送出／停止。Web 的 Enter 送出、Shift+Enter 換行，**Enter 必須排除 `isComposing`，否則選中文字時會誤送**。新功能入口請加進這兩個選單，不要再加常駐按鈕。
 - profile 列表來自 `/api/settings/profiles`，預設選中 `is_default=true`
 - Query / Ingest / Organize API 支援可選 `profile_id` override，會檢查 `owner_id` 權限
 - 若使用者未設定任何 profile，選單只留導入項，API fallback 至 workspace 綁定的 default profile

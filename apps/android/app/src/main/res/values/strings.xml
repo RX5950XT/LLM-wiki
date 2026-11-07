@@ -83,7 +83,7 @@
     <string name="wiki_delete_note">Delete note</string>
     <string name="wiki_delete_note_confirm">Delete \"%1$s\"? This cannot be undone.</string>
     <string name="wiki_select_model">Select model</string>
-    <string name="wiki_chat_menu">Model &amp; import</string>
+    <string name="wiki_chat_menu">Model &amp; answer mode</string>
     <string name="query_mode_title">Answer mode</string>
     <string name="query_mode_standard">Wiki answer</string>
     <string name="query_mode_standard_hint">Use your maintained wiki</string>

@@ -83,7 +83,7 @@
     <string name="wiki_delete_note">刪除筆記</string>
     <string name="wiki_delete_note_confirm">刪除「%1$s」？此動作無法復原。</string>
     <string name="wiki_select_model">選擇模型</string>
-    <string name="wiki_chat_menu">模型與導入</string>
+    <string name="wiki_chat_menu">模型與回答模式</string>
     <string name="query_mode_title">回答模式</string>
     <string name="query_mode_standard">Wiki 回答</string>
     <string name="query_mode_standard_hint">使用已整理的 Wiki</string>

@@ -132,8 +132,8 @@ GOOGLE_OAUTH_CLIENT_SECRET=
 
 ## 關鍵功能
 
-### Bot 多功能選單（模型 + 導入）
-- `conversation-panel.tsx` 輸入框左側 `Bot` 按鈕 =「導入內容」＋「選擇模型」（Android chat sheet 的 `SmartToy` 同理，另有「從檔案匯入」）
+### 對話輸入區（導入 + 模型）
+- 對話輸入區是**單一卡片**（Web `conversation-panel.tsx`、Android `ChatBottomSheet`，版面相同）：上方是會長高的輸入框，下方工具列左邊是「＋」（導入）與模型晶片（顯示目前模型，非預設模式才加上模式名；點開選模型與回答模式），右邊是送出／停止。Web 的 Enter 送出、Shift+Enter 換行，**Enter 必須排除 `isComposing`，否則選中文字時會誤送**。新功能入口請加進這兩個選單，不要再加常駐按鈕。
 - profile 列表來自 `/api/settings/profiles`，預設選中 `is_default=true`
 - Query / Ingest / Organize API 支援 `profile_id` override，檢查 `owner_id` 權限
 - **不要再加獨立的導入輸入框**：舊版把導入 textarea 疊在對話輸入框上方，使用者會誤認成「輸入框重複顯示兩次」
@@ -291,7 +291,7 @@ Query API 文字串流結尾依序附加 `\x00CITATIONS\x00[...]`、`\x00ACTIONS
 - Android Wiki drawer 使用工作區下拉選單；建立工作區整合在下拉內，並支援從手機附加文字檔直接 ingest
 - Android workspace 下拉選單需提供切換、新建、重新命名、刪除；刪除時清掉該 workspace 的 Room cache 並選下一個 workspace 或回建立頁
 - Android workspace 下拉選單的切換區與 rename/delete action 區必須分離，且 action hit target 至少 44dp；否則容易誤觸成切換 workspace
-- Android Chat 模型選擇用模型/聊天語意 icon（例如 `SmartToy`），不要用設定齒輪；頁面鎖定狀態需以 `Lock` / `LockOpen` 區分，因為鎖頭本身可點擊切換
+- Android 頁面鎖定狀態需以 `Lock` / `LockOpen` 區分，因為鎖頭本身可點擊切換
 - Android `MarkdownViewer` 用 Markwon + `TextView` 時必須在 Compose update 內同步 `MaterialTheme` 的文字與連結顏色，否則深色模式會出現黑底黑字
 - Android FAB 要明確設定 `containerColor` / `contentColor`，不要依賴預設 primaryContainer；淺色模式容易出現不自然白色塊
 - Web API 若要服務 Android，需支援 `Authorization: Bearer <token>`；不要只依賴 cookie session
