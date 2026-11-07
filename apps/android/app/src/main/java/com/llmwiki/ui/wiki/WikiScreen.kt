@@ -131,6 +131,9 @@ import com.llmwiki.R
 import com.llmwiki.data.parseDriveReconnectSource
 import com.llmwiki.data.LlmProfile
 import com.llmwiki.data.IngestJobRow
+import java.time.OffsetDateTime
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import com.llmwiki.data.GraphInsights
 import com.llmwiki.data.SearchResult
 import com.llmwiki.data.SourceListItem
@@ -792,6 +795,44 @@ fun WikiScreen(
                 // dialog — an old failure must not pin a banner here forever (Web parity).
                 val hasActiveIngest = uiState.ingestLoading || uiState.activeIngestCount > 0
                 val hasPausedIngest = uiState.ingestJobs.any { it.status == "paused" }
+                val failureNotice = uiState.ingestFailureNotice
+                if (failureNotice != null && !hasActiveIngest && !hasPausedIngest) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.errorContainer,
+                        modifier = Modifier
+                            .heightIn(min = 44.dp)
+                            .clickable {
+                                showIngestQueueDialog = true
+                                wikiViewModel.loadIngestJobs()
+                            },
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = stringResource(
+                                    R.string.ingest_last_failed,
+                                    failureNotice.sourceTitle?.takeIf { it.isNotBlank() }
+                                        ?: stringResource(R.string.wiki_untitled),
+                                    failureNotice.error.orEmpty(),
+                                ),
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.weight(1f),
+                                maxLines = 3,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            IconButton(onClick = wikiViewModel::dismissIngestFailure) {
+                                Icon(
+                                    Icons.Default.Close,
+                                    contentDescription = stringResource(R.string.action_dismiss),
+                                    tint = MaterialTheme.colorScheme.onErrorContainer,
+                                )
+                            }
+                        }
+                    }
+                }
                 if (hasActiveIngest || hasPausedIngest) {
                     Surface(
                         color = MaterialTheme.colorScheme.secondaryContainer,
@@ -807,7 +848,7 @@ fun WikiScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
-                            if (hasActiveIngest) {
+                            if (hasActiveIngest && !uiState.ingestAllWaiting) {
                                 CircularProgressIndicator(
                                     modifier = Modifier.size(16.dp),
                                     strokeWidth = 2.dp,
@@ -823,6 +864,11 @@ fun WikiScreen(
                             }
                             Text(
                                 text = when {
+                                    uiState.ingestAllWaiting -> stringResource(
+                                        R.string.ingest_waiting_batch,
+                                        uiState.activeIngestCount,
+                                        uiState.ingestWaitingJob?.let { ingestWaitText(it) }.orEmpty(),
+                                    )
                                     uiState.activeIngestCount > 0 -> stringResource(
                                         R.string.ingest_running_batch,
                                         uiState.activeIngestCount,
@@ -830,6 +876,7 @@ fun WikiScreen(
                                         uiState.activeIngestDone,
                                         uiState.activeIngestFailed,
                                     )
+                                    uiState.ingestLoading -> stringResource(R.string.ingest_uploading)
                                     uiState.ingestProgress > 0 ->
                                         stringResource(R.string.ingest_running_progress, uiState.ingestProgress)
                                     hasPausedIngest && !hasActiveIngest ->
@@ -2032,6 +2079,21 @@ private fun SourcesListDialog(
 
 // ── Durable ingest queue ──────────────────────────────────────────────────
 
+/** Why the server parked a job and when it continues by itself (same wording as Web). */
+@Composable
+private fun ingestWaitText(job: IngestJobRow): String {
+    val time = job.nextAttemptAt?.let { raw ->
+        runCatching {
+            DateTimeFormatter.ofPattern("M/d HH:mm").withZone(ZoneId.systemDefault()).format(OffsetDateTime.parse(raw))
+        }.getOrNull()
+    }.orEmpty()
+    return when (job.waitReason) {
+        "usage_limit" -> stringResource(R.string.ingest_wait_usage_limit, time)
+        "continue" -> stringResource(R.string.ingest_wait_continue)
+        else -> stringResource(R.string.ingest_wait_retry, time)
+    }
+}
+
 @Composable
 private fun IngestQueueDialog(
     jobs: List<IngestJobRow>,
@@ -2109,6 +2171,7 @@ private fun IngestQueueDialog(
                                 else -> job.status
                             }
                             val phase = when (job.phase) {
+                                "intake" -> stringResource(R.string.ingest_phase_intake)
                                 "analysis" -> stringResource(R.string.ingest_phase_analysis)
                                 "writing" -> stringResource(R.string.ingest_phase_writing)
                                 "review" -> stringResource(R.string.ingest_phase_review)
@@ -2138,12 +2201,28 @@ private fun IngestQueueDialog(
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                 }
-                                job.error?.takeIf { it.isNotBlank() }?.let {
+                                job.workspaceName?.takeIf { it.isNotBlank() }?.let {
+                                    Text(
+                                        it,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                                if (job.isWaiting) {
+                                    Text(
+                                        ingestWaitText(job),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.tertiary,
+                                    )
+                                }
+                                job.error?.takeIf { it.isNotBlank() && (job.status == "failed" || job.waitReason == "retry") }?.let {
                                     Text(
                                         it,
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.error,
-                                        maxLines = 2,
+                                        maxLines = 4,
                                         overflow = TextOverflow.Ellipsis,
                                     )
                                 }
@@ -2158,6 +2237,14 @@ private fun IngestQueueDialog(
                                                 stringResource(R.string.ingest_action_in_progress),
                                                 style = MaterialTheme.typography.labelSmall,
                                             )
+                                        }
+                                        if (job.isWaiting) {
+                                            TextButton(
+                                                enabled = actionLoadingJobId == null && !isLoading,
+                                                onClick = { onAction(jobId, "retry") },
+                                            ) {
+                                                Text(stringResource(R.string.ingest_retry_now))
+                                            }
                                         }
                                         when (job.status) {
                                             "pending", "running" -> TextButton(

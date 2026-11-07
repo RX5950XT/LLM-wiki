@@ -1,6 +1,7 @@
 package com.llmwiki.ui.wiki
 
 import android.app.Application
+import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.android.gms.auth.api.signin.GoogleSignIn
@@ -33,6 +34,7 @@ import com.llmwiki.data.isDriveReconnectError
 import com.llmwiki.data.isSupabaseAuthProblem
 import com.llmwiki.data.room.AppDatabase
 import com.llmwiki.data.room.PageEntity
+import com.llmwiki.sync.IngestUploadWorker
 import com.llmwiki.sync.SyncWorker
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.postgrest.from
@@ -44,16 +46,11 @@ import io.ktor.client.request.header
 import io.ktor.client.request.patch
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
-import io.ktor.client.request.forms.MultiPartFormDataContent
-import io.ktor.client.request.forms.formData
-import io.ktor.client.request.forms.ChannelProvider
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsChannel
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
-import io.ktor.http.HttpHeaders
-import io.ktor.http.Headers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -82,11 +79,13 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
-import io.ktor.utils.io.jvm.javaio.toByteReadChannel
 import io.ktor.utils.io.jvm.javaio.toInputStream
 import android.net.Uri
-import java.io.FilterInputStream
-import java.io.InputStream
+import androidx.work.WorkInfo
+import androidx.work.WorkManager
+import java.io.File
+import java.time.OffsetDateTime
+import java.util.UUID
 
 internal fun isPageRequestCurrent(
     requestToken: Long,
@@ -153,6 +152,8 @@ private const val MAX_PAGE_HISTORY = 50
 const val QUERY_MODE_STANDARD = "standard"
 const val QUERY_MODE_FAITHFUL = "faithful"
 private const val MAX_IMPORT_BYTES = 2L * 1024L * 1024L
+private const val FAILURE_NOTICE_MS = 24L * 60L * 60L * 1000L
+private const val KEY_FAILURE_DISMISSED_AT = "failure_dismissed_at"
 
 data class ChatMessage(
     val role: String,
@@ -209,6 +210,11 @@ data class WikiUiState(
     /** Finished / failed jobs in the same batch window as the running ones (Web parity). */
     val activeIngestDone: Int = 0,
     val activeIngestFailed: Int = 0,
+    /** The soonest job parked by the server, and whether everything in flight is parked. */
+    val ingestWaitingJob: IngestJobRow? = null,
+    val ingestAllWaiting: Boolean = false,
+    /** A recent failure nobody has dismissed; it must not vanish with the app. */
+    val ingestFailureNotice: IngestJobRow? = null,
     val pageSaveLoading: Boolean = false,
     val syncLoading: Boolean = false,
     val backlinks: List<String> = emptyList(),
@@ -292,6 +298,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
         )
         loadProfiles()
         watchRunningIngests()
+        watchIngestUploads()
     }
 
     /**
@@ -305,26 +312,62 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
     private fun watchRunningIngests() {
         if (ingestWatchJob?.isActive == true) return
         ingestWatchJob = viewModelScope.launch {
-            var hadActive = false
+            var activeIds = emptySet<String>()
             var watchedWorkspaceId: String? = null
             while (isActive) {
                 val wsId = workspaceId.value
                 if (wsId != watchedWorkspaceId) {
                     watchedWorkspaceId = wsId
-                    hadActive = false
+                    activeIds = emptySet()
                 }
                 val jobs = wsId?.let { runCatching { fetchIngestJobs(it) }.getOrNull() }
                 if (jobs != null) {
-                    val active = jobs.count { it.status == "pending" || it.status == "running" }
+                    val nowActive = jobs
+                        .filter { it.status == "pending" || it.status == "running" }
+                        .mapNotNull { it.id }
+                        .toSet()
                     applyIngestJobs(wsId, jobs)
-                    // The last import just landed — pull in what it wrote.
-                    if (hadActive && active == 0 && workspaceId.value == wsId) {
-                        wsId.let { syncPagesInternal(it, forceSync = true) }
+                    // An import just landed, possibly in another workspace — pull in what it wrote.
+                    val landed = jobs.filter { it.id in activeIds && it.id !in nowActive && it.status == "done" }
+                    if (landed.isNotEmpty() && workspaceId.value == wsId) {
+                        landed.lastOrNull { it.workspaceId != wsId && it.result != "unchanged" }?.workspaceName?.let { name ->
+                            _uiState.update { it.copy(ingestRoutedName = name, ingestRoutedCreated = false) }
+                        }
+                        syncPagesInternal(wsId, forceSync = true)
                         refreshWorkspaces(syncSelected = false)
                     }
-                    hadActive = active > 0
+                    activeIds = nowActive
                 }
-                delay(if (hadActive) 5_000L else 20_000L)
+                delay(if (activeIds.isNotEmpty() || _uiState.value.ingestLoading) 5_000L else 20_000L)
+            }
+        }
+    }
+
+    private var ingestUploadWatchJob: Job? = null
+
+    /** Uploads waiting in WorkManager count as in flight, and survive the app the same way jobs do. */
+    private fun watchIngestUploads() {
+        if (ingestUploadWatchJob?.isActive == true) return
+        val workManager = WorkManager.getInstance(getApplication<Application>())
+        ingestUploadWatchJob = viewModelScope.launch {
+            var hadUploads = false
+            workManager.getWorkInfosByTagFlow(IngestUploadWorker.TAG).collect { infos ->
+                val uploading = infos.any { !it.state.isFinished }
+                _uiState.update { it.copy(ingestLoading = uploading) }
+                infos.firstOrNull { it.state == WorkInfo.State.FAILED }?.let { failed ->
+                    val status = failed.outputData.getInt(IngestUploadWorker.KEY_ERROR_STATUS, 0)
+                    val message = failed.outputData.getString(IngestUploadWorker.KEY_ERROR_MESSAGE)
+                        ?: str(R.string.error_op_ingest)
+                    if (status == 403 && isDriveReconnectError(message)) {
+                        requestDriveReconnect("ingest", message)
+                    } else {
+                        _uiState.update { it.copy(syncError = message) }
+                    }
+                    // Shown once: finished work would otherwise report the same failure on every start.
+                    workManager.pruneWork()
+                }
+                if (hadUploads && !uploading) loadIngestJobs()
+                hadUploads = uploading
             }
         }
     }
@@ -1378,7 +1421,8 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
 
     private suspend fun fetchIngestJobs(wsId: String): List<IngestJobRow> {
         val response = sendAuthorizedRequest { accessToken ->
-            AndroidHttpClient.instance.get(webApiUrl("/api/ingest?workspace_id=$wsId")) {
+            // Auto-routed imports leave this workspace, so the queue spans all of them.
+            AndroidHttpClient.instance.get(webApiUrl("/api/ingest?workspace_id=$wsId&scope=owner")) {
                 header("Authorization", "Bearer $accessToken")
                 header("x-llm-wiki-locale", currentUiLocale())
             }
@@ -1394,6 +1438,8 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
         if (workspaceId.value != requestedWorkspaceId) return
         val active = jobs.filter { it.status == "pending" || it.status == "running" }
         val (batchDone, batchFailed) = ingestBatchCounts(jobs)
+        val waiting = active.filter { it.isWaiting }.sortedBy { it.nextAttemptAt }
+        val notice = if (active.isEmpty()) latestUnseenFailure(jobs) else null
         _uiState.update {
             it.copy(
                 ingestJobs = jobs,
@@ -1401,8 +1447,32 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                 activeIngestPages = active.sumOf { job -> job.touchedPages.size },
                 activeIngestDone = batchDone,
                 activeIngestFailed = batchFailed,
+                ingestWaitingJob = waiting.firstOrNull(),
+                ingestAllWaiting = active.isNotEmpty() && waiting.size == active.size,
+                ingestFailureNotice = notice,
             )
         }
+    }
+
+    private val ingestPrefs by lazy {
+        getApplication<Application>().getSharedPreferences("ingest_notices", Context.MODE_PRIVATE)
+    }
+
+    /** Stays for a day unless dismissed: a failure must be visible when the user comes back. */
+    private fun latestUnseenFailure(jobs: List<IngestJobRow>): IngestJobRow? {
+        val since = maxOf(
+            System.currentTimeMillis() - FAILURE_NOTICE_MS,
+            ingestPrefs.getLong(KEY_FAILURE_DISMISSED_AT, 0L),
+        )
+        return jobs.firstOrNull { job ->
+            job.status == "failed" &&
+                (runCatching { OffsetDateTime.parse(job.finishedAt).toInstant().toEpochMilli() }.getOrNull() ?: 0L) > since
+        }
+    }
+
+    fun dismissIngestFailure() {
+        ingestPrefs.edit().putLong(KEY_FAILURE_DISMISSED_AT, System.currentTimeMillis()).apply()
+        _uiState.update { it.copy(ingestFailureNotice = null) }
     }
 
     private fun decodeIngestJobs(raw: String): List<IngestJobRow> {
@@ -1705,6 +1775,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                 ).signOut()
             } finally {
                 workspaceIds.forEach { SyncWorker.cancel(getApplication(), accountName, it) }
+                IngestUploadWorker.cancelAll(getApplication())
                 db.pageDao().deleteByAccount(accountName)
                 _uiState.update { it.copy(signedOut = true) }
             }
@@ -1712,100 +1783,28 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun ingestUrl(url: String, autoRoute: Boolean = false, onDone: (Boolean) -> Unit) {
-        viewModelScope.launch {
-            val wsId = workspaceId.value ?: return@launch
-            _uiState.update {
-                it.copy(
-                    ingestLoading = true,
-                    ingestProgress = 0,
-                    ingestRoutedName = null,
-                    ingestRoutedCreated = false,
-                )
-            }
-            try {
-                val requestBody = buildJsonObject {
-                    put("kind", "url")
-                    put("url", url)
-                    if (autoRoute) {
-                        put("auto_route", true)
-                        put("fallback_workspace_id", wsId)
-                    } else {
-                        put("workspace_id", wsId)
-                    }
-                    _uiState.value.selectedProfileId?.let { put("profile_id", it) }
-                }.toString()
-                val response = sendAuthorizedRequest { accessToken ->
-                    AndroidHttpClient.instance.post(webApiUrl("/api/ingest")) {
-                        header("Authorization", "Bearer $accessToken")
-                        header("x-llm-wiki-locale", currentUiLocale())
-                        contentType(ContentType.Application.Json)
-                        setBody(requestBody)
-                    }
-                } ?: run {
-                    _uiState.update { it.copy(syncError = unauthorizedMessage()) }
-                    onDone(false)
-                    return@launch
-                }
-                val text = response.bodyAsText()
-                handleIngestResult(wsId, response.status.value, text, onDone)
-            } catch (e: Exception) {
-                _uiState.update { it.copy(syncError = e.toUserFacingMessage(str(R.string.error_op_ingest))) }
-                onDone(false)
-            } finally {
-                _uiState.update { it.copy(ingestLoading = false, ingestProgress = 0) }
-            }
-        }
+        val requestId = UUID.randomUUID().toString()
+        val queued = enqueueIngest(requestId, "url", autoRoute, url = url, title = url)
+        onDone(queued)
     }
 
     fun ingestText(title: String, content: String, autoRoute: Boolean = false, onDone: (Boolean) -> Unit) {
         viewModelScope.launch {
-            val wsId = workspaceId.value ?: return@launch
+            val requestId = UUID.randomUUID().toString()
             if (content.toByteArray(Charsets.UTF_8).size.toLong() > MAX_IMPORT_BYTES) {
                 _uiState.update { it.copy(syncError = str(R.string.error_import_file_too_large)) }
                 onDone(false)
                 return@launch
             }
-            _uiState.update {
-                it.copy(
-                    ingestLoading = true,
-                    ingestProgress = 0,
-                    ingestRoutedName = null,
-                    ingestRoutedCreated = false,
-                )
-            }
-            try {
-                val requestBody = buildJsonObject {
-                    put("kind", "text")
-                    put("title", title)
-                    put("content", content)
-                    if (autoRoute) {
-                        put("auto_route", true)
-                        put("fallback_workspace_id", wsId)
-                    } else {
-                        put("workspace_id", wsId)
-                    }
-                    _uiState.value.selectedProfileId?.let { put("profile_id", it) }
-                }.toString()
-                val response = sendAuthorizedRequest { accessToken ->
-                    AndroidHttpClient.instance.post(webApiUrl("/api/ingest")) {
-                        header("Authorization", "Bearer $accessToken")
-                        header("x-llm-wiki-locale", currentUiLocale())
-                        contentType(ContentType.Application.Json)
-                        setBody(requestBody)
-                    }
-                } ?: run {
-                    _uiState.update { it.copy(syncError = unauthorizedMessage()) }
-                    onDone(false)
-                    return@launch
-                }
-                val text = response.bodyAsText()
-                handleIngestResult(wsId, response.status.value, text, onDone)
-            } catch (e: Exception) {
-                _uiState.update { it.copy(syncError = e.toUserFacingMessage(str(R.string.error_op_ingest))) }
+            val written = runCatching {
+                withContext(Dispatchers.IO) { outboxFile(requestId).writeText(content) }
+            }.isSuccess
+            if (!written) {
+                _uiState.update { it.copy(syncError = str(R.string.error_op_ingest)) }
                 onDone(false)
-            } finally {
-                _uiState.update { it.copy(ingestLoading = false, ingestProgress = 0) }
+                return@launch
             }
+            onDone(enqueueIngest(requestId, "text", autoRoute, title = title))
         }
     }
 
@@ -1817,141 +1816,72 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
         onDone: (Boolean) -> Unit,
     ) {
         viewModelScope.launch {
-            val wsId = workspaceId.value ?: return@launch
-            _uiState.update {
-                it.copy(
-                    ingestLoading = true,
-                    ingestProgress = 0,
-                    ingestRoutedName = null,
-                    ingestRoutedCreated = false,
-                )
-            }
+            val requestId = UUID.randomUUID().toString()
+            val safeTitle = title
+                .ifBlank { str(R.string.wiki_imported_file) }
+                .toSafeUploadName()
+                .withImportExtension(mimeType)
             try {
-                val byteSize = countImportBytes(uri)
-                val safeTitle = title
-                    .ifBlank { str(R.string.wiki_imported_file) }
-                    .toSafeUploadName()
-                    .withImportExtension(mimeType)
-                val response = sendAuthorizedRequest { accessToken ->
-                    AndroidHttpClient.instance.post(webApiUrl("/api/ingest")) {
-                        header("Authorization", "Bearer $accessToken")
-                        header("x-llm-wiki-locale", currentUiLocale())
-                        setBody(MultiPartFormDataContent(formData {
-                            append("kind", "file")
-                            append("title", safeTitle)
-                            if (autoRoute) {
-                                append("auto_route", "true")
-                                append("fallback_workspace_id", wsId)
-                            } else {
-                                append("workspace_id", wsId)
-                            }
-                            _uiState.value.selectedProfileId?.let { append("profile_id", it) }
-                            val contentType = safeTitle.toImportMimeType(mimeType)
-                            append(
-                                "file",
-                                ChannelProvider(byteSize) {
-                                    val stream = getApplication<Application>().contentResolver.openInputStream(uri)
-                                        ?: throw IllegalArgumentException("Unable to open selected file")
-                                    CountingImportInputStream(stream).toByteReadChannel()
-                                },
-                                Headers.build {
-                                    append(
-                                        HttpHeaders.ContentDisposition,
-                                        "form-data; name=\"file\"; filename=\"" + safeTitle + "\"",
-                                    )
-                                    append(HttpHeaders.ContentType, contentType)
-                                },
-                            )
-                        }))
-                    }
-                } ?: run {
-                    _uiState.update { it.copy(syncError = unauthorizedMessage()) }
-                    onDone(false)
-                    return@launch
-                }
-                handleIngestResult(wsId, response.status.value, response.bodyAsText(), onDone)
+                // Permission on a content:// uri dies with the process, so take a copy now.
+                copyImportToOutbox(uri, outboxFile(requestId))
+                onDone(enqueueIngest(requestId, "file", autoRoute, title = safeTitle, mime = safeTitle.toImportMimeType(mimeType)))
             } catch (e: ImportTooLargeException) {
+                outboxFile(requestId).delete()
                 _uiState.update { it.copy(syncError = str(R.string.error_import_file_too_large)) }
                 onDone(false)
             } catch (e: Exception) {
-                val message = if (e.hasImportTooLargeCause()) {
-                    str(R.string.error_import_file_too_large)
-                } else {
-                    e.toUserFacingMessage(str(R.string.error_import_file_unreadable))
-                }
-                _uiState.update { it.copy(syncError = message) }
+                outboxFile(requestId).delete()
+                _uiState.update { it.copy(syncError = e.toUserFacingMessage(str(R.string.error_import_file_unreadable))) }
                 onDone(false)
-            } finally {
-                _uiState.update { it.copy(ingestLoading = false, ingestProgress = 0) }
             }
         }
     }
 
-    private suspend fun countImportBytes(uri: Uri): Long = withContext(Dispatchers.IO) {
+    private fun outboxFile(requestId: String): File =
+        File(IngestUploadWorker.outboxDir(getApplication()), requestId)
+
+    /** Hand the import to WorkManager; it now outlives this process. False when there is no workspace yet. */
+    private fun enqueueIngest(
+        requestId: String,
+        kind: String,
+        autoRoute: Boolean,
+        url: String? = null,
+        title: String? = null,
+        mime: String? = null,
+    ): Boolean {
+        val wsId = workspaceId.value ?: return false
+        _uiState.update { it.copy(ingestLoading = true, ingestRoutedName = null, ingestRoutedCreated = false, syncError = null) }
+        IngestUploadWorker.enqueue(
+            context = getApplication(),
+            requestId = requestId,
+            kind = kind,
+            url = url,
+            title = title,
+            mime = mime,
+            autoRoute = autoRoute,
+            workspaceId = wsId,
+            profileId = _uiState.value.selectedProfileId,
+            locale = currentUiLocale(),
+        )
+        return true
+    }
+
+    private suspend fun copyImportToOutbox(uri: Uri, target: File) = withContext(Dispatchers.IO) {
         val stream = getApplication<Application>().contentResolver.openInputStream(uri)
             ?: throw IllegalArgumentException("Unable to open selected file")
         stream.use { input ->
-            val buffer = ByteArray(32 * 1024)
-            var total = 0L
-            while (true) {
-                val read = input.read(buffer)
-                if (read < 0) break
-                total += read
-                if (total > MAX_IMPORT_BYTES) throw ImportTooLargeException()
+            target.outputStream().use { output ->
+                val buffer = ByteArray(32 * 1024)
+                var total = 0L
+                while (true) {
+                    val read = input.read(buffer)
+                    if (read < 0) break
+                    total += read
+                    if (total > MAX_IMPORT_BYTES) throw ImportTooLargeException()
+                    output.write(buffer, 0, read)
+                }
             }
-            total
         }
-    }
-
-    private suspend fun handleIngestResult(
-        wsId: String,
-        statusCode: Int,
-        raw: String,
-        onDone: (Boolean) -> Unit,
-    ) {
-        if (statusCode !in 200..299) {
-            val message = parseApiError(raw, str(R.string.error_op_ingest))
-            if (statusCode == 403 && isDriveReconnectError(message)) {
-                requestDriveReconnect("ingest", message)
-            } else {
-                _uiState.update { it.copy(syncError = message) }
-            }
-            onDone(false)
-            return
-        }
-
-        // Async ingest protocol: the server owns the queue. Keep the client request
-        // short and let the durable job list/poller report progress after this returns.
-        val bodyJson = if (isJsonObject(raw)) {
-            runCatching { apiJson.parseToJsonElement(raw).jsonObject }.getOrNull()
-        } else null
-        val initialStatus = bodyJson?.get("status")?.jsonPrimitive?.contentOrNull
-        val routedWorkspaceId = bodyJson?.get("routed_workspace_id")?.jsonPrimitive?.contentOrNull
-        val jobId = bodyJson?.get("jobId")?.jsonPrimitive?.contentOrNull
-        if (bodyJson == null || jobId.isNullOrBlank() || initialStatus.isNullOrBlank()) {
-            _uiState.update { it.copy(syncError = nonJsonApiMessage(str(R.string.error_op_ingest))) }
-            onDone(false)
-            return
-        }
-        // Auto-routed ingest: surface which workspace the AI picked
-        val routedCreated = bodyJson?.get("routed_workspace_created")?.jsonPrimitive?.booleanOrNull ?: false
-        bodyJson?.get("routed_workspace_name")?.jsonPrimitive?.contentOrNull?.let { routedName ->
-            _uiState.update { it.copy(ingestRoutedName = routedName, ingestRoutedCreated = routedCreated) }
-        }
-
-        _uiState.update { it.copy(syncError = null) }
-        val targetWorkspaceId = routedWorkspaceId ?: wsId
-        if (targetWorkspaceId != wsId || routedCreated) {
-            // The old client ignored routed_workspace_id and kept showing the fallback
-            // workspace. Follow the server's decision, including a newly created one.
-            refreshWorkspaces(preferredWorkspaceId = targetWorkspaceId, syncSelected = true)
-        } else if (initialStatus == "done") {
-            // A duplicate source can be returned as already done/unchanged.
-            syncPagesInternal(targetWorkspaceId, forceSync = true)
-            selectDefaultPageIfNeeded(targetWorkspaceId)
-        }
-        loadIngestJobs()
-        onDone(true)
     }
 
     private fun refreshWorkspaces(
@@ -2371,30 +2301,6 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
 }
 
 private class ImportTooLargeException : Exception()
-
-private class CountingImportInputStream(input: InputStream) : FilterInputStream(input) {
-    private var bytesRead = 0L
-
-    override fun read(): Int {
-        val value = super.read()
-        if (value >= 0) count(1)
-        return value
-    }
-
-    override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
-        val readCount = super.read(buffer, offset, length)
-        if (readCount > 0) count(readCount)
-        return readCount
-    }
-
-    private fun count(amount: Int) {
-        bytesRead += amount
-        if (bytesRead > MAX_IMPORT_BYTES) throw ImportTooLargeException()
-    }
-}
-
-private fun Throwable.hasImportTooLargeCause(): Boolean =
-    generateSequence(this) { it.cause }.any { it is ImportTooLargeException }
 
 private fun String.toSafeUploadName(): String =
     trim()

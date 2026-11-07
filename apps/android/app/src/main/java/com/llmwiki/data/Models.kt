@@ -93,7 +93,13 @@ data class IngestJobRow(
     @SerialName("updated_at") val updatedAt: String? = null,
     @SerialName("source_title") val sourceTitle: String? = null,
     @SerialName("source_mime_type") val sourceMimeType: String? = null,
-)
+    @SerialName("workspace_name") val workspaceName: String? = null,
+    /** Pending until this time; the server resumes the job by itself. */
+    @SerialName("next_attempt_at") val nextAttemptAt: String? = null,
+    @SerialName("wait_reason") val waitReason: String? = null,
+) {
+    val isWaiting: Boolean get() = status == "pending" && nextAttemptAt != null && waitReason != null
+}
 
 /** UI-side join of a source with its latest ingest job. */
 data class SourceListItem(
