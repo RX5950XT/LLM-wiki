@@ -42,7 +42,6 @@ import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Build
@@ -52,8 +51,9 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
@@ -65,7 +65,6 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -79,7 +78,6 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.ModalDrawerSheet
-import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.NavigationDrawerItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -95,7 +93,6 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.material3.rememberDrawerState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -130,6 +127,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.llmwiki.R
 import com.llmwiki.data.GraphInsights
@@ -143,6 +141,7 @@ import com.llmwiki.data.room.PageEntity
 import java.time.OffsetDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 private val importMimeTypes = arrayOf(
@@ -176,7 +175,7 @@ fun WikiScreen(
 ) {
     val uiState by wikiViewModel.uiState.collectAsState()
     val pages by wikiViewModel.pages.collectAsState()
-    val drawerState = rememberDrawerState(DrawerValue.Closed)
+    val drawerState = rememberSwipeDrawerState()
     val scope = rememberCoroutineScope()
 
     // rememberSaveable so rotation / process death can't discard dialogs or unsaved edits
@@ -187,7 +186,7 @@ fun WikiScreen(
     var workspaceMenuWidth by remember { mutableStateOf(280.dp) }
     val density = LocalDensity.current
     var showToolsMenu by remember { mutableStateOf(false) }
-    var showPageMenu by remember { mutableStateOf(false) }
+    var wikiSectionExpanded by rememberSaveable { mutableStateOf(true) }
     var showHelpDialog by rememberSaveable { mutableStateOf(false) }
     var showSourcesDialog by rememberSaveable { mutableStateOf(false) }
     var showIngestQueueDialog by rememberSaveable { mutableStateOf(false) }
@@ -298,9 +297,26 @@ fun WikiScreen(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    ModalNavigationDrawer(
-        drawerState = drawerState,
-        gesturesEnabled = drawerState.isOpen,
+    // There is no manual sync: while the app is on screen, check for changes right away
+    // on return and then on a timer. Web gets the same freshness from Realtime.
+    LaunchedEffect(lifecycleOwner, accountName) {
+        if (accountName.isBlank()) return@LaunchedEffect
+        lifecycleOwner.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            while (true) {
+                wikiViewModel.syncIfChanged()
+                delay(PAGE_SYNC_INTERVAL_MS)
+            }
+        }
+    }
+
+    // Swiping is off where sideways drags mean something else: text editing, and search.
+    val canSwipeDrawerOpen = inlineEditorPageSlug == null && !uiState.showSearch
+
+    SwipeDrawer(
+        state = drawerState,
+        gesturesEnabled = drawerState.isOpen || canSwipeDrawerOpen,
+        paneTitle = stringResource(R.string.wiki_open_pages),
+        closeLabel = stringResource(R.string.action_dismiss),
         modifier = modifier,
         drawerContent = {
             ModalDrawerSheet(
@@ -314,43 +330,33 @@ fun WikiScreen(
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 6.dp),
                 ) {
-                    OutlinedButton(
-                        onClick = { showWorkspaceMenu = true; wikiViewModel.prefetchWorkspaceIndexes() },
+                    TextButton(
+                        onClick = {
+                            showWorkspaceMenu = true
+                            wikiViewModel.refreshWorkspaceList()
+                            wikiViewModel.prefetchWorkspaceIndexes()
+                        },
                         modifier = Modifier
                             .fillMaxWidth()
+                            .heightIn(min = 48.dp)
                             .onSizeChanged { workspaceMenuWidth = with(density) { it.width.toDp() } },
                         shape = MaterialTheme.shapes.medium,
-                        colors = ButtonDefaults.outlinedButtonColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        colors = ButtonDefaults.textButtonColors(
                             contentColor = MaterialTheme.colorScheme.onSurface,
                         ),
                     ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Column(Modifier.weight(1f)) {
-                                Text(
-                                    text = uiState.workspace?.name ?: stringResource(R.string.wiki_switch_workspace),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    style = MaterialTheme.typography.titleMedium,
-                                )
-                                Text(
-                                    text = stringResource(R.string.wiki_switch_workspace),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                            Icon(
-                                Icons.Default.ArrowDropDown,
-                                contentDescription = stringResource(R.string.wiki_switch_workspace),
-                                modifier = Modifier.rotate(workspaceArrowRotation),
-                            )
-                        }
+                        Text(
+                            text = uiState.workspace?.name ?: stringResource(R.string.wiki_switch_workspace),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.titleSmall,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Icon(
+                            Icons.Default.KeyboardArrowDown,
+                            contentDescription = stringResource(R.string.wiki_switch_workspace),
+                            modifier = Modifier.rotate(workspaceArrowRotation),
+                        )
                     }
                     DropdownMenu(
                         expanded = showWorkspaceMenu,
@@ -435,15 +441,32 @@ fun WikiScreen(
                                 }
                             }
 
-                            if (wikiPages.isNotEmpty()) {
-                                item {
+                            item {
+                                Row(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(min = 44.dp)
+                                        .clickable { wikiSectionExpanded = !wikiSectionExpanded }
+                                        .padding(start = 20.dp, end = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Icon(
+                                        Icons.Default.KeyboardArrowDown,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier
+                                            .size(16.dp)
+                                            .rotate(if (wikiSectionExpanded) 0f else -90f),
+                                    )
+                                    Spacer(Modifier.width(6.dp))
                                     Text(
                                         text = stringResource(R.string.wiki_zone_wiki),
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.padding(start = 20.dp, top = 8.dp, bottom = 2.dp),
                                     )
                                 }
+                            }
+                            if (wikiSectionExpanded) {
                                 items(wikiPages, key = { "${it.workspaceId}/${it.accountName}/${it.slug}" }) { page ->
                                     PageListItem(
                                         page = page,
@@ -455,107 +478,97 @@ fun WikiScreen(
                                         },
                                     )
                                 }
+                                if (wikiPages.isEmpty()) {
+                                    item {
+                                        Text(
+                                            stringResource(R.string.wiki_zone_empty),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
                 }
 
                 HorizontalDivider(Modifier.padding(vertical = 4.dp))
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Box(Modifier.weight(1f)) {
-                        TextButton(
-                            onClick = { showToolsMenu = true },
-                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-                        ) {
-                            Icon(Icons.Default.MoreVert, contentDescription = null)
-                            Spacer(Modifier.width(8.dp))
-                            Text(stringResource(R.string.wiki_tools))
-                            if (uiState.organizeRunning) {
-                                Spacer(Modifier.width(8.dp))
-                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                            }
-                        }
-                        DropdownMenu(
-                            expanded = showToolsMenu,
-                            onDismissRequest = { showToolsMenu = false },
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.sources_title)) },
-                                leadingIcon = { Icon(Icons.AutoMirrored.Filled.LibraryBooks, contentDescription = null) },
-                                onClick = {
-                                    showToolsMenu = false
-                                    showSourcesDialog = true
-                                    wikiViewModel.loadSources()
-                                    scope.launch { drawerState.close() }
-                                },
-                            )
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.ingest_queue_title)) },
-                                leadingIcon = { Icon(Icons.Default.AttachFile, contentDescription = null) },
-                                onClick = {
-                                    showToolsMenu = false
-                                    showIngestQueueDialog = true
-                                    wikiViewModel.loadIngestJobs()
-                                    scope.launch { drawerState.close() }
-                                },
-                            )
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.graph_view_title)) },
-                                leadingIcon = { Icon(Icons.Default.Share, contentDescription = null) },
-                                onClick = {
-                                    showToolsMenu = false
-                                    showGraphDialog = true
-                                    wikiViewModel.loadGraph()
-                                    scope.launch { drawerState.close() }
-                                },
-                            )
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.wiki_maintenance)) },
-                                leadingIcon = { Icon(Icons.Default.Build, contentDescription = null) },
-                                enabled = !uiState.organizeRunning,
-                                onClick = {
-                                    showToolsMenu = false
-                                    showMaintenanceConfirm = true
-                                    scope.launch { drawerState.close() }
-                                },
-                            )
-                            HorizontalDivider()
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.help_title)) },
-                                leadingIcon = { Icon(Icons.AutoMirrored.Filled.Help, contentDescription = null) },
-                                onClick = {
-                                    showToolsMenu = false
-                                    showHelpDialog = true
-                                    scope.launch { drawerState.close() }
-                                },
-                            )
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.auth_sign_out)) },
-                                leadingIcon = { Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = null) },
-                                onClick = {
-                                    showToolsMenu = false
-                                    showSignOutConfirm = true
-                                    scope.launch { drawerState.close() }
-                                },
-                            )
-                        }
-                    }
-                    TextButton(
-                        onClick = {
-                            scope.launch { drawerState.close() }
-                            onNavigateToSettings(uiState.workspace?.id)
+                Box {
+                    NavigationDrawerItem(
+                        label = { Text(stringResource(R.string.action_more)) },
+                        icon = { Icon(Icons.Default.MoreHoriz, contentDescription = null) },
+                        badge = if (uiState.organizeRunning) {
+                            { CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp) }
+                        } else {
+                            null
                         },
-                        modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+                        selected = false,
+                        onClick = { showToolsMenu = true },
+                        modifier = Modifier.padding(horizontal = 8.dp),
+                    )
+                    DropdownMenu(
+                        expanded = showToolsMenu,
+                        onDismissRequest = { showToolsMenu = false },
                     ) {
-                        Icon(Icons.Default.Settings, contentDescription = null)
-                        Spacer(Modifier.width(8.dp))
-                        Text(stringResource(R.string.settings_title))
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.sources_open)) },
+                            leadingIcon = { Icon(Icons.AutoMirrored.Filled.LibraryBooks, contentDescription = null) },
+                            onClick = {
+                                showToolsMenu = false
+                                showSourcesDialog = true
+                                wikiViewModel.loadSources()
+                                scope.launch { drawerState.close() }
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.graph_view_title)) },
+                            leadingIcon = { Icon(Icons.Default.Share, contentDescription = null) },
+                            onClick = {
+                                showToolsMenu = false
+                                showGraphDialog = true
+                                wikiViewModel.loadGraph()
+                                scope.launch { drawerState.close() }
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.wiki_maintenance)) },
+                            leadingIcon = { Icon(Icons.Default.Build, contentDescription = null) },
+                            enabled = !uiState.organizeRunning,
+                            onClick = {
+                                showToolsMenu = false
+                                showMaintenanceConfirm = true
+                                scope.launch { drawerState.close() }
+                            },
+                        )
+                        HorizontalDivider()
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.settings_title)) },
+                            leadingIcon = { Icon(Icons.Default.Settings, contentDescription = null) },
+                            onClick = {
+                                showToolsMenu = false
+                                scope.launch { drawerState.close() }
+                                onNavigateToSettings(uiState.workspace?.id)
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.help_open)) },
+                            leadingIcon = { Icon(Icons.AutoMirrored.Filled.Help, contentDescription = null) },
+                            onClick = {
+                                showToolsMenu = false
+                                showHelpDialog = true
+                                scope.launch { drawerState.close() }
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.auth_sign_out)) },
+                            leadingIcon = { Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = null) },
+                            onClick = {
+                                showToolsMenu = false
+                                showSignOutConfirm = true
+                                scope.launch { drawerState.close() }
+                            },
+                        )
                     }
                 }
                 Spacer(Modifier.height(8.dp))
@@ -563,6 +576,7 @@ fun WikiScreen(
         },
     ) {
         Scaffold(
+            modifier = if (canSwipeDrawerOpen && drawerState.isClosed) Modifier.drawerEdgeSwipeZone(density) else Modifier,
             containerColor = MaterialTheme.colorScheme.background,
             contentColor = MaterialTheme.colorScheme.onBackground,
             snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -654,34 +668,12 @@ fun WikiScreen(
                                 IconButton(onClick = { wikiViewModel.toggleSearch() }) {
                                     Icon(Icons.Default.Search, contentDescription = stringResource(R.string.wiki_search))
                                 }
-                                Box {
-                                    IconButton(onClick = { showPageMenu = true }) {
-                                        Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.wiki_page_actions))
-                                    }
-                                    DropdownMenu(
-                                        expanded = showPageMenu,
-                                        onDismissRequest = { showPageMenu = false },
-                                    ) {
-                                        if (editablePage != null) {
-                                            DropdownMenuItem(
-                                                text = { Text(stringResource(R.string.action_edit)) },
-                                                leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
-                                                onClick = {
-                                                    showPageMenu = false
-                                                    inlineEditorPageSlug = editablePage.slug
-                                                    inlineEditorValue = TextFieldValue(uiState.pageContent.orEmpty())
-                                                },
-                                            )
-                                        }
-                                        DropdownMenuItem(
-                                            text = { Text(stringResource(R.string.wiki_sync)) },
-                                            leadingIcon = { Icon(Icons.Default.Refresh, contentDescription = null) },
-                                            enabled = !uiState.contentLoading && !uiState.syncLoading,
-                                            onClick = {
-                                                showPageMenu = false
-                                                wikiViewModel.syncPages()
-                                            },
-                                        )
+                                if (editablePage != null) {
+                                    IconButton(onClick = {
+                                        inlineEditorPageSlug = editablePage.slug
+                                        inlineEditorValue = TextFieldValue(uiState.pageContent.orEmpty())
+                                    }) {
+                                        Icon(Icons.Default.Edit, contentDescription = stringResource(R.string.action_edit))
                                     }
                                 }
                             }
@@ -1102,6 +1094,11 @@ fun WikiScreen(
                 showChatSheet = false
                 filePickerLauncher.launch(importMimeTypes)
             },
+            onOpenImportQueue = {
+                showChatSheet = false
+                showIngestQueueDialog = true
+                wikiViewModel.loadIngestJobs()
+            },
             onExecuteProposal = { mi, pi -> wikiViewModel.executeProposal(mi, pi) },
             onDismissProposal = { mi, pi -> wikiViewModel.dismissProposal(mi, pi) },
             onSend = { wikiViewModel.sendQuery(it) },
@@ -1380,6 +1377,8 @@ private fun localizedSystemPageLabel(slug: String): String? = when (slug) {
     else -> null
 }
 
+private const val PAGE_SYNC_INTERVAL_MS = 30_000L
+
 private fun isHumanEditablePage(page: PageEntity): Boolean =
     page.zone == "notes" || page.zone == "schema"
 
@@ -1410,6 +1409,7 @@ private fun ChatBottomSheet(
     onUntagWorkspace: (String) -> Unit,
     onImportContent: () -> Unit,
     onImportFile: () -> Unit,
+    onOpenImportQueue: () -> Unit,
     onExecuteProposal: (messageIndex: Int, proposalIndex: Int) -> Unit,
     onDismissProposal: (messageIndex: Int, proposalIndex: Int) -> Unit,
     onSend: (String) -> Unit,
@@ -1699,6 +1699,14 @@ private fun ChatBottomSheet(
                                     onClick = {
                                         showImportMenu = false
                                         onImportFile()
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.ingest_queue_title)) },
+                                    leadingIcon = { Icon(Icons.Default.Schedule, contentDescription = null) },
+                                    onClick = {
+                                        showImportMenu = false
+                                        onOpenImportQueue()
                                     },
                                 )
                             }

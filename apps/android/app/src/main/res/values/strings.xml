@@ -28,6 +28,7 @@
     <string name="wiki_schema_query">Query Rules</string>
     <string name="wiki_schema_lint">Lint Rules</string>
     <string name="wiki_zone_wiki">Knowledge</string>
+    <string name="wiki_zone_empty">No pages yet.</string>
     <string name="wiki_zone_notes">Notes</string>
     <string name="wiki_zone_schema">Rules</string>
     <string name="ingest_add_source">Add source</string>
@@ -35,6 +36,7 @@
     <string name="ingest_running_progress">Ingesting… %1$d pages updated so far</string>
     <string name="wiki_backlinks">Backlinks</string>
     <string name="sources_title">Ingested sources</string>
+    <string name="sources_open">Sources</string>
     <string name="sources_empty">No sources ingested yet</string>
     <string name="sources_status_done">%1$d pages integrated</string>
     <string name="sources_status_pending">Waiting to integrate…</string>
@@ -53,7 +55,6 @@
     <string name="wiki_empty_select">Select a page from the menu</string>
     <string name="wiki_no_content">No content available</string>
     <string name="wiki_open_pages">Open pages</string>
-    <string name="wiki_sync">Sync</string>
     <string name="wiki_chat">Chat</string>
     <string name="wiki_chat_empty">Ask anything about your wiki</string>
     <string name="wiki_chat_input_hint">Ask about your wiki…</string>
@@ -122,8 +123,7 @@
     <string name="graph_legend_summary">Summary</string>
     <string name="graph_legend_synthesis">Synthesis</string>
     <string name="graph_legend_other">Other</string>
-    <string name="wiki_tools">Tools</string>
-    <string name="wiki_page_actions">Page actions</string>
+    <string name="action_more">More</string>
     <string name="error_op_graph">Failed to load the graph</string>
     <string name="graph_count_pages">Pages: %1$d</string>
     <string name="graph_count_links">Links: %1$d</string>
@@ -201,6 +201,7 @@
 
     <!-- Help -->
     <string name="help_title">Help</string>
+    <string name="help_open">Open help</string>
     <string name="help_workspace_title">Workspaces and pages</string>
     <string name="help_workspace_body">Use the workspace menu to switch, reorder, or create a workspace. Knowledge pages are AI-maintained. You can also ask the AI in chat to create, rename, or delete workspaces.</string>
     <string name="help_ingest_title">Import content</string>

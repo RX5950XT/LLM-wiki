@@ -28,6 +28,7 @@
     <string name="wiki_schema_query">查詢規則</string>
     <string name="wiki_schema_lint">健康檢查規則</string>
     <string name="wiki_zone_wiki">知識頁</string>
+    <string name="wiki_zone_empty">目前沒有頁面。</string>
     <string name="wiki_zone_notes">筆記</string>
     <string name="wiki_zone_schema">規則</string>
     <string name="ingest_add_source">新增來源</string>
@@ -35,6 +36,7 @@
     <string name="ingest_running_progress">整合中…已更新 %1$d 個頁面</string>
     <string name="wiki_backlinks">反向連結</string>
     <string name="sources_title">已匯入的來源</string>
+    <string name="sources_open">來源清單</string>
     <string name="sources_empty">尚未匯入任何來源</string>
     <string name="sources_status_done">已整合 %1$d 個頁面</string>
     <string name="sources_status_pending">等待整合中…</string>
@@ -53,7 +55,6 @@
     <string name="wiki_empty_select">從選單選擇一個頁面</string>
     <string name="wiki_no_content">無可用內容</string>
     <string name="wiki_open_pages">開啟頁面列表</string>
-    <string name="wiki_sync">同步</string>
     <string name="wiki_chat">對話</string>
     <string name="wiki_chat_empty">問問你的 Wiki 任何問題</string>
     <string name="wiki_chat_input_hint">問問你的 Wiki…</string>
@@ -122,8 +123,7 @@
     <string name="graph_legend_summary">摘要</string>
     <string name="graph_legend_synthesis">整合</string>
     <string name="graph_legend_other">其他</string>
-    <string name="wiki_tools">工具</string>
-    <string name="wiki_page_actions">頁面操作</string>
+    <string name="action_more">更多</string>
     <string name="error_op_graph">載入圖譜失敗</string>
     <string name="graph_count_pages">頁面：%1$d</string>
     <string name="graph_count_links">連結：%1$d</string>
@@ -201,6 +201,7 @@
 
     <!-- 使用說明 -->
     <string name="help_title">使用說明</string>
+    <string name="help_open">開啟使用說明</string>
     <string name="help_workspace_title">工作區與頁面</string>
     <string name="help_workspace_body">用工作區選單切換、排序或建立工作區。知識頁全部由 AI 維護。也可以直接在對話中請 AI 建立、重新命名或刪除工作區。</string>
     <string name="help_ingest_title">匯入內容</string>

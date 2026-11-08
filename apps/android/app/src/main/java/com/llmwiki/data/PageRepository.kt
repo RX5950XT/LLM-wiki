@@ -68,8 +68,19 @@ class PageRepository(
         @SerialName("pages_revision") val pagesRevision: Long,
     )
 
-    suspend fun syncPages(workspaceId: String, accountName: String, locale: String, forceSync: Boolean = false) {
-        ensureSystemPages(workspaceId, locale)
+    /**
+     * Returns whether the page list was re-read. [quiet] is for checks that repeat on a
+     * timer: it skips the server call for system pages, and only reads the list when the
+     * revision check confirms a change.
+     */
+    suspend fun syncPages(
+        workspaceId: String,
+        accountName: String,
+        locale: String,
+        forceSync: Boolean = false,
+        quiet: Boolean = false,
+    ): Boolean {
+        if (!quiet) ensureSystemPages(workspaceId, locale)
 
         val serverRevision: Long? = if (forceSync) null else runCatching {
             supabase.from("workspace_sync_state")
@@ -84,11 +95,13 @@ class PageRepository(
             null
         }
 
+        if (quiet && serverRevision == null) return false
+
         val localRevision = if (forceSync) -1L else (db.pageDao().getCachedRevision(workspaceId, accountName) ?: -1L)
 
         if (!forceSync && serverRevision != null && serverRevision <= localRevision) {
             Log.d("SyncPages", "skip: server=$serverRevision local=$localRevision")
-            return
+            return false
         }
 
         val rows = withSupabaseRetry {
@@ -137,6 +150,7 @@ class PageRepository(
         }
 
         Log.i("SyncPages", "synced: ${entities.size} rows, revision $localRevision → $serverRevision")
+        return true
     }
 
     suspend fun loadPageContent(workspaceId: String, accountName: String, slug: String): PageLoadResult {

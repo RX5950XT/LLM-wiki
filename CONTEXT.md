@@ -2,6 +2,15 @@
 
 > 給下一個 AI Agent 的接手指南。架構與規範細節以 `CLAUDE.md` / `AGENTS.md` 為準，這裡只記「最近做了什麼、為什麼、還缺什麼」。
 
+## 2026-11-07 手機抽屜與同步（Android 0.8.7 / versionCode 19）
+
+- **改了什麼**：頂列拿掉「⋮」（同步移除，編輯改成鉛筆，只在可編輯頁出現）；不再有手動同步，改為前景每 30 秒＋回到前景＋對話結束時查 revision（`syncIfChanged`）；抽屜按鈕對齊網頁版（工作區名稱＋箭頭、可收合的「知識頁」、底部單一「更多」）；匯入佇列移到對話「＋」；抽屜改成自寫的 `SwipeDrawer`，可左右滑。規格見 `CLAUDE.md`。Web 不需改：這些都是讓手機對齊網頁版。
+- **Pixel 6a 實測通過**：快速 13 種、慢速（1500ms）4 種滑動（水平、20°、左邊緣、直上直下、30°、45°、50°、斜率 1.2／1.4 的慢速斜滑都只捲頁面）；慢拖 30% 放開回到關閉、80% 保持開啟；抽屜清單斜拖不關閉；左邊緣排除區 `(0,938,105,1463)`；revision 變動在 30 秒內同步（log `revision 6527 → 6528`），App 在背景 40 秒不同步、回前景約 1 秒內同步；「更多」選單項目與網頁版相同。
+- **對照組**：拿掉防護後，快速滑動仍全部通過（測試無效），慢速斜滑則抽屜會被拉出來。第一版做法（保留 Material 抽屜、consume 斜滑事件）讓慢速斜滑時頁面完全捲不動，已改掉。
+- **尚未驗證**：最後一版只改了「系統返回手勢取消觸控」的處理（`changedToUp()`），之後手機斷線（約 23:58 起），返回鍵／點遮罩／右邊緣返回手勢那組測試沒跑完。已知：修正前從右邊緣拖遮罩會讓 App 退到桌面；修正後的同一個動作 App 留在前景。測試腳本在 scratchpad 的 `back_probe.py`（不在 repo），下次接上手機先跑它。
+- **測試事故**：一次背景測試在 App 被退出後仍繼續在桌面上滑動約 10 分鐘（腳本只在開頭檢查前景 App）。截圖桌面正常、沒有開啟其他 App。之後的腳本每一步都先確認 App 在前景。
+- **既有、與本次無關**：`lintDebug` 有 3 個 Error（`DriveClient.kt:33`、`DriveReconnect.kt:20` 的 NewApi，`GraphView.kt:201` 的 produceState），本次未改這些檔案。
+
 ## 2026-11-07 匯入改為持久化（Android 0.8.6 / versionCode 18）
 
 - **改了什麼**：POST 只存檔就回 202（`runIntake` 在背景讀來源）、pg_cron `ingest-worker` 每分鐘喚醒 worker、失敗分類與自動重試、Android `IngestUploadWorker`、佇列改看全帳號。規格見 `CLAUDE.md`「非同步 Ingest 協定」。migration `20261107090000_durable_ingest.sql` 已套用 production；Vault 的 `ingest_worker_url` 是手動寫入的，不在 migration 內。

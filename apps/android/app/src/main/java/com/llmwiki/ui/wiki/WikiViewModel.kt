@@ -575,6 +575,32 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Background check for changes made elsewhere (Web, AI, another device). Costs one
+     * small query when nothing changed, and shows no spinner or error: a user who did
+     * not ask for a sync should not hear about a failed one. Skipped while a visible
+     * sync runs, because it would replace that sync and leave its spinner on.
+     */
+    fun syncIfChanged() {
+        val id = workspaceId.value ?: return
+        if (accountName.isBlank() || _uiState.value.syncLoading) return
+        viewModelScope.launch { syncPagesInternal(id, quiet = true) }
+    }
+
+    /** Opening the switcher is when a workspace made elsewhere should show up. */
+    fun refreshWorkspaceList() {
+        viewModelScope.launch {
+            try {
+                val latest = repository.getWorkspaces()
+                if (latest != _uiState.value.workspaces) refreshWorkspaces(syncSelected = false)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                android.util.Log.w("WikiViewModel", "workspace list refresh failed", e)
+            }
+        }
+    }
+
     fun selectPage(page: PageEntity, recordHistory: Boolean = true) {
         val previous = _uiState.value.activePage
         if (recordHistory && previous != null && previous.workspaceId == page.workspaceId && previous.slug != page.slug) {
@@ -1064,6 +1090,8 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                 // The AI may have created/renamed a workspace this turn — refresh the
                 // switcher list (syncSelected=false keeps it cheap unless it changed)
                 refreshWorkspaces(syncSelected = false)
+                // ...and it may have written pages here.
+                syncIfChanged()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -1931,7 +1959,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(syncError = null) }
     }
 
-    private suspend fun syncPagesInternal(wsId: String, forceSync: Boolean = false) {
+    private suspend fun syncPagesInternal(wsId: String, forceSync: Boolean = false, quiet: Boolean = false) {
         val syncRequestToken = ++syncGeneration
         val requestGeneration = pageRequestGeneration
         val requestedActiveSlug = _uiState.value.activePage?.slug
@@ -1939,10 +1967,13 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
         fun isCurrent(state: WikiUiState = _uiState.value): Boolean =
             isSyncCurrent() && isCurrentPageRequest(wsId, requestGeneration, requestedActiveSlug, state)
 
-        _uiState.update { it.copy(syncLoading = true) }
+        if (!quiet) _uiState.update { it.copy(syncLoading = true) }
         try {
             val repo = PageRepository(db, driveClient)
-            repo.syncPages(wsId, accountName, currentUiLocale(), forceSync)
+            val changed = repo.syncPages(wsId, accountName, currentUiLocale(), forceSync, quiet)
+            // Quiet checks repeat, so nothing below may re-run when nothing changed:
+            // it would retry a failed page load and clear errors from other features.
+            if (quiet && !changed) return
             if (!isCurrent()) return
             val activeSlug = requestedActiveSlug
             if (activeSlug != null) {
@@ -1966,7 +1997,7 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                                 // Same version: a content load may still be in flight — keep its
                                 // spinner instead of flashing "no content" until it lands.
                                 contentLoading = if (sameVersion) state.contentLoading else updatedPage.content == null,
-                                syncError = null,
+                                syncError = if (quiet) state.syncError else null,
                             )
                         }
                         if (updatedPage.content == null &&
@@ -1976,15 +2007,19 @@ class WikiViewModel(application: Application) : AndroidViewModel(application) {
                         }
                     }
                 }
-            } else {
+            } else if (!quiet) {
                 _uiState.update { it.copy(syncError = null) }
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
-            if (isSyncCurrent()) {
+            if (quiet) {
+                android.util.Log.w("WikiViewModel", "background sync failed for $wsId", e)
+            } else if (isSyncCurrent()) {
                 _uiState.update { it.copy(syncError = e.toUserFacingMessage(str(R.string.error_op_sync))) }
             }
         } finally {
-            if (isSyncCurrent()) {
+            if (!quiet && isSyncCurrent()) {
                 _uiState.update { it.copy(syncLoading = false) }
             }
         }

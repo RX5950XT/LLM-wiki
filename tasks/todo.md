@@ -216,3 +216,15 @@
 
 - `bun test` 174 pass、`tsc` 無錯誤、`assembleRelease`／`assembleDebug` 成功；release APK 原地安裝，登入保留。
 - 細節與未驗證項目見 `CONTEXT.md`。
+
+# 手機抽屜、選單與自動同步（2026-11-07）
+
+- [x] 頂列移除同步，「⋮」只剩編輯 → 改成鉛筆
+- [x] 自動同步：前景每 30 秒、回前景、對話結束；不顯示轉圈與錯誤
+- [x] 抽屜按鈕與功能對齊網頁版（更多選單、工作區切換、可收合知識頁），匯入佇列移到「＋」
+- [x] 抽屜可左右滑開、不與上下捲動衝突（自寫 `SwipeDrawer`）
+- [ ] 返回鍵／點遮罩／右邊緣返回手勢的實機測試（手機斷線，未跑完）
+
+### Review
+
+- `assembleDebug`／`assembleRelease`／`testDebugUnitTest` 成功；Pixel 6a 滑動與同步實測見 `CONTEXT.md`。
