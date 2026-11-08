@@ -67,8 +67,6 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Badge
-import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -410,17 +408,6 @@ fun WikiScreen(
                         onClick = {
                             showSourcesDialog = true
                             wikiViewModel.loadSources()
-                            scope.launch { drawerState.close() }
-                        },
-                    )
-                    DrawerShortcut(
-                        icon = Icons.Default.Schedule,
-                        label = stringResource(R.string.drawer_short_queue),
-                        description = stringResource(R.string.ingest_queue_title),
-                        badge = uiState.activeIngestCount,
-                        onClick = {
-                            showIngestQueueDialog = true
-                            wikiViewModel.loadIngestJobs()
                             scope.launch { drawerState.close() }
                         },
                     )
@@ -1368,16 +1355,14 @@ private fun RowScope.DrawerShortcut(
     label: String,
     onClick: () -> Unit,
     description: String = label,
-    badge: Int = 0,
     busy: Boolean = false,
 ) {
-    val spoken = if (badge > 0) "$description, $badge" else description
     Column(
         Modifier
             .weight(1f)
             .clip(MaterialTheme.shapes.medium)
             .clickable(enabled = !busy, role = Role.Button, onClick = onClick)
-            .semantics { contentDescription = spoken }
+            .semantics { contentDescription = description }
             .heightIn(min = 56.dp)
             .padding(vertical = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -1387,23 +1372,12 @@ private fun RowScope.DrawerShortcut(
             if (busy) {
                 CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
             } else {
-                BadgedBox(
-                    badge = {
-                        if (badge > 0) {
-                            Badge(
-                                containerColor = MaterialTheme.colorScheme.primary,
-                                contentColor = MaterialTheme.colorScheme.onPrimary,
-                            ) { Text(badge.toString()) }
-                        }
-                    },
-                ) {
-                    Icon(
-                        icon,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(22.dp),
-                    )
-                }
+                Icon(
+                    icon,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(22.dp),
+                )
             }
         }
         Spacer(Modifier.height(4.dp))
