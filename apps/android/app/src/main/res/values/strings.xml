@@ -123,7 +123,6 @@
     <string name="graph_legend_summary">Summary</string>
     <string name="graph_legend_synthesis">Synthesis</string>
     <string name="graph_legend_other">Other</string>
-    <string name="action_more">More</string>
     <string name="error_op_graph">Failed to load the graph</string>
     <string name="graph_count_pages">Pages: %1$d</string>
     <string name="graph_count_links">Links: %1$d</string>
@@ -201,7 +200,6 @@
 
     <!-- Help -->
     <string name="help_title">Help</string>
-    <string name="help_open">Open help</string>
     <string name="help_workspace_title">Workspaces and pages</string>
     <string name="help_workspace_body">Use the workspace menu to switch, reorder, or create a workspace. Knowledge pages are AI-maintained. You can also ask the AI in chat to create, rename, or delete workspaces.</string>
     <string name="help_ingest_title">Import content</string>

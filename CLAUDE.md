@@ -309,7 +309,7 @@ apps/android/app/src/main/java/com/llmwiki/
 - 頁面內容由 Compose `verticalScroll` 捲動（TextView 自己捲只能拖、沒有慣性），反向連結放在文章末尾並顯示標題、底部留 88dp 給 FAB。
 - 匯入橫幅只在有 pending/running/paused 時顯示；「本批」完成／失敗數用與 Web 相同的 30 分鐘視窗（`ingestBatchCounts()`），舊的失敗不可永遠掛在畫面上。
 - 冷啟與切換工作區先顯示 Room 快取的 index，再背景同步。打開工作區選單時 `prefetchWorkspaceIndexes()` 先把其他工作區還沒快取的 index.md 抓進 Room；Web 同樣在滑過／打開切換按鈕時 `router.prefetch` ＋ `prefetchPage(ws, "index.md")`，切換不必等約 1 秒的 Drive 讀取。
-- **Android 按鈕收斂（2026-11-07 更新）**：抽屜底部只有一顆「更多」，項目與順序同網頁版的「更多」選單（來源清單／知識圖譜／整理知識庫｜設定／開啟使用說明／登出）；匯入佇列在對話的「＋」（網頁版在 ImportDialog）與匯入橫幅。頁面頂列只有搜尋，可編輯的頁（`notes`／`schema`）多一支鉛筆。新功能入口請加進既有選單，不要再加常駐圖示。
+- **Android 按鈕收斂（2026-11-07 更新）**：抽屜底部直接列出來源清單／匯入佇列（有進行中的匯入時顯示數字）／知識圖譜／整理知識庫，最下面一排是設定／使用說明／登出（2026-11-08，0.8.8）。曾經收進一顆「更多」選單，使用者實測覺得難用：要多點一次，彈出的選單還會蓋住清單，所以不要再收回選單。匯入佇列另外也在對話的「＋」與匯入橫幅。頁面頂列只有搜尋，可編輯的頁（`notes`／`schema`）多一支鉛筆。新功能入口請加進既有選單，不要再加常駐圖示。
 - **沒有手動同步（2026-11-07）**：`WikiViewModel.syncIfChanged()` 在回到前景時立刻跑，App 在前景時每 30 秒跑一次（`repeatOnLifecycle(RESUMED)`，背景不跑），對話結束也跑一次。它只查一次 `workspace_sync_state.pages_revision`，有變才重讀頁面清單。這條路徑不顯示轉圈與錯誤、不打 `ensure-system-pages`、也不可清 `syncError`（那裡也放匯入失敗等訊息）。有可見的同步在跑時要跳過，否則會取代它，轉圈就永遠不會停。打開工作區選單時 `refreshWorkspaceList()` 比對清單，有變才更新。知識圖譜在 `ui/wiki/GraphView.kt`（直查 `page_links`、經 `resolvePageSlug` 解析端點；上方類型 chip 同時是圖例與篩選，對齊 Web），圖譜洞察從圖譜右上角進入（Web 同）。
 - Chat/設定選擇（主題/語言）用 `FilterChip`（含勾選 + TalkBack selected 語意），不要用僅變文字色的 OutlinedButton
 

@@ -123,7 +123,6 @@
     <string name="graph_legend_summary">摘要</string>
     <string name="graph_legend_synthesis">整合</string>
     <string name="graph_legend_other">其他</string>
-    <string name="action_more">更多</string>
     <string name="error_op_graph">載入圖譜失敗</string>
     <string name="graph_count_pages">頁面：%1$d</string>
     <string name="graph_count_links">連結：%1$d</string>
@@ -201,7 +200,6 @@
 
     <!-- 使用說明 -->
     <string name="help_title">使用說明</string>
-    <string name="help_open">開啟使用說明</string>
     <string name="help_workspace_title">工作區與頁面</string>
     <string name="help_workspace_body">用工作區選單切換、排序或建立工作區。知識頁全部由 AI 維護。也可以直接在對話中請 AI 建立、重新命名或刪除工作區。</string>
     <string name="help_ingest_title">匯入內容</string>
