@@ -8,6 +8,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -31,6 +33,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -65,6 +68,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -78,7 +82,6 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.ModalDrawerSheet
-import androidx.compose.material3.NavigationDrawerItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -119,7 +122,12 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.TextFieldValue
@@ -323,12 +331,12 @@ fun WikiScreen(
                 drawerContainerColor = MaterialTheme.colorScheme.surface,
                 drawerContentColor = MaterialTheme.colorScheme.onSurface,
             ) {
-                Spacer(Modifier.height(16.dp))
+                Spacer(Modifier.height(12.dp))
 
                 Box(
                     Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 6.dp),
+                        .padding(horizontal = 12.dp, vertical = 4.dp),
                 ) {
                     TextButton(
                         onClick = {
@@ -392,7 +400,53 @@ fun WikiScreen(
                     }
                 }
 
-                HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                // Tools sit in one strip under the workspace name, and account actions in a
+                // matching strip at the bottom, so the page list keeps the space in between.
+                Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
+                    DrawerShortcut(
+                        icon = Icons.AutoMirrored.Filled.LibraryBooks,
+                        label = stringResource(R.string.drawer_short_sources),
+                        description = stringResource(R.string.sources_open),
+                        onClick = {
+                            showSourcesDialog = true
+                            wikiViewModel.loadSources()
+                            scope.launch { drawerState.close() }
+                        },
+                    )
+                    DrawerShortcut(
+                        icon = Icons.Default.Schedule,
+                        label = stringResource(R.string.drawer_short_queue),
+                        description = stringResource(R.string.ingest_queue_title),
+                        badge = uiState.activeIngestCount,
+                        onClick = {
+                            showIngestQueueDialog = true
+                            wikiViewModel.loadIngestJobs()
+                            scope.launch { drawerState.close() }
+                        },
+                    )
+                    DrawerShortcut(
+                        icon = Icons.Default.Share,
+                        label = stringResource(R.string.drawer_short_graph),
+                        description = stringResource(R.string.graph_view_title),
+                        onClick = {
+                            showGraphDialog = true
+                            wikiViewModel.loadGraph()
+                            scope.launch { drawerState.close() }
+                        },
+                    )
+                    DrawerShortcut(
+                        icon = Icons.Default.Build,
+                        label = stringResource(R.string.drawer_short_tidy),
+                        description = stringResource(R.string.wiki_maintenance),
+                        busy = uiState.organizeRunning,
+                        onClick = {
+                            showMaintenanceConfirm = true
+                            scope.launch { drawerState.close() }
+                        },
+                    )
+                }
+
+                HorizontalDivider(Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
 
                 Box(Modifier.weight(1f)) {
                     if (pages.isEmpty()) {
@@ -437,7 +491,7 @@ fun WikiScreen(
                                     )
                                 }
                                 item {
-                                    HorizontalDivider(Modifier.padding(horizontal = 12.dp, vertical = 4.dp))
+                                    HorizontalDivider(Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
                                 }
                             }
 
@@ -447,7 +501,7 @@ fun WikiScreen(
                                         .fillMaxWidth()
                                         .heightIn(min = 44.dp)
                                         .clickable { wikiSectionExpanded = !wikiSectionExpanded }
-                                        .padding(start = 20.dp, end = 12.dp),
+                                        .padding(start = 24.dp, end = 12.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
                                     Icon(
@@ -493,70 +547,28 @@ fun WikiScreen(
                     }
                 }
 
-                HorizontalDivider(Modifier.padding(vertical = 4.dp))
-                // Every tool is one tap away. A menu inside the drawer hid them behind a
-                // second tap and a popup that covered the list.
-                DrawerToolRow(
-                    icon = Icons.AutoMirrored.Filled.LibraryBooks,
-                    label = stringResource(R.string.sources_open),
-                    onClick = {
-                        showSourcesDialog = true
-                        wikiViewModel.loadSources()
-                        scope.launch { drawerState.close() }
-                    },
-                )
-                DrawerToolRow(
-                    icon = Icons.Default.Schedule,
-                    label = stringResource(R.string.ingest_queue_title),
-                    badge = uiState.activeIngestCount.takeIf { it > 0 }?.toString(),
-                    onClick = {
-                        showIngestQueueDialog = true
-                        wikiViewModel.loadIngestJobs()
-                        scope.launch { drawerState.close() }
-                    },
-                )
-                DrawerToolRow(
-                    icon = Icons.Default.Share,
-                    label = stringResource(R.string.graph_view_title),
-                    onClick = {
-                        showGraphDialog = true
-                        wikiViewModel.loadGraph()
-                        scope.launch { drawerState.close() }
-                    },
-                )
-                DrawerToolRow(
-                    icon = Icons.Default.Build,
-                    label = stringResource(R.string.wiki_maintenance),
-                    busy = uiState.organizeRunning,
-                    onClick = {
-                        showMaintenanceConfirm = true
-                        scope.launch { drawerState.close() }
-                    },
-                )
-                HorizontalDivider(Modifier.padding(vertical = 4.dp, horizontal = 12.dp))
+                HorizontalDivider(Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
                 Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
-                    DrawerFooterButton(
+                    DrawerShortcut(
                         icon = Icons.Default.Settings,
                         label = stringResource(R.string.settings_title),
-                        modifier = Modifier.weight(1f),
                         onClick = {
                             scope.launch { drawerState.close() }
                             onNavigateToSettings(uiState.workspace?.id)
                         },
                     )
-                    DrawerFooterButton(
+                    DrawerShortcut(
                         icon = Icons.AutoMirrored.Filled.Help,
-                        label = stringResource(R.string.help_title),
-                        modifier = Modifier.weight(1f),
+                        label = stringResource(R.string.drawer_short_help),
+                        description = stringResource(R.string.help_title),
                         onClick = {
                             showHelpDialog = true
                             scope.launch { drawerState.close() }
                         },
                     )
-                    DrawerFooterButton(
+                    DrawerShortcut(
                         icon = Icons.AutoMirrored.Filled.Logout,
                         label = stringResource(R.string.auth_sign_out),
-                        modifier = Modifier.weight(1f),
                         onClick = {
                             showSignOutConfirm = true
                             scope.launch { drawerState.close() }
@@ -1349,71 +1361,60 @@ private fun SearchResultsPanel(
     }
 }
 
+/** Icon over a short label. Both drawer strips use it, so they look the same. */
 @Composable
-private fun DrawerToolRow(
+private fun RowScope.DrawerShortcut(
     icon: ImageVector,
     label: String,
     onClick: () -> Unit,
-    badge: String? = null,
+    description: String = label,
+    badge: Int = 0,
     busy: Boolean = false,
 ) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 8.dp)
-            .clip(MaterialTheme.shapes.medium)
-            .clickable(enabled = !busy, onClick = onClick)
-            .heightIn(min = 44.dp)
-            .padding(horizontal = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(
-            icon,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(20.dp),
-        )
-        Spacer(Modifier.width(12.dp))
-        Text(
-            label,
-            style = MaterialTheme.typography.bodyMedium,
-            maxLines = 1,
-            modifier = Modifier.weight(1f),
-        )
-        when {
-            busy -> CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-            badge != null -> Badge(
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-            ) { Text(badge) }
-        }
-    }
-}
-
-@Composable
-private fun DrawerFooterButton(
-    icon: ImageVector,
-    label: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
+    val spoken = if (badge > 0) "$description, $badge" else description
     Column(
-        modifier
+        Modifier
+            .weight(1f)
             .clip(MaterialTheme.shapes.medium)
-            .clickable(onClick = onClick)
+            .clickable(enabled = !busy, role = Role.Button, onClick = onClick)
+            .semantics { contentDescription = spoken }
             .heightIn(min = 56.dp)
             .padding(vertical = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        Icon(
-            icon,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(20.dp),
-        )
+        Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) {
+            if (busy) {
+                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+            } else {
+                BadgedBox(
+                    badge = {
+                        if (badge > 0) {
+                            Badge(
+                                containerColor = MaterialTheme.colorScheme.primary,
+                                contentColor = MaterialTheme.colorScheme.onPrimary,
+                            ) { Text(badge.toString()) }
+                        }
+                    },
+                ) {
+                    Icon(
+                        icon,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(22.dp),
+                    )
+                }
+            }
+        }
         Spacer(Modifier.height(4.dp))
-        Text(label, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+        Text(
+            label,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.clearAndSetSemantics { },
+        )
     }
 }
 
@@ -1424,12 +1425,27 @@ private fun PageListItem(
     onClick: () -> Unit,
     label: String? = null,
 ) {
-    NavigationDrawerItem(
-        label = { Text(label ?: page.title ?: page.slug, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-        selected = isSelected,
-        onClick = onClick,
-        modifier = Modifier.padding(horizontal = 8.dp),
-    )
+    val colors = MaterialTheme.colorScheme
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp)
+            .clip(MaterialTheme.shapes.medium)
+            .background(if (isSelected) colors.secondaryContainer else Color.Transparent)
+            .selectable(selected = isSelected, role = Role.Button, onClick = onClick)
+            .heightIn(min = 44.dp)
+            .padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            label ?: page.title ?: page.slug,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = if (isSelected) FontWeight.Medium else FontWeight.Normal,
+            color = if (isSelected) colors.onSecondaryContainer else colors.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
 }
 
 @Composable

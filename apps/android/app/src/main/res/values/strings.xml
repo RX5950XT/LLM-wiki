@@ -36,6 +36,11 @@
     <string name="ingest_running_progress">Ingesting… %1$d pages updated so far</string>
     <string name="wiki_backlinks">Backlinks</string>
     <string name="sources_title">Ingested sources</string>
+    <string name="drawer_short_sources">Sources</string>
+    <string name="drawer_short_queue">Queue</string>
+    <string name="drawer_short_graph">Graph</string>
+    <string name="drawer_short_tidy">Tidy</string>
+    <string name="drawer_short_help">Help</string>
     <string name="sources_open">Sources</string>
     <string name="sources_empty">No sources ingested yet</string>
     <string name="sources_status_done">%1$d pages integrated</string>

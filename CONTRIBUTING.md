@@ -31,17 +31,21 @@ See `apps/web/.env.example` for the full list. The minimum set to run the web ap
 | `NEXT_PUBLIC_SUPABASE_URL` | Your Supabase project URL |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon key |
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role key (server-only) |
-| `ENCRYPTION_KEY` | 32-byte hex string — encrypt API keys at rest |
+| `ENCRYPTION_KEY` | Base64-encoded 32 bytes (`openssl rand -base64 32`) — encrypts API keys at rest |
 | `GOOGLE_OAUTH_CLIENT_ID` | Google OAuth client ID |
 | `GOOGLE_OAUTH_CLIENT_SECRET` | Google OAuth client secret |
-| `CRON_SECRET` | Random secret used to authenticate the lint cron endpoint |
 
 ### Database migrations
 
 ```bash
-# Apply the initial schema to your Supabase project
+# Apply every migration in supabase/migrations/ in order
 supabase db push --db-url "$DATABASE_URL"
-# or manually run supabase/migrations/0001_init.sql in the Supabase dashboard
+```
+
+The import worker is woken by pg_cron every minute. It needs the worker URL stored in Vault (not part of any migration):
+
+```sql
+select vault.create_secret('https://<host>/api/ingest/worker', 'ingest_worker_url');
 ```
 
 ## Project structure
@@ -49,13 +53,17 @@ supabase db push --db-url "$DATABASE_URL"
 ```
 llm-wiki/
 ├── apps/
-│   ├── web/        Next.js 16 App Router (main web app)
-│   └── android/    Kotlin + Jetpack Compose
-└── packages/
-    ├── shared-types/   TypeScript types used by web
-    ├── prompts/        LLM system prompt templates (ingest, query, lint)
-    └── drive-schema/   Google Drive folder path constants
+│   ├── web/        Next.js 16 App Router (UI and every API route)
+│   └── android/    Kotlin + Jetpack Compose (calls the same web API)
+├── packages/
+│   ├── shared-types/   TypeScript types used by web
+│   ├── prompts/        Default prompt templates (ingest, query, lint)
+│   ├── drive-schema/   Google Drive folder path constants
+│   └── ui/             Shared colour tokens and styles
+└── supabase/migrations/  Database schema and pg_cron jobs
 ```
+
+A file-level map lives in `CLAUDE.md` under 目錄速查.
 
 ## Development workflow
 
@@ -80,9 +88,11 @@ Users can override prompts per-workspace by editing `_schema/ingest.md` etc. in 
    ```
    SUPABASE_URL=https://your-project.supabase.co
    SUPABASE_ANON_KEY=eyJ...
+   # Must be the Web OAuth client ID, not the Android one
    GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
+   WEB_API_BASE_URL=https://your-app.vercel.app
    ```
-3. Run on an emulator or device (API 26+).
+3. Build with `.\gradlew.bat :app:assembleDebug` (JDK 17, e.g. the one bundled with Android Studio), or run from Android Studio on an emulator or device (API 26+).
 
 ## Pull request guidelines
 

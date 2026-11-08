@@ -32,42 +32,111 @@ Karpathy-principle 知識庫工具。LLM 持續維護結構化 markdown wiki，�
 ```
 apps/web/
 ├── app/
-│   ├── (auth)/         登入頁
-│   ├── w/[wid]/        Workspace 主介面（workspace-shell.tsx）
-│   ├── api/
-│   │   ├── search/     GET: 全文搜尋（RPC search_pages + ilike fallback）
-│   │   ├── ingest/     LLM ingest pipeline（kind: url/text；支援 auto_route 由 AI 選工作區）
-│   │   ├── query/      LLM query（streaming；current_slug + context_workspace_ids）
-│   │   ├── agent/execute/  POST: 執行使用者確認過的破壞性動作
-│   │   ├── organize/   POST/GET: 唯一維護 job（健康檢查＋跨工作區整理去重）
-│   │   └── workspaces/ CRUD + synthesis + reorder
-│   └── settings/       LLM profile 管理（含 PATCH 編輯）+ AI 權限開關
+│   ├── (auth)/login/              登入頁
+│   ├── auth/callback/             OAuth 回呼（存 Google refresh token）
+│   ├── auth/reconnect/            Drive 重新授權（Android deep link 也走這裡）
+│   ├── privacy/                   隱私權政策（OAuth 正式版必填）
+│   ├── w/                         工作區列表、create/ 建立頁
+│   ├── w/[wid]/                   工作區主畫面（workspace-shell.tsx：頂列、「更多」選單、匯入／維護狀態列、三欄拖曳）
+│   ├── settings/                  LLM profile、ChatGPT 登入、AI 權限、主題、語言、規則
+│   └── api/
+│       ├── ingest/                POST 存檔即回 202；GET 輪詢與清單（scope=owner）；PATCH pause/resume/retry
+│       ├── ingest/worker/         pg_cron 喚醒的背景 worker（Vault token）
+│       ├── query/                 對話串流（current_slug、context_workspace_ids、query_mode）
+│       ├── organize/              唯一的維護 job（健康檢查＋跨工作區整理去重，agent_jobs）
+│       ├── agent/execute/         執行使用者確認過的破壞性動作
+│       ├── pages/[workspaceId]/   [...slug]：GET 讀頁（ETag/304、alias fallback）、PATCH 寫頁／鎖定、DELETE；根路徑 POST 建立筆記頁
+│       ├── workspaces/            建立；[id] 改名／刪除；reorder；[id]/pages、[id]/synthesis、[id]/ensure-system-pages
+│       ├── sources/[id]/reingest/ 來源重新整合
+│       ├── search/                全文搜尋（RPC search_pages + ilike fallback）
+│       ├── graph/insights/        圖譜洞察
+│       └── settings/              profiles（CRUD）、chatgpt（device code 登入）
 ├── components/
 │   ├── wiki/
-│   │   ├── conversation-panel.tsx  ← 對話中心：citations + 確認卡片 + @ 工作區標記 + Bot 多功能選單
-│   │   ├── import-dialog.tsx       ← 統一導入入口（貼上/拖曳/檔案 + 自動判斷工作區）
-│   │   ├── page-viewer.tsx         ← staleness banner + ReactMarkdown（GFM、frontmatter strip、[[wikilink]] 路由）
-│   │   ├── page-tree.tsx           ← 左側導航樹（只顯示 wiki zone；無 icon）
-│   │   └── graph-view.tsx          ← react-force-graph-2d（動態 import；degree sizing + hover 高亮）
-│   └── workspace/
-│       ├── create-form.tsx         ← 新建 workspace + Drive re-auth
-│       └── workspace-card.tsx
-└── lib/
-    ├── ai/
-    │   ├── tools.ts             ← 跨工作區 AI 工具（6 頁面 + 6 workspace 管理）
-    │   ├── organize-pipeline.ts ← 維護 pipeline（健康檢查＋去重＋重新分類＋工作區調整）
-    │   ├── client.ts            ← LLM client factory
-    │   └── citation-parser.ts   ← 解析 \x00NAME\x00 metadata blocks
-    ├── workspaces/manage.ts  ← create/rename/delete workspace 共用函式
-    ├── crypto/               ← AES-256-GCM API key 加解密
-    ├── drive/                ← Google Drive API wrapper
-    ├── supabase/             ← server/browser client factories
-    └── sync/                 ← Realtime hook (useRealtimePages)
+│   │   ├── conversation-panel.tsx 對話：citations、確認卡片、@ 工作區、「＋」導入選單、模型晶片
+│   │   ├── import-dialog.tsx      匯入入口（貼上／拖曳／選檔、目標工作區）＋匯入佇列
+│   │   ├── ingest-queue.ts        佇列狀態判斷（等待原因、本批計數）
+│   │   ├── page-viewer.tsx        頁面顯示、編輯工具列、反向連結、stale 橫幅
+│   │   ├── page-tree.tsx          左欄頁面清單（只列 wiki zone）
+│   │   ├── graph-view.tsx         知識圖譜＋洞察（動態 import react-force-graph-2d）
+│   │   ├── sources-dialog.tsx     來源清單＋重新整合
+│   │   └── help-dialog.tsx        使用說明
+│   ├── settings/                  profile、ChatGPT 登入、AI 權限、主題、語言、規則
+│   └── workspace/create-form.tsx  建立工作區＋Drive 重授權
+├── lib/
+│   ├── ai/
+│   │   ├── client.ts              LLM client（首筆資料／中途沉默逾時、OpenRouter 預設推理強度）
+│   │   ├── chatgpt.ts             ChatGPT profile（Codex Responses API）
+│   │   ├── tools.ts               跨工作區 AI 工具與硬性 guard
+│   │   ├── ingest-intake.ts       匯入第一段：讀來源、路由、去重、寫 Drive
+│   │   ├── ingest-plan.ts         計畫與複查的 JSON 產生
+│   │   ├── ingest-pipeline.ts     寫入迴圈（時間預算、續寫）
+│   │   ├── ingest-job-runner.ts   claim／lease、執行到期 job、回收死掉的 run
+│   │   ├── ingest-job-state.ts    job 狀態轉換
+│   │   ├── ingest-retry.ts        失敗分類與重試時間
+│   │   ├── ingest-error-i18n.ts   匯入錯誤翻譯
+│   │   ├── route-workspace.ts     自動判斷目標工作區
+│   │   ├── organize-pipeline.ts   維護 pipeline
+│   │   ├── organize-mechanical.ts 維護中由程式判斷的部分（空工作區、重複頁、失效連結、索引）
+│   │   ├── source-tools.ts        事實模式讀原始來源
+│   │   ├── frontmatter-merge.ts   frontmatter 合併、wikiToday()
+│   │   ├── citation-parser.ts     串流尾端 metadata
+│   │   └── profile.ts             預設 profile fallback
+│   ├── drive/                     Drive client、錯誤、系統頁、工作區初始化
+│   ├── google/                    access token 快取、OAuth token、重授權
+│   ├── ingest/document-parser.ts  PDF／DOCX／PPTX／EPUB／文字／圖片解析
+│   ├── fetch/url-to-markdown.ts   抓網頁（SSRF 防護）
+│   ├── wiki/slug.ts、resolve.ts   wikilink 解析與 alias fallback
+│   ├── graph/insights.ts          圖譜洞察計算
+│   ├── workspaces/                manage.ts（建立／改名／刪除共用）、queries.ts（排序與 fallback）
+│   ├── supabase/                  server／browser／admin client、request.ts（Cookie 或 Bearer）
+│   ├── crypto/api-key.ts          AES-256-GCM 加解密
+│   ├── sync/realtime.ts           useRealtimePages
+│   └── i18n/、ime.ts、env.ts
+└── messages/                      zh-TW.json、en.json
 
 packages/
-├── shared-types/       TS 型別（LLMProfile, WorkspacePage...）
-├── prompts/            ingest/query/lint.md prompt templates
-└── drive-schema/       Drive 資料夾路徑常量
+├── prompts/          ingest／query／lint.md 預設提示詞
+├── shared-types/     TS 型別
+├── drive-schema/     Drive 資料夾路徑常量
+└── ui/               共用色票（styles.css；Android Color.kt 要同步）
+
+supabase/migrations/  schema、RLS、pg_cron（ingest-worker）
+```
+
+Android：
+
+```
+apps/android/app/src/main/java/com/llmwiki/
+├── LlmWikiApp.kt
+├── MainActivity.kt             singleTask；分享意圖、Drive 重授權 deep link、啟動前套用語言
+├── ui/
+│   ├── LlmWikiNavGraph.kt      launch → auth／wiki／workspace-create／settings
+│   ├── auth/                   Google 登入（CredentialManager → Supabase IDToken）
+│   ├── wiki/
+│   │   ├── WikiScreen.kt       主畫面：側邊欄（工作區、捷徑列、頁面清單、帳號列）、頂列、匯入橫幅、對話 sheet、各對話框
+│   │   ├── WikiViewModel.kt    頁面、同步（syncIfChanged）、對話串流、匯入、維護、來源
+│   │   ├── SwipeDrawer.kt      自寫的可滑動側邊欄（不要換回 ModalNavigationDrawer）
+│   │   ├── WorkspaceMenu.kt    工作區選單（長按拖曳排序、行內改名）
+│   │   ├── GraphView.kt        知識圖譜＋洞察
+│   │   ├── MarkdownViewer.kt   Markwon + TextView
+│   │   └── StreamMeta.kt       串流尾端 metadata 解析
+│   ├── settings/               設定頁（profile、ChatGPT 登入、AI 權限、主題、語言、規則）
+│   ├── workspace/              建立工作區
+│   └── theme/                  色票（對齊 packages/ui）、字體、圓角
+├── data/
+│   ├── AndroidHttpClient.kt    Ktor（timeout、錯誤轉換）
+│   ├── SupabaseClient.kt       Supabase client（session 跨重啟保留）
+│   ├── AuthSession.kt          requireAccessToken（refresh 以 mutex 序列化）
+│   ├── PageRepository.kt       syncPages（先查 revision）、頁面內容（ETag）
+│   ├── LlmProfileRepository.kt 直查 llm_profiles
+│   ├── AppPreferencesRepository.kt  DataStore（語言、主題、最後工作區）
+│   ├── DriveClient.kt、DriveReconnect.kt
+│   ├── Models.kt
+│   └── room/                   AppDatabase、PageDao、PageEntity（含內容快取）、WorkspaceCacheStateEntity
+└── sync/
+    ├── SyncWorker.kt           每小時背景同步
+    └── IngestUploadWorker.kt   匯入上傳（outbox，殺 App 後會重送）
 ```
 
 ## 核心 Karpathy 原則
@@ -166,7 +235,7 @@ GOOGLE_OAUTH_CLIENT_SECRET=
 - 掃描逐一 catch：單一工作區刪除失敗（Drive 資料夾不存在）不可 throw 上去，否則整輪維護在 LLM 開跑前就被標 failed
 - 維護自己 `createWorkspace` 出來、跑完卻沒填東西的空殼**不吃 1 小時寬限期**（寬限是給「匯入路由剛建好、ingest 還在寫」的工作區）；用工具回傳的 id 記錄，不拿時間猜
 - **同一頁在同一次按鈕裡只能搬一次**（`frozenMoveSlugs`）：每輪都從零重新推導分類，邊界模糊的頁會被搬來搬去；有變更 → `more_work` 永遠 true → 自動再開一輪，一次按鈕會把預算花在自己推翻自己。`loadFrozenMoveSlugs()` 讀 30 分鐘內 organize job 的 progress，`movePageToWorkspace` 直接拒絕。**只有維護會設，對話不受影響**
-- 入口：Web 頂列 `Wrench`、Android drawer `Build`（各一顆）
+- 入口：Web 頂列「更多」→ 整理知識庫、Android 側邊欄捷徑列的「整理」
 - **「一次一個」靠 DB 約束，不靠檢查**（migration `0019`）：route 的 SELECT 檢查與 INSERT 之間隔著好幾秒的 Drive 呼叫，兩個分頁同時續跑（都看到 `done && more_work`）會雙雙通過檢查 → 兩條 pipeline 同時改同一個 wiki、燒兩倍額度（實測發生過）。`agent_jobs (owner_id) where status='running'` 的 partial unique index 才擋得住；route 把 `23505` 轉成 `409 + 現行 jobId`，client 採用它繼續輪詢
 
 ### Ingest 驗證

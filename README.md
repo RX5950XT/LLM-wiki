@@ -1,117 +1,162 @@
 # LLM Wiki
 
-> 一個由 LLM 持續維護的知識庫，橫跨 Web 與 Android，所有內容儲存在你自己的 Google Drive。
+> 把你讀過的東西交給 AI，它會整理成一套互相連結、會持續更新的 Markdown 知識庫。網頁與 Android 都能用，內容存在你自己的 Google Drive。
 
-靈感來自 Andrej Karpathy、Lex Fridman 和 tobi 的工作方式——讓 LLM 讀取你的資料來源，將其整合進一個互相連結的 Markdown wiki，並持續保持更新，而不需要你手動整理。
+靈感來自 Andrej Karpathy 的做法：不是每次提問才臨時翻資料，而是讓 LLM 把每個來源**編譯**進 wiki——寫摘要、建立人物與概念頁、補上交叉連結、標出互相矛盾的說法。wiki 本身就是成品，會越用越完整。
 
-## 為何存在
+## 能做什麼
 
-大多數「與文件對話」的工具在每次查詢時只是片段式地撈取資料，兩次對話之間什麼都不記得。LLM Wiki 不同：LLM 會將每一個新來源增量地**編譯**進結構化的 wiki（摘要、實體頁面、交叉引用、矛盾標記）。**Wiki 是持久存在的成品。** 資料歸你所有——以純 Markdown 格式存放在你的 Google Drive，可以直接用 Obsidian、VS Code 或任何文字編輯器開啟。
+**匯入**
+- 貼上網址或文字，或上傳 PDF、DOCX、PPTX、EPUB、純文字／Markdown 與圖片（單檔 2 MiB 內）。
+- AI 自動判斷該放進哪個工作區，主題都不合時會自己開新的工作區。
+- 送出後立即存檔，之後在伺服器背景處理；關掉網頁或 App 也不會中斷。額度用完或供應商出錯會自動重試，進度在「匯入佇列」查看。
+
+**對話**
+- 預設以你正在看的頁面為上下文，輸入 `@` 可以帶入其他工作區。
+- 「事實模式」只讀原始來源作答，並標出引用的行數。
+- 好的回答可以一鍵存成綜合頁；刪除類操作會先跳出確認卡片。
+
+**整理與瀏覽**
+- 多個工作區，可切換、改名、刪除與拖曳排序。
+- 全文搜尋、知識圖譜與圖譜洞察（孤立頁、群組、橋接頁、失效連結）。
+- 「整理知識庫」讓 AI 跨全部工作區合併重複頁、重新分類、修好失效連結，直接改 wiki，不另寫報告。
+- 來源清單保留每一份原始來源，可以重新整合。
+
+**資料歸你**
+- 頁面是純 Markdown，放在你 Google Drive 的 `Apps/LLM Wiki/`，用 Obsidian、VS Code 或任何編輯器都能打開。
+- LLM 自備金鑰：任何 OpenAI 相容端點（OpenRouter、OpenAI、Ollama…），或直接用 ChatGPT 帳號登入使用方案額度。
+
+**Android**
+- 離線快取、從其他 App 分享網址進來匯入、在前景時自動同步。
+- 側邊欄可左右滑開，不會和上下捲動打架。
 
 ## 核心原則
 
-1. **Ingest 是編譯，不是索引** — 一個來源會觸及 10 個以上既有頁面
-2. **查詢結果可存回 wiki** — 你的探索過程本身也成為知識
-3. **LLM 主導 wiki 層，使用者負責導演** — 你策展來源、提問
-4. **原始來源不可變更** — 完整可追溯
-5. **使用者筆記與 AI wiki 實體分離**（Steph Ango 原則）
-6. **Schema 共同演化** — 你可以調整引導 LLM 的 Prompt
-7. **對話 + 即時 wiki 是核心體驗** — 一側聊天，另一側 wiki 即時更新
+1. **匯入是編譯，不是建索引**：一個來源通常會改到 10 個以上既有頁面。
+2. **提問的結果可以存回 wiki**：你的探索過程也會變成知識。
+3. **LLM 負責寫 wiki，你負責導演**：你挑來源、提問題。
+4. **原始來源不可修改**：每一頁都能追溯回來源。
+5. **AI 的 wiki 與你的筆記分開存放**：`wiki/` 由 AI 寫，`notes/` 與 `_schema/` AI 不能動。
+6. **規則一起演化**：匯入、查詢、整理的提示詞放在 `_schema/`，可以在設定頁修改。
+7. **對話與即時更新的 wiki 是主要體驗**。
 
-## 技術棧
+## 架構
 
-| 層級 | 技術 |
-|------|------|
-| Web 前端 | Next.js 16 App Router + Tailwind CSS v4，部署於 Vercel |
-| Android | Kotlin + Jetpack Compose |
-| Metadata | Supabase（Postgres + Auth + Realtime） |
-| 儲存 | 你自己的 Google Drive（我們只存 metadata） |
-| LLM | BYO key，支援 OpenAI-compatible endpoint（OpenRouter / OpenAI / Anthropic / Ollama / 任意） |
+```
+ Web（Next.js）   Android（Compose）
+        │               │
+        └───── Web API（Vercel，sin1）─────┬──── LLM 供應商（自備金鑰／ChatGPT）
+                                          ├──── Google Drive（頁面內容）
+                                          └──── Supabase（帳號、metadata、Realtime、
+                                                 pg_cron 每分鐘喚醒匯入 worker）
+```
 
-## 開發進度
+- 頁面內容只存在 Google Drive（`drive.file` 權限，只看得到本 App 建立的檔案）；Supabase 只存 metadata、連結與工作狀態。
+- Android 呼叫與網頁相同的 API，另外用 Room 快取頁面，可離線閱讀。
 
-| 階段 | 狀態 | 說明 |
-|------|------|------|
-| 0 — 骨架 | ✅ | Monorepo、Next.js 16、Android 骨架、Supabase schema |
-| 1 — Web MVP | ✅ | Google OAuth + Drive 初始化、來源整合、wiki 瀏覽、Realtime |
-| 2 — 查詢與存回 | ✅ | 對話介面、Citation chips、Synthesis 頁面、鎖定切換 |
-| 3 — Android | ✅ | Kotlin + Compose、Room 離線快取、分享意圖、WorkManager 同步 |
-| 4 — Lint + Graph | ✅ | 力導向圖視圖、LLM wiki 健檢、每週定期任務 |
-| 5 — 介面優化 | ✅ | 完整繁體中文 i18n、可拖移側邊欄、個人資料頁、任意格式 ingest |
-| 6 — 多工作區 | ✅ | 多工作區切換、新建工作區、Drive token 失效重授權 |
-| 7 — Android 對齊 | ✅ | Android Chat/Query 串流、citations、synthesis、lock toggle、登出 |
-| 8 — 安全強化 | ✅ | P0/P1 安全漏洞修復、Android 帳號 Room cache 隔離 |
-| 9 — 批次攝取 + 搜尋 | ✅ | 多檔上傳/拖曳、PostgreSQL tsvector 全文搜尋、模型選擇器 |
-| 10 — AI 檔案操控 | ✅ | deletePage / movePage 工具（自動重寫 backlink）、工作區排序 |
-| 11–17 — 知識編譯能力 | ✅ | 可恢復 Ingest queue、多格式匯入、Faithful raw-source query、Graph Insights，以及 Web/Android 對齊 |
+## 專案結構
+
+```
+LLM-wiki/
+├── apps/
+│   ├── web/                    Next.js 16 App Router（介面＋全部 API）
+│   │   ├── app/api/            ingest、query、organize、pages、workspaces、sources、search、graph…
+│   │   ├── app/w/[wid]/        工作區主畫面（workspace-shell.tsx）
+│   │   ├── components/wiki/    對話、匯入、頁面、圖譜、來源清單
+│   │   ├── lib/ai/             LLM client、工具、匯入與整理 pipeline
+│   │   ├── lib/drive/          Google Drive 讀寫
+│   │   └── messages/           介面文字（zh-TW、en）
+│   └── android/                Kotlin + Jetpack Compose
+│       └── app/src/main/java/com/llmwiki/
+│           ├── ui/wiki/        主畫面、側邊欄（SwipeDrawer）、圖譜、Markdown 顯示
+│           ├── data/           API／Supabase／Drive 存取與 Room 快取
+│           └── sync/           背景同步與匯入上傳（WorkManager）
+├── packages/
+│   ├── prompts/                預設的匯入／查詢／整理提示詞
+│   ├── shared-types/           共用 TypeScript 型別
+│   ├── drive-schema/           Drive 資料夾路徑常數
+│   └── ui/                     共用色票與樣式
+└── supabase/migrations/        資料庫 schema 與 pg_cron 排程
+```
 
 ## 快速開始
 
-### 前置需求
-- Node.js 22 / Bun
-- Supabase 專案（免費方案即可）
-- Google Cloud 專案，已啟用 OAuth client 與 Drive API
+### 需要準備
 
-### Web
+- Bun 1.x（或 Node.js 22）
+- Supabase 專案（免費方案即可）
+- Google Cloud 專案：建立 Web OAuth client，啟用 Drive API
+- 一把 LLM API 金鑰，或 ChatGPT 帳號
+
+### 1. 資料庫
+
+依序套用 `supabase/migrations/` 內的 migration（`supabase db push` 或在 Dashboard 執行）。匯入 worker 需要另外在 Vault 寫入網址：
+
+```sql
+select vault.create_secret('https://<你的網域>/api/ingest/worker', 'ingest_worker_url');
+```
+
+沒有這一筆時，匯入仍可運作，但要有網頁或 App 開著才會往下跑。
+
+### 2. Web
 
 ```bash
-git clone https://github.com/your-org/llm-wiki
-cd llm-wiki
 bun install
 cp apps/web/.env.example apps/web/.env.local
-# 填入 SUPABASE_URL、SUPABASE_ANON_KEY、SUPABASE_SERVICE_ROLE_KEY
-#       ENCRYPTION_KEY（openssl rand -base64 32）
-#       GOOGLE_OAUTH_CLIENT_ID、GOOGLE_OAUTH_CLIENT_SECRET
-#       NEXT_PUBLIC_SITE_URL（部署後改為 Vercel URL）
 bun run dev
 ```
 
-### Android
+`.env.local` 需要填：
 
-1. 用 Android Studio 開啟 `apps/android`
-2. 建立 `apps/android/local.properties`（參考 `local.properties.example`）：
-   ```
+| 變數 | 說明 |
+|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL`、`NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase 專案網址與 anon key |
+| `SUPABASE_SERVICE_ROLE_KEY` | 只在伺服器使用 |
+| `ENCRYPTION_KEY` | 加密 API 金鑰用，`openssl rand -base64 32` 產生 |
+| `GOOGLE_OAUTH_CLIENT_ID`、`GOOGLE_OAUTH_CLIENT_SECRET` | Google Web OAuth client |
+
+Google OAuth 同意畫面要發布為「正式版」，否則 refresh token 7 天就會失效，使用者每週都得重新授權 Drive。
+
+### 3. Android
+
+1. 用 Android Studio 開啟 `apps/android`。
+2. 依 `local.properties.example` 建立 `apps/android/local.properties`：
+   ```properties
    SUPABASE_URL=https://your-project.supabase.co
    SUPABASE_ANON_KEY=your-anon-key
-   # 必須填 Web OAuth client ID（不是 Android client ID）
-   GOOGLE_CLIENT_ID=xxx-yyy.apps.googleusercontent.com
+   # 要填 Web OAuth client ID，不是 Android client ID
+   GOOGLE_CLIENT_ID=xxx.apps.googleusercontent.com
    WEB_API_BASE_URL=https://your-app.vercel.app
    ```
-   - `GOOGLE_CLIENT_ID` 在 Google Cloud Console → APIs & Services → Credentials → **Web client**（`requestIdToken` 需要）
-   - `WEB_API_BASE_URL` 是 Vercel 部署後的 URL，本機測試時改為 `http://10.0.2.2:3000`（模擬器）
-3. 在裝置或模擬器上執行（API 26+）
+   在模擬器上連本機開發伺服器時，`WEB_API_BASE_URL` 改成 `http://10.0.2.2:3000`。
+3. 建置：`.\gradlew.bat :app:assembleDebug`（需要 Android Studio 內附的 JDK 17）。支援 Android 8.0（API 26）以上。
 
-目前 Android 正式版：**v0.7.0**（versionCode **7**）。[下載 APK](https://github.com/RX5950XT/LLM-wiki/releases/download/v0.7.0/llm-wiki-0.7.0.apk)；[查看 Release](https://github.com/RX5950XT/LLM-wiki/releases/tag/v0.7.0)。
+### 下載 Android 版
 
-SHA-256：`97FF398DC4AA6B106925EEF7AAB277608C6BFE148C781A094D3ABE5A2C5389D7`
+到 [最新 Release](https://github.com/RX5950XT/LLM-wiki/releases/latest) 下載 APK。
 
-## 如何使用
+## 使用方式
 
-1. **登入** — 使用 Google 帳號登入，系統自動在 Google Drive 建立 `Apps/LLM Wiki/` 資料夾結構
-2. **設定 LLM Profile** — 前往設定頁，新增 OpenAI-compatible endpoint（OpenRouter、OpenAI、本地 Ollama 等）
-3. **Ingest 來源** — 在右側面板貼上 URL、純文字或 Markdown，點「整合」，LLM 自動更新 wiki 頁面
-4. **查詢 Wiki** — 在對話欄輸入問題，回答底部顯示引用頁面，可一鍵存成 Synthesis 頁面
-5. **瀏覽 Wiki** — 左側頁面樹瀏覽知識頁
-6. **搜尋** — 頂列 Search 按鈕展開搜尋框，輸入 2 字元以上自動全文搜尋，點擊結果直接跳轉
-7. **知識圖譜** — 頂列 GitFork 按鈕開啟力導向圖視圖：
-   - 每個圓點代表一個頁面（紫色 = 目前頁面、藍色 = entity、綠色 = concept、琥珀色 = synthesis、灰色 = 其他）
-   - 連線代表頁面間的 `[[wikilink]]` 引用關係；中心密集區 = wiki 核心知識群
-   - 四周孤立的灰點 = 尚未被引用的孤立頁面，可作為「待整合」清單
-   - 點任一節點可直接跳轉至該頁面
-8. **Wiki 健康檢查** — 頂列燒杯按鈕觸發 LLM 健檢：
-   - LLM 從 `index.md` 出發，最多執行 20 個步驟巡視整個 wiki
-   - 自動偵測並修復：孤立頁面、斷連 wikilink、概念重疊、缺漏交叉引用等問題
-   - 完成後自動跳轉至當日 lint 報告（`_lint/YYYY-MM-DD.md`），列出所有發現與修正
-   - 可透過設定頁編輯 `_schema/lint.md` 自訂健檢規則
-9. **批次匯入** — 拖曳或多選 `.md` / `.txt` 檔案到對話輸入框，即可批次上傳
-10. **理解頁面分工** — `wiki/` 是 LLM 維護的知識頁；`notes/` 是你自己寫的筆記；`_schema/` 是設定內的規則檔
-11. **管理筆記** — Web 與 Android 都可新增、重新命名、刪除 `notes/*.md` 頁面，並用內建 Markdown 工具列編輯
-12. **編輯規則** — 規則入口已搬到設定頁；若 `_schema/*.md` 仍是預設模板，切換語言時會跟著本地化
-13. **調整工作區順序** — Web 可直接拖移排序，Android 可在工作區選單調整上下順序
+1. 用 Google 帳號登入，App 會在 Drive 建立 `Apps/LLM Wiki/`。
+2. 到設定頁新增 LLM 設定檔，或用 ChatGPT 登入。
+3. 在對話輸入框按「＋」→「導入內容」，貼上網址、文字或選檔案。
+4. 在對話中提問；回答會附上引用的頁面，可存成綜合頁。
+5. 網頁版的「更多」選單、Android 側邊欄上方的捷徑，可以打開來源清單、匯入佇列、知識圖譜與整理知識庫。
 
-## 貢獻
+## 開發
 
-請參考 [CONTRIBUTING.md](CONTRIBUTING.md) 了解開發環境設定、專案結構與 PR 規範。
+```bash
+bun run dev          # 啟動網頁開發伺服器（http://localhost:3000）
+bun run typecheck    # 全部套件型別檢查
+bun run test         # 單元測試
+bun run build        # 正式建置
+```
+
+| 文件 | 內容 |
+|---|---|
+| [CLAUDE.md](CLAUDE.md)／[AGENTS.md](AGENTS.md) | 開發規範、架構決策與「不要回退」的實測紀錄 |
+| [CONTEXT.md](CONTEXT.md) | 最近做了什麼、還缺什麼 |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | 開發環境與 PR 規範 |
 
 ## 授權
 

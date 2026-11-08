@@ -41,27 +41,76 @@ type CookieEntry = { name: string; value: string; options: CookieOptions };
 ```
 apps/web/
 ├── app/
-│   ├── (auth)/         登入頁
-│   ├── w/[wid]/        Workspace 主介面（workspace-shell.tsx）
-│   ├── api/
-│   │   ├── ingest/     LLM ingest pipeline
-│   │   ├── query/      LLM query（streaming）
-│   │   └── workspaces/ pages CRUD
-│   └── settings/       LLM profile 管理
+│   ├── (auth)/login/              登入頁
+│   ├── auth/callback/             OAuth 回呼（存 Google refresh token）
+│   ├── auth/reconnect/            Drive 重新授權（Android deep link 也走這裡）
+│   ├── privacy/                   隱私權政策（OAuth 正式版必填）
+│   ├── w/                         工作區列表、create/ 建立頁
+│   ├── w/[wid]/                   工作區主畫面（workspace-shell.tsx：頂列、「更多」選單、匯入／維護狀態列、三欄拖曳）
+│   ├── settings/                  LLM profile、ChatGPT 登入、AI 權限、主題、語言、規則
+│   └── api/
+│       ├── ingest/                POST 存檔即回 202；GET 輪詢與清單（scope=owner）；PATCH pause/resume/retry
+│       ├── ingest/worker/         pg_cron 喚醒的背景 worker（Vault token）
+│       ├── query/                 對話串流（current_slug、context_workspace_ids、query_mode）
+│       ├── organize/              唯一的維護 job（健康檢查＋跨工作區整理去重，agent_jobs）
+│       ├── agent/execute/         執行使用者確認過的破壞性動作
+│       ├── pages/[workspaceId]/   [...slug]：GET 讀頁（ETag/304、alias fallback）、PATCH 寫頁／鎖定、DELETE；根路徑 POST 建立筆記頁
+│       ├── workspaces/            建立；[id] 改名／刪除；reorder；[id]/pages、[id]/synthesis、[id]/ensure-system-pages
+│       ├── sources/[id]/reingest/ 來源重新整合
+│       ├── search/                全文搜尋（RPC search_pages + ilike fallback）
+│       ├── graph/insights/        圖譜洞察
+│       └── settings/              profiles（CRUD）、chatgpt（device code 登入）
 ├── components/
-│   ├── wiki/           PageTree, PageViewer, ConversationPanel
-│   └── workspace/      WorkspaceCard
-└── lib/
-    ├── ai/             LLM client factory + tools + ingest pipeline
-    ├── crypto/         AES-256-GCM API key 加解密
-    ├── drive/          Google Drive API wrapper
-    ├── supabase/       server/browser client factories
-    └── sync/           Realtime hook (useRealtimePages)
+│   ├── wiki/
+│   │   ├── conversation-panel.tsx 對話：citations、確認卡片、@ 工作區、「＋」導入選單、模型晶片
+│   │   ├── import-dialog.tsx      匯入入口（貼上／拖曳／選檔、目標工作區）＋匯入佇列
+│   │   ├── ingest-queue.ts        佇列狀態判斷（等待原因、本批計數）
+│   │   ├── page-viewer.tsx        頁面顯示、編輯工具列、反向連結、stale 橫幅
+│   │   ├── page-tree.tsx          左欄頁面清單（只列 wiki zone）
+│   │   ├── graph-view.tsx         知識圖譜＋洞察（動態 import react-force-graph-2d）
+│   │   ├── sources-dialog.tsx     來源清單＋重新整合
+│   │   └── help-dialog.tsx        使用說明
+│   ├── settings/                  profile、ChatGPT 登入、AI 權限、主題、語言、規則
+│   └── workspace/create-form.tsx  建立工作區＋Drive 重授權
+├── lib/
+│   ├── ai/
+│   │   ├── client.ts              LLM client（首筆資料／中途沉默逾時、OpenRouter 預設推理強度）
+│   │   ├── chatgpt.ts             ChatGPT profile（Codex Responses API）
+│   │   ├── tools.ts               跨工作區 AI 工具與硬性 guard
+│   │   ├── ingest-intake.ts       匯入第一段：讀來源、路由、去重、寫 Drive
+│   │   ├── ingest-plan.ts         計畫與複查的 JSON 產生
+│   │   ├── ingest-pipeline.ts     寫入迴圈（時間預算、續寫）
+│   │   ├── ingest-job-runner.ts   claim／lease、執行到期 job、回收死掉的 run
+│   │   ├── ingest-job-state.ts    job 狀態轉換
+│   │   ├── ingest-retry.ts        失敗分類與重試時間
+│   │   ├── ingest-error-i18n.ts   匯入錯誤翻譯
+│   │   ├── route-workspace.ts     自動判斷目標工作區
+│   │   ├── organize-pipeline.ts   維護 pipeline
+│   │   ├── organize-mechanical.ts 維護中由程式判斷的部分（空工作區、重複頁、失效連結、索引）
+│   │   ├── source-tools.ts        事實模式讀原始來源
+│   │   ├── frontmatter-merge.ts   frontmatter 合併、wikiToday()
+│   │   ├── citation-parser.ts     串流尾端 metadata
+│   │   └── profile.ts             預設 profile fallback
+│   ├── drive/                     Drive client、錯誤、系統頁、工作區初始化
+│   ├── google/                    access token 快取、OAuth token、重授權
+│   ├── ingest/document-parser.ts  PDF／DOCX／PPTX／EPUB／文字／圖片解析
+│   ├── fetch/url-to-markdown.ts   抓網頁（SSRF 防護）
+│   ├── wiki/slug.ts、resolve.ts   wikilink 解析與 alias fallback
+│   ├── graph/insights.ts          圖譜洞察計算
+│   ├── workspaces/                manage.ts（建立／改名／刪除共用）、queries.ts（排序與 fallback）
+│   ├── supabase/                  server／browser／admin client、request.ts（Cookie 或 Bearer）
+│   ├── crypto/api-key.ts          AES-256-GCM 加解密
+│   ├── sync/realtime.ts           useRealtimePages
+│   └── i18n/、ime.ts、env.ts
+└── messages/                      zh-TW.json、en.json
 
 packages/
-├── shared-types/       TS 型別（LLMProfile, WorkspacePage...）
-├── prompts/            ingest/query/lint.md prompt templates
-└── drive-schema/       Drive 資料夾路徑常量
+├── prompts/          ingest／query／lint.md 預設提示詞
+├── shared-types/     TS 型別
+├── drive-schema/     Drive 資料夾路徑常量
+└── ui/               共用色票（styles.css；Android Color.kt 要同步）
+
+supabase/migrations/  schema、RLS、pg_cron（ingest-worker）
 ```
 
 ## 核心 Karpathy 原則（設計決策基準）
@@ -97,27 +146,6 @@ SUPABASE_SERVICE_ROLE_KEY=
 ENCRYPTION_KEY=          # base64 32 bytes，用於 AES-256-GCM 加密 API key / Google refresh token
 GOOGLE_OAUTH_CLIENT_ID=
 GOOGLE_OAUTH_CLIENT_SECRET=
-```
-
-## 目錄速查（補充）
-
-```
-apps/web/
-├── app/api/
-│   ├── search/                     ← GET: 全文搜尋（RPC search_pages + ilike fallback）
-│   ├── agent/execute/              ← POST: 執行使用者確認過的破壞性動作（delete_page / delete_workspace）
-│   ├── organize/                   ← POST/GET: 唯一的維護 job（健康檢查＋跨工作區整理去重，agent_jobs）
-│   ├── workspaces/[id]/synthesis/  ← POST: 儲存 Q&A 為 synthesis page
-│   └── pages/[wid]/[...slug]/lock/ ← PATCH: 切換 locked_by_human
-├── components/wiki/
-│   ├── conversation-panel.tsx  ← 對話中心（citation chips、確認卡片、@ 工作區標記、Bot 多功能選單）
-│   ├── import-dialog.tsx       ← 統一導入入口（貼上／拖曳／檔案 + 自動判斷工作區）
-│   └── page-viewer.tsx         ← 含 staleness banner + ReactMarkdown（GFM、frontmatter strip、[[wikilink]] 路由）
-├── lib/workspaces/manage.ts    ← create/rename/delete workspace 共用函式（REST route 與 AI 工具共用）
-└── lib/ai/
-    ├── tools.ts                ← AI wiki 工具（跨工作區；read/write/search/list/delete/move + workspace 管理）
-    ├── organize-pipeline.ts    ← 維護 pipeline（健康檢查＋去重＋重新分類＋工作區調整，不寫報告）
-    └── citation-parser.ts      ← 解析串流尾端的 \x00NAME\x00 metadata blocks
 ```
 
 ## 串流 metadata 協定（Citations + Actions）
@@ -209,30 +237,35 @@ Android 呼叫與 Web 相同的後端 API（`/api/ingest`、`/api/query`、`/api
 
 ```
 apps/android/app/src/main/java/com/llmwiki/
-├── MainActivity.kt           ← ACTION_SEND 分享意圖 → extractSharedUrl
+├── LlmWikiApp.kt
+├── MainActivity.kt             singleTask；分享意圖、Drive 重授權 deep link、啟動前套用語言
 ├── ui/
-│   ├── LlmWikiNavGraph.kt    ← auth → wiki 路由，傳遞 accountName + shareUrl
-│   ├── auth/
-│   │   ├── AuthViewModel.kt  ← CredentialManager + Supabase IDToken sign-in
-│   │   │                        AuthState.Success 含 workspaceId + accountName
-│   │   └── AuthScreen.kt
-│   └── wiki/
-│       ├── WikiScreen.kt     ← ModalNavigationDrawer + Scaffold + IngestUrlDialog
-│       ├── WikiViewModel.kt  ← pages Flow（Room）+ syncPages + ingestUrl (Ktor)
-│       │                        init() 後自動呼叫 SyncWorker.schedule()
-│       └── MarkdownViewer.kt ← Markwon + AndroidView(TextView)
+│   ├── LlmWikiNavGraph.kt      launch → auth／wiki／workspace-create／settings
+│   ├── auth/                   Google 登入（CredentialManager → Supabase IDToken）
+│   ├── wiki/
+│   │   ├── WikiScreen.kt       主畫面：側邊欄（工作區、捷徑列、頁面清單、帳號列）、頂列、匯入橫幅、對話 sheet、各對話框
+│   │   ├── WikiViewModel.kt    頁面、同步（syncIfChanged）、對話串流、匯入、維護、來源
+│   │   ├── SwipeDrawer.kt      自寫的可滑動側邊欄（不要換回 ModalNavigationDrawer）
+│   │   ├── WorkspaceMenu.kt    工作區選單（長按拖曳排序、行內改名）
+│   │   ├── GraphView.kt        知識圖譜＋洞察
+│   │   ├── MarkdownViewer.kt   Markwon + TextView
+│   │   └── StreamMeta.kt       串流尾端 metadata 解析
+│   ├── settings/               設定頁（profile、ChatGPT 登入、AI 權限、主題、語言、規則）
+│   ├── workspace/              建立工作區
+│   └── theme/                  色票（對齊 packages/ui）、字體、圓角
 ├── data/
-│   ├── DriveClient.kt        ← GoogleAccountCredential + Drive SDK
-│   ├── PageRepository.kt     ← syncPages（Supabase→Room）+ loadPageContent（Drive）
-│   ├── Models.kt             ← WorkspaceRow, PageRow（@Serializable）
-│   └── room/
-│       ├── AppDatabase.kt
-│       ├── PageDao.kt        ← observePages(workspace_id, account_name) Flow + upsertAll
-│       └── PageEntity.kt     ← (workspace_id, account_name, slug) PK，確保每帳號 Room cache 隔離
+│   ├── AndroidHttpClient.kt    Ktor（timeout、錯誤轉換）
+│   ├── SupabaseClient.kt       Supabase client（session 跨重啟保留）
+│   ├── AuthSession.kt          requireAccessToken（refresh 以 mutex 序列化）
+│   ├── PageRepository.kt       syncPages（先查 revision）、頁面內容（ETag）
+│   ├── LlmProfileRepository.kt 直查 llm_profiles
+│   ├── AppPreferencesRepository.kt  DataStore（語言、主題、最後工作區）
+│   ├── DriveClient.kt、DriveReconnect.kt
+│   ├── Models.kt
+│   └── room/                   AppDatabase、PageDao、PageEntity（含內容快取）、WorkspaceCacheStateEntity
 └── sync/
-    ├── SyncWorker.kt         ← CoroutineWorker，schedule() 每小時 KEEP 策略
-    └── IngestUploadWorker.kt ← 匯入上傳（outbox + WorkManager，殺 App 後會重送）
-
+    ├── SyncWorker.kt           每小時背景同步
+    └── IngestUploadWorker.kt   匯入上傳（outbox，殺 App 後會重送）
 ```
 
 ## Android 注意事項
@@ -297,7 +330,7 @@ apps/android/app/src/main/java/com/llmwiki/
 - `LaunchRoute` 查 workspaces 失敗（離線）時導向 `wiki` 而非 `workspace-create`；`workspace-create` 只保留給「成功查詢且真的沒有工作區」
 - 離線冷啟：`AppPreferencesRepository.setLastWorkspace()` 持久化最後使用的 workspace（account + WorkspaceRow JSON），`refreshWorkspaces()` 失敗時還原它並顯示 Room 快取頁面清單，不再出現空白畫面
 - Android backlinks 面板：`selectPage` 觸發 `loadBacklinks()` 直查 Supabase `page_links`（RLS），顯示為 MarkdownViewer 下方的 AssistChip 橫向捲動列；查詢失敗靜默為空（離線可接受）
-- Sources 清單：drawer 底列 `LibraryBooks` icon → `SourcesListDialog`，`loadSources()` 直查 `sources` + `ingest_jobs`（各 source 取最新 job 的 status/touched 數）；來源不可編輯（Karpathy 原則），純檢視
+- Sources 清單：側邊欄捷徑列「來源」→ `SourcesListDialog`，`loadSources()` 直查 `sources` + `ingest_jobs`（各 source 取最新 job 的 status/touched 數）；來源不可編輯（Karpathy 原則），純檢視
 - Chat 草稿存 `WikiUiState.chatDraft`（ViewModel），sheet 關閉/旋轉不丟；`sendQuery` 送出時清空
 - Ingest 進度：`pollIngestJob` 於 running 期間讀 `touched_pages` 長度 → `WikiUiState.ingestProgress`，banner 顯示「整合中…已更新 N 個頁面」
 - `themes.xml` 用 `Theme.AppCompat.DayNight.NoActionBar`，`values/` 淺色 windowBackground（#FAF9F7）、`values-night/` 深色（#0F1419）——避免淺色模式冷啟黑閃；AppCompat parent 不可換（`setApplicationLocales` 依賴）
@@ -309,7 +342,7 @@ apps/android/app/src/main/java/com/llmwiki/
 - 頁面內容由 Compose `verticalScroll` 捲動（TextView 自己捲只能拖、沒有慣性），反向連結放在文章末尾並顯示標題、底部留 88dp 給 FAB。
 - 匯入橫幅只在有 pending/running/paused 時顯示；「本批」完成／失敗數用與 Web 相同的 30 分鐘視窗（`ingestBatchCounts()`），舊的失敗不可永遠掛在畫面上。
 - 冷啟與切換工作區先顯示 Room 快取的 index，再背景同步。打開工作區選單時 `prefetchWorkspaceIndexes()` 先把其他工作區還沒快取的 index.md 抓進 Room；Web 同樣在滑過／打開切換按鈕時 `router.prefetch` ＋ `prefetchPage(ws, "index.md")`，切換不必等約 1 秒的 Drive 讀取。
-- **Android 按鈕收斂（2026-11-07 更新）**：抽屜底部直接列出來源清單／匯入佇列（有進行中的匯入時顯示數字）／知識圖譜／整理知識庫，最下面一排是設定／使用說明／登出（2026-11-08，0.8.8）。曾經收進一顆「更多」選單，使用者實測覺得難用：要多點一次，彈出的選單還會蓋住清單，所以不要再收回選單。匯入佇列另外也在對話的「＋」與匯入橫幅。頁面頂列只有搜尋，可編輯的頁（`notes`／`schema`）多一支鉛筆。新功能入口請加進既有選單，不要再加常駐圖示。
+- **Android 按鈕收斂（2026-11-07 更新）**：抽屜分三段：工作區名稱下方一排捷徑（來源／佇列／圖譜／整理，佇列有進行中的匯入時顯示數字），中間是頁面清單（44dp、一般字級），最底一排是設定／說明／登出；兩排捷徑共用 `DrawerShortcut`，頁面列與捷徑列不可再各用一種樣式（2026-11-08，0.8.8）。曾經收進一顆「更多」選單，使用者實測覺得難用：要多點一次，彈出的選單還會蓋住清單，所以不要再收回選單。匯入佇列另外也在對話的「＋」與匯入橫幅。頁面頂列只有搜尋，可編輯的頁（`notes`／`schema`）多一支鉛筆。新功能入口請加進既有選單，不要再加常駐圖示。
 - **沒有手動同步（2026-11-07）**：`WikiViewModel.syncIfChanged()` 在回到前景時立刻跑，App 在前景時每 30 秒跑一次（`repeatOnLifecycle(RESUMED)`，背景不跑），對話結束也跑一次。它只查一次 `workspace_sync_state.pages_revision`，有變才重讀頁面清單。這條路徑不顯示轉圈與錯誤、不打 `ensure-system-pages`、也不可清 `syncError`（那裡也放匯入失敗等訊息）。有可見的同步在跑時要跳過，否則會取代它，轉圈就永遠不會停。打開工作區選單時 `refreshWorkspaceList()` 比對清單，有變才更新。知識圖譜在 `ui/wiki/GraphView.kt`（直查 `page_links`、經 `resolvePageSlug` 解析端點；上方類型 chip 同時是圖例與篩選，對齊 Web），圖譜洞察從圖譜右上角進入（Web 同）。
 - Chat/設定選擇（主題/語言）用 `FilterChip`（含勾選 + TalkBack selected 語意），不要用僅變文字色的 OutlinedButton
 
@@ -322,12 +355,12 @@ apps/android/app/src/main/java/com/llmwiki/
 - 從 Supabase `page_links` 表讀邊，`pages` 表讀節點（需 `createClient` from `@/lib/supabase/client`）
 - `page_links` 由 `writePage` 工具在每次寫頁面時自動同步（解析 `[[wikilink]]` → upsert）
 - workspace-shell 頂列 `GitFork` 按鈕切換，點節點後自動跳回 PageViewer
-- `Wrench` 按鈕觸發 POST `/api/organize`（單一維護動作：健康檢查 ＋ 跨全部工作區整理去重）
+- 「更多」選單的「整理知識庫」觸發 POST `/api/organize`（單一維護動作：健康檢查 ＋ 跨全部工作區整理去重）
 - **Obsidian 對齊（Phase 14）**：節點大小改 degree-based（`3 + sqrt(degree) * 1.6`，上限 12），`nodeCanvasObject` 自繪節點 + 文字標籤（`globalScale > 1.4` 或 hover 才顯示標籤），hover 高亮鄰居（其餘節點/邊降透明度），孤兒節點（degree 0）平時淡化
 
 ## 維護 job（健康檢查 ＋ 整理去重，Phase 16 合一）
 
-**只剩一個維護動作**：Web 頂列 `Wrench`、Android drawer `Build`，各一顆按鈕 → confirm → `POST /api/organize`（`agent_jobs` kind `organize`）。健康檢查與整理去重是**同一個 pipeline**（`lib/ai/organize-pipeline.ts` 的 `runOrganizePipeline`），不再有兩支 job、兩顆按鈕。
+**只剩一個維護動作**：Web 頂列「更多」→「整理知識庫」、Android 側邊欄捷徑列「整理」，各一個入口 → confirm → `POST /api/organize`（`agent_jobs` kind `organize`）。健康檢查與整理去重是**同一個 pipeline**（`lib/ai/organize-pipeline.ts` 的 `runOrganizePipeline`），不再有兩支 job、兩顆按鈕。
 
 - **不產生任何報告頁**（不寫 `_lint/*`、`_organize/*`）——wiki 本身就是產出。`agent_jobs.progress` 累積工具呼叫（`toolName:slug|name|workspace_id`），前端 pill 顯示「已變更 N 項」，`report_slug` 永遠 null。
 - **全權限、不 gate**：pipeline 傳 `confirmDestructive: false`——按鈕上的 confirm dialog 就是使用者授權。以前預設 `ai_confirm_destructive=true` 會讓背景 job 的刪除被 `gateDestructive` 直接拒絕（沒人能按確認卡片），這就是「自動整理去重沒有實際作用」的根因，**不要改回去**。

@@ -36,6 +36,11 @@
     <string name="ingest_running_progress">整合中…已更新 %1$d 個頁面</string>
     <string name="wiki_backlinks">反向連結</string>
     <string name="sources_title">已匯入的來源</string>
+    <string name="drawer_short_sources">來源</string>
+    <string name="drawer_short_queue">佇列</string>
+    <string name="drawer_short_graph">圖譜</string>
+    <string name="drawer_short_tidy">整理</string>
+    <string name="drawer_short_help">說明</string>
     <string name="sources_open">來源清單</string>
     <string name="sources_empty">尚未匯入任何來源</string>
     <string name="sources_status_done">已整合 %1$d 個頁面</string>
