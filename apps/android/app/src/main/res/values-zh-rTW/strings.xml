@@ -201,11 +201,13 @@
     <!-- 使用說明 -->
     <string name="help_title">使用說明</string>
     <string name="help_workspace_title">工作區與頁面</string>
-    <string name="help_workspace_body">用工作區選單切換、排序或建立工作區。知識頁全部由 AI 維護。也可以直接在對話中請 AI 建立、重新命名或刪除工作區。</string>
+    <string name="help_workspace_body">用工作區選單切換或建立工作區，長按任一列可拖曳排序。知識頁全部由 AI 維護。也可以直接在對話中請 AI 建立、重新命名或刪除工作區。</string>
     <string name="help_ingest_title">匯入內容</string>
-    <string name="help_ingest_body">打開對話後，按輸入框左側的機器人按鈕 →「導入內容」或「從檔案匯入」。目標工作區預設「自動判斷」，由 AI 決定內容該進哪個工作區。</string>
+    <string name="help_ingest_body">打開對話後，按輸入框下方的「＋」→「導入內容」或「從檔案匯入」。送出後就算關掉 App 也會繼續上傳與整合，進度看側邊欄的「匯入佇列」。目標工作區預設「自動判斷」，由 AI 決定內容該進哪個工作區。</string>
     <string name="help_chat_title">對話與綜合頁</string>
-    <string name="help_chat_body">對話預設以你正在看的頁面為上下文；輸入「@」可標記其他工作區一起參考。AI 會把有價值的內容整理進知識頁；刪除類操作會先跳出確認卡片（可在設定改成直接執行）。側欄的魔杖按鈕可跨全部工作區自動分類＋去重複。</string>
+    <string name="help_chat_body">對話預設以你正在看的頁面為上下文；輸入「@」可標記其他工作區一起參考。AI 會把有價值的內容整理進知識頁；刪除類操作會先跳出確認卡片（可在設定改成直接執行）。</string>
+    <string name="help_tools_title">搜尋、圖譜與整理</string>
+    <string name="help_tools_body">頂列的放大鏡輸入 2 個字以上就能搜尋整個知識庫。側邊欄下方有來源清單、匯入佇列、知識圖譜和整理知識庫。圖譜裡的圓點是頁面、連線是頁面之間的連結，點圓點會打開那一頁。整理知識庫會讓 AI 跨全部工作區合併重複的頁、重新分類並修好失效的連結，直接改知識庫，不會另外寫報告。</string>
     <string name="help_settings_title">設定與 LLM 設定檔</string>
     <string name="help_settings_body">設定頁管理 LLM profile、語言、外觀與規則。規則是控制匯入、查詢與健康檢查的提示詞檔。</string>
     <string name="help_drive_title">Google Drive 重新連線</string>

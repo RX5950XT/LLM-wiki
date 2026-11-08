@@ -250,15 +250,15 @@
     "workspaceTitle": "Workspaces and pages",
     "workspaceBody": "Use the workspace menu to switch, drag to reorder, or create workspaces. Knowledge pages are AI-maintained. You can also ask the AI in chat to create, rename, or delete workspaces.",
     "ingestTitle": "Import content",
-    "ingestBody": "Click the bot button left of the chat input → \"Import content\" to paste a URL or text, or drop / pick .txt, .md, .pdf, .docx, .pptx, .epub, or common image files. Import jobs keep running after you close the dialog; the target defaults to \"Auto\".",
+    "ingestBody": "Click the + below the chat input → \"Import content\" to paste a URL or text, or drop / pick .txt, .md, .pdf, .docx, .pptx, .epub, or common image files. Imports keep running after you close the dialog or the page; follow them in the queue in the same dialog. The target defaults to \"Auto\".",
     "chatTitle": "Chat and synthesis",
-    "chatBody": "The chat defaults to the page you're viewing as context. Type \"@\" to tag another workspace as extra context. The AI files valuable content into knowledge pages; destructive actions show a confirmation card first (switchable in Settings). The wand button in the top bar runs auto-classify + dedupe across all workspaces.",
+    "chatBody": "The chat uses the page you're viewing as context. Type \"@\" to tag another workspace as extra context. The AI files valuable content into knowledge pages; destructive actions show a confirmation card first (switchable in Settings).",
     "settingsTitle": "Settings and sync",
     "settingsBody": "Settings manages LLM profiles, language, appearance, and rules. Rules are the prompt files that control ingest, query, and health checks.",
     "driveTitle": "Google Drive reconnect",
     "driveBody": "If Drive access expires, reconnect when prompted. After returning to the app or web page, workspace and profile data refresh automatically.",
-    "toolsTitle": "Search, graph, and health check",
-    "toolsBody": "Click the magnifying-glass icon and type 2+ characters to full-text search the wiki. The GitFork button opens the knowledge graph: nodes are pages, edges are wikilinks; isolated gray dots are orphaned pages not yet referenced by anything — click any node to navigate. The flask button runs a wiki health check: the LLM finds and fixes orphaned pages, broken wikilinks, and concept overlaps, then opens a lint report (_lint/date.md)."
+    "toolsTitle": "Search, graph, and tidy-up",
+    "toolsBody": "Click the magnifier in the top bar and type 2+ characters to search the whole wiki. The More menu has Sources, Graph view, and Tidy knowledge base. In the graph, dots are pages and lines are links between them; hollow dots are pages nothing links to yet, and clicking a dot opens that page. Tidy knowledge base has the AI merge duplicate pages, regroup pages across all workspaces, and fix broken links, editing the wiki directly without writing a report."
   },
   "graph": {
     "loading": "Loading graph…",

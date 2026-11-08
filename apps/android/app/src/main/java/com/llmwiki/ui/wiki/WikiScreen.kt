@@ -1258,6 +1258,10 @@ private fun WikiHelpDialog(onDismiss: () -> Unit) {
                     body = stringResource(R.string.help_chat_body),
                 )
                 HelpSection(
+                    title = stringResource(R.string.help_tools_title),
+                    body = stringResource(R.string.help_tools_body),
+                )
+                HelpSection(
                     title = stringResource(R.string.help_settings_title),
                     body = stringResource(R.string.help_settings_body),
                 )
