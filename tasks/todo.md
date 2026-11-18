@@ -1,230 +1,51 @@
-# 六項知識編譯能力（2026-08-31）
+# LLM-wiki todo
+最後更新：2026-11-19
 
-## 規劃與資料契約
+## 現況（交接）
+- Web（Next.js on Vercel）＋ Android 的對話驅動知識庫；功能、架構、建置見 `README.md`，規範、協定與「勿回退」紀錄見 `CLAUDE.md`／`AGENTS.md`。
+- 最新 Android：`0.8.8`（versionCode `20`，GitHub Release `v0.8.8`，tag 指向 `7e33b39`），簽章與 0.8.6 起相同可覆蓋安裝；README 下載連 `releases/latest`。
+- 環境：Supabase production `mjuciqffwayydobpxzcz`（ap-southeast-1）；Vercel 跑 `sin1`、Fluid Compute、無 cron（`vercel.json` 與 `CRON_SECRET` 已於 Phase 16 移除）。
+- 匯入持久化（Phase 18）：POST 只存檔回 202，pg_cron `ingest-worker` 每分鐘喚醒 worker，失敗分類＋自動重試；Android 用 WorkManager 上傳。Vault 的 `ingest_worker_url` 是手動寫入，不在 migration 內。
+- 預設模型為 OpenRouter `google/gemini-3.8-flash`（走 Google Vertex BYOK，實付 $0；OpenRouter「僅限 BYOK」沒開，Vertex 失敗時理論上會改扣 OpenRouter 餘額）。
+- Android 抽屜：工作區名稱下一排「來源／佇列／圖譜／整理」、最底一排「設定／說明／登出」，共用 `DrawerShortcut`；網頁同樣功能放在「更多」選單（刻意不同的只有版面）。
+- 同步：沒有手動同步，`syncIfChanged` 在前景每 30 秒、回前景、對話結束時查 revision；開頁用 ETag 條件請求。
 
-- [x] 盤點 Ingest / Query / Sources / Graph 的 Web、Android、DB 完整 caller
-- [x] 設計並新增 `ingest_jobs` 可恢復狀態、checkpoint、SHA256 去重 migration（GRANT + RLS 同步）
-- [x] 定義兩階段 Ingest plan、寫入、自我審查與錯誤／暫停邊界
-- [x] 定義 Faithful mode 原始來源工具與可驗證 citation metadata
-- [x] 選定最少且安全的多格式解析依賴，完成漏洞與維護狀態檢查
+## 關鍵決策
+- 機械判斷交給程式、語意判斷交給模型（掃空工作區、找重複、死連結清單都由程式先算好再給模型）。
+- 維護（整理知識庫）是單一 pipeline、單一按鈕；模型拿不到 `deleteWorkspace`；不產生報告頁。
+- 匯入是加法：ingest 固定 `confirmDestructive: true`，不刪頁；去重交給維護。
+- Drive → DB → `page_links` 不是單一交易，靠新檔＋DB version／lock CAS＋補償降低衝突與孤兒。
+- ChatGPT 暫緩（使用者決定）：`strict:false` 驗證先不做，OpenRouter 設定不動。
+- production migration history 只記到 0010（0004／0005／0011 是手動套用），不要整批 `db push`。
 
-## 後端實作
+## 測試陷阱
+- `GET /api/ingest` 也會啟動到期的 job：測 cron 時只要有 client 開著，任務可能是 client 推動的，要看 `net._http_response` 才算數。
+- 暫停 intake 擋不住 Drive 寫入（`runIntake` 寫來源檔前不檢查 job 狀態）。要清得乾淨的測試請用解析必敗的網址（如 `https://x.invalid/`），不碰 Drive、不花模型費用。
+- 測批次匯入開新工作區前，先確認工作區數量低於 12（`MAX_AUTO_WORKSPACES`），否則不會開新工作區，測試會假通過。
+- PDF 要用真檔測：假 PDF 的失敗訊息剛好一樣，曾蓋住 production 全部 PDF 解析失敗的 bug。
+- 實機自動化腳本每一步都要先確認 App 在前景（曾有腳本在 App 退出後繼續在桌面滑 10 分鐘）。
+- 右邊緣約 105px 是系統返回手勢區，從那裡慢拖會關抽屜，屬系統行為。
+- Android `assembleDebug` 偶爾 `checkDebugAarMetadata` 的 Gradle 快取搬移失敗（`Could not move temporary workspace`），與程式無關，重跑即過。
+- 查 DB 一定要按 `owner_id` 過濾（另外兩個空的「My Wiki」屬於別的帳號，不是 bug）。
 
-- [x] 兩階段 Ingest：分析人物／概念／證據／矛盾／目標頁，再寫入並自我審查
-- [x] 共用 `writePageForWorkspace` 加安全合併：保留 sources/tags/related，拒絕可疑縮短
-- [x] 可恢復 Ingest queue：pause / resume / retry / checkpoint / SHA256 unchanged skip
-- [x] PDF / DOCX / PPTX / EPUB / image 匯入與圖片描述
-- [x] Faithful Query：只可讀 raw sources，不注入 wiki／背景知識，回傳來源 citation
-- [x] Graph Insights API：孤立頁、社群、橋接頁、可能缺失連結（5 個 fixture 通過）
+## 待辦
+- [ ] （暫緩）ChatGPT 額度重置後確認 `strict:false` 真的解決 0 頁：job `a45d5c4f-b5f5-4ec0-86bc-52066137cf7a` 看 `touched_pages`，仍 0 頁就讀 `checkpoint.diagnostics`。
+- [ ] 手機接電腦一直響（Windows 裝置連線音，手機確實反覆斷線）：已排除「每小時固定斷線」；靜置時不斷線，多數疑似手拿時接頭晃動，「充飽才斷」只有一次反例未證實。`+cellular_high_tx_power` 與斷線重合不是證據，別再走這條。
+- [ ] Drive 留有兩個測試殘檔待刪：`187pJPuE1lxXzPMsQoZH_ynuBIucQJGjI`（沒被任何資料列引用）、`1c9vSDFgDVc5vzR3QY6ZpI9_26GD7OAgB`（離線重送測試留下的 AI/sources 來源檔）。
 
-## Web / Android 對齊
+## 已知問題／刻意不處理
+- Android `lintDebug` 既有 3 個 Error：`DriveClient.kt:33`、`DriveReconnect.kt:20`（NewApi）、`GraphView.kt:201`（produceState）。
+- Web lint 剩 38 warnings（37 個刻意保留的診斷 console、1 個 export 格式）；build 有既有 `experimental.turbo` warning。
+- next-intl 不升 v4（大遷移，接受現狀）；build 工具鏈 3 個 high 不進 runtime。
+- Supabase advisor「Leaked Password Protection」需手動在 Dashboard 開；只用 Google OAuth，不影響。
+- 矛盾（contradiction）只記在 `log.md`，沒有專門 UI。
+- Web／Android 小差異沒改：網頁頁首有「AI／使用者」標記、網頁編輯器有格式工具列、網頁有「此頁面已更新」橫幅（手機靠自動同步＋ETag）。
+- 掃描檔與 Web 上傳 PDF 在 production 只部分實測；桌面版真實輸入法（注音選字時按 Enter）沒測過，只有手機實測與桌面模擬事件。
+- 大檔競態修正（`next_attempt_at`）只做過低強度測試（輪詢 2 次）。
+- Android 0.8.6 離線橫幅新文字沒在真正離線時重測（走同一個 `ingestLoading` 狀態）。
 
-- [x] Web：Faithful 切換、queue 控制、多格式狀態、graph insights
-- [x] Android：沿用同一 API，對齊 Faithful、queue、多格式、graph insights 與雙語字串
-- [x] 未知串流 metadata 保持向後相容；錯誤／loading／disabled／a11y 狀態齊全
-
-## 驗證與交付
-
-- [x] 單元／route／DB policy 測試涵蓋安全合併、checkpoint、去重、Faithful citation、圖演算法
-- [x] `bun test`（107 pass / 0 fail）、`bun run typecheck`（5/5）、`bun run build`（1/1）、`bun audit`、`git diff --check`
-- [x] Android `./gradlew.bat :app:assembleDebug` 與相關 unit tests（APK `0.7.0`）
-- [x] 瀏覽器實測：公開登入 redirect，以及新 API 未登入時回 JSON/401
-- [x] `recoverable_ingest` migration 套用 production，欄位與索引讀回驗證
-- [x] push 後部署並驗證公開站與 commit status
-- [x] 更新 `CONTEXT.md` / `tasks/lessons.md`，完成文件收尾（commit + push 由主代理執行）
-
-## Review
-
-- `bun test`：107 pass / 0 fail。
-- `bun run typecheck`：5/5 packages passed；`bun run build`：1/1 passed。
-- Android `testDebugUnitTest` 無測試來源但成功，`assembleDebug` 成功；APK `0.7.0` / versionCode `7`。
-- `recoverable_ingest` 已套用 production；`sources` 欄位、`ingest_jobs` 欄位與 unique/index 約束已讀回驗證。
-- Security review：無 CRITICAL/HIGH；剩餘已知限制是 Drive → DB → `page_links` 非單一交易，保留 CAS + compensation。
-- 部署：commit `3318b26`、Vercel success、GitHub Actions `33473299451` success，Android APK artifact 已上傳；production 公開頁/API 回讀正常。
-
----
-
-# 參考 nashsu/llm_wiki 改善本專案（2026-08-31）
-
-- [x] 查證 Codex 全域子代理設定欄位
-- [x] 將一般 Codex 與 Orca runtime 子代理預設設為 `gpt-5.6-luna` / `max`
-- [x] 在全域與專案 `AGENTS.md` 寫入積極委派規則
-- [x] 研究並比較上游 `nashsu/llm_wiki` v0.6.11（`e808211`），整理產品、資料流、prompts、工具與 UI 差異
-- [x] 選出不重複且能直接提升本專案的改善：統一 synthesis commit path
-- [x] 完成 synthesis route 實作；Android 無需變更
-- [x] 完成最終驗證：`bun test` 41 pass/0 fail、`bun run typecheck` 5/5、`bun run build` 1/1、Android `assembleDebug` `BUILD SUCCESSFUL`
-- [x] Review：安全複核無 CRITICAL/HIGH；中文／emoji slug collision 已由 query fallback + 12 hex UUID 關閉；既有 MEDIUM 是 shared writer 的 Drive→DB→page_links 非原子，本輪未做跨核心交易／補償重構
-- [x] Commit 並 push 目前分支
-
----
-
-# 修復批次：連結 / 圖譜 / 來源 / 維護按鈕（2026-07-13）
-
-使用者連續回報 5 項。診斷完成，依 root cause 分組。
-
-## 診斷數據（production mjuciqffwayydobpxzcz）
-- 189 頁、600 page_links，**225 條 dangling（37.5%）**
-- dangling 拆解：126 條「格式不符但頁面存在」（缺 `concepts/` 前綴／大小寫／`.md`）、99 條真失連
-- 唯一可 alias 解析 35 個 distinct slug、1 個撞頁、68 個真失連
-- sources：49 筆，2 筆 ingest 失敗（要 re-ingest 入口）
-- lint route 是**同步** `await generateText`（關頁面即斷），organize 已是 job
-
-## Group 1 — 藍色連結 PAGE_NOT_FOUND + 圖譜亂（同一 root cause）
-- [x] 1a. 共用 `lib/wiki/slug.ts`（canonicalWikiAlias）
-- [x] 1b. `/api/pages/[...slug]` GET：exact miss → 唯一 alias 匹配才 resolve（共用咽喉點，修所有 client）
-- [x] 1c. `page-viewer.tsx`：真失連顯示友善訊息，不再噴 `[PAGE_NOT_FOUND]`
-- [x] 4a. `graph-view.tsx`：邊的端點經 alias 解析成真實節點；解不到就濾掉（去幽靈節點）
-
-## Group 3 — 已匯入來源修復（re-ingest）
-- [x] 5a. Web `sources-dialog.tsx` + Android `SourcesListDialog`：每列加「重新整合」按鈕
-- [x] 5b. 新 route `POST /api/sources/[id]/reingest`：讀 Drive 既有內容 → 建新 ingest_job → 重跑 pipeline，沿用 `/api/ingest?job_id=` 輪詢
-
-## Group 2 — 維護按鈕整合（lint + organize 合一 + 進度 + 背景）
-- [x] 2a. lint 改 job 化（migration `0016` 加 `lint` kind、`after()` 背景跑、GET `?job_id=` 輪詢 + stale sweep；cron GET 保留）
-- [x] 2b. Web 頂列一顆 `Wrench` 維護選單（健康檢查 / 自動整理＋去重）；Android drawer `Build` 選單
-- [x] 2c. Web 統一進度 pill：進行中（含「可關頁面背景續跑」提示）/完成（查看報告）/失敗，localStorage 續跑
-- [x] 2d. Android 對齊：`runMaintenance(kind)` 泛化、kind-aware 進行中 banner + 背景提示
-
-## 收尾
-- [x] Android 連結解析：走同支 `/api/pages`，自動吃到伺服器 fallback（WikiViewModel 本就有 canonicalWikiAlias 本地解析）
-- [x] typecheck 5/5 / web build 綠 / Android compileDebugKotlin 綠 / migration 0016 已套 production
-- [x] Android release APK + commit push
-
-## Review 心得
-- 連結失效的 root cause 是資料髒（225/600 dangling），但正解不是改資料而是**讀取時在伺服器咽喉點做唯一-alias fallback**——survives writePage 重寫、一次修所有 client（Web/Android/直接 URL）。ambiguity 只有 1 筆，故「唯一匹配才 resolve」安全。
-- 圖譜的「亂」= force-graph 對 dangling 邊生幽靈節點；client 端解析邊端點 + 濾掉解不到的，比清資料更穩。
-- lint 從同步改 job 化後，Android 舊的「2xx 即完成」邏輯會假完成——協定改動一定要回頭掃所有 client caller。
-- 兩顆按鈕合一 + 背景續跑：organize 早就是 job，只要把 lint 也放進 agent_jobs（共用 one-at-a-time 鎖）就自然變「一次一個維護任務」。前端 localStorage 記 jobId → 重載/關頁面回來續 poll。
-
-# 深色圖譜與匯入卡住修復（2026-09-01）
-
-- [x] 查 production logs、`ingest_jobs` 與前端輪詢資料流，確認卡住根因
-- [x] 修 Web 知識圖譜深色模式，沿用既有主題 token
-- [x] 修匯入狀態不會自動結束的根因並補回歸檢查
-- [x] 驗證 Web 深色／淺色、匯入狀態、typecheck、build 與 Android APK
-- [x] 更新 Review、commit、push 並確認 production 部署
-
-## Review
-
-- 根因是 Web 直接查 `ingest_jobs.status=running`；Vercel 中斷留下 stale row 時，畫面會永遠顯示「匯入中」。改由 `/api/ingest` 先做 server stale sweep，再回傳 queue 清單給 UI。
-- GraphView 改用 `next-themes` 的 `resolvedTheme` 與深色專用節點／連線色，切換深色模式後重繪仍保持可讀。
-- `findStaleRunningJobs` 回歸測試確認只清理過期 running job，不影響仍活著的 job。
-- commit `67a1522` 已部署至 production；正式網址 redirect 正常，新 ingest list 未登入回 JSON `401`，近 10 分鐘無 error log。
-
----
-
-# Android 最新 APK 發行（2026-09-01）
-
-- [x] 盤點現有 GitHub Release、tag、Android 版本與發行流程，決定未使用版本
-- [x] 確認 Android `versionName` / `versionCode`，更新 README／CONTEXT 文件
-- [x] 執行 Android 測試與 APK 建置，核對 APK 內版本、大小與 SHA-256
-- [x] 提交並推送，建立 GitHub Release 並上傳版本化 APK
-- [x] 驗證遠端 branch、tag、Release 與下載資產
-
-## Review
-
-- `v0.7.0` / versionCode `7` 發行前確認未與遠端 tag／Release 重複。
-- `bun test`：108 pass / 0 fail；`bun run typecheck`：5/5；`bun run build`：1/1。
-- Android `testDebugUnitTest`：NO-SOURCE；`assembleDebug`、`assembleRelease`：BUILD SUCCESSFUL。
-- 正式 APK：4,854,680 bytes；SHA-256 `97FF398DC4AA6B106925EEF7AAB277608C6BFE148C781A094D3ABE5A2C5389D7`；簽章與 `v0.6.0` 相同。
-
-## 2026-09-08 審查問題修復
-
-- [x] 修維護查詢失敗誤刪、Drive 寫入衝突、ingest attempt 重用
-- [x] 修 Web / Android 切頁與 Android 跨工作區聊天回應污染
-- [x] 修根目錄 test 與 Web lint 指令，補必要回歸檢查
-- [x] 執行測試、typecheck、Web build、Android assembleDebug
-- [x] 更新 review、提交並推送目前分支
-- Android 實機測試依使用者指示留到之後。
-
-### Review（2026-09-09）
-
-- writer 用新檔 + DB CAS 發布，競爭落敗只清自己的檔案；GET 遇到已換版舊檔會重讀新 pointer 一次，真實刪除仍回錯。
-- 維護 inventory fallback 失敗會停止；ingest claim 後必須匹配自己的 status / attempt_count。
-- Web 以 request generation 丟棄晚到成功、錯誤及轉頁回應；Android 同時隔離頁面載入與跨工作區 chat 串流。
-- `bun run test`：131 pass / 0 fail（25 files），不再空跑；`bun run typecheck`：5/5；`bun run build`：成功。
-- `bun run lint` 已能執行 ESLint；仍回 exit 1（20 errors / 52 warnings）。以新 config 對照 HEAD 原始檔確認 20 errors 均已存在，本次沒有新增 error；沒有關閉規則或擴大重寫既有程式。
-- Web build 保留既有 `next.config.ts experimental.turbo` 選項 warning；不影響建置成功。
-- `apps/android`：`.\gradlew.bat :app:assembleDebug :app:testDebugUnitTest` 成功；JVM 2 tests / 0 failures / 0 errors，並非實機測試。APK SHA-256：`E307878CD069A6C26B616EB3A2732A6741EE7CBB5D552221ED3245C759A0635E`。
-
----
-
-## 2026-09-09 修復既有 lint 錯誤
-
-- [x] 修 workspace-shell 的狀態更新、ref 及內部連結
-- [x] 修設定元件、PageViewer、GraphView 與測試型別
-- [x] 確認 lint 0 errors，執行回歸測試、typecheck、Web build、Android APK
-- [x] 更新 review、提交並推送；Android 實機測試仍延後
-
-### Review
-
-- 修完 20 個既有 lint errors，未停用規則；52 個既有 warnings 未納入本次範圍。
-- 新增頁面草稿取消／確認、手動刷新鎖定狀態、設定刪除與 props 同步、手機面板、搜尋索引及維護輪詢回歸。
-- `bun run test`：140 pass / 0 fail（27 files）；`bun run typecheck`：5/5；`bun run build`：成功，保留既有 `experimental.turbo` warning。
-- `apps/android` 執行 `.\gradlew.bat :app:assembleDebug`：BUILD SUCCESSFUL；實機測試依使用者指示延後。
-
----
-
-## 2026-09-09 處理該處理的 lint warnings
-
-- [x] 修 React Hook 依賴與 SPA 內部導頁警告
-- [x] 清除未使用變數警告，保留必要診斷 console
-- [x] 確認 lint、測試、typecheck、Web build、Android APK
-- [ ] 提交並推送；Android 實機測試仍延後
-
-### Review
-
-- lint：38 warnings / 0 errors；剩餘為 37 個診斷 `console` 與 1 個 module export 格式警告。
-- `bun run test`：140 pass / 0 fail；`bun run typecheck`：5/5；`bun run build`：成功。
-- `apps/android` 執行 `.\gradlew.bat :app:assembleDebug`：BUILD SUCCESSFUL；實機測試依使用者指示延後。
-
-# Web / Android 介面簡化與功能對齊（2026-10-23）
-
-- [x] 盤點兩端功能與真實畫面，建立功能對照表。
-- [x] 統一明暗配色、簡化常駐按鈕，保留清楚的功能入口與操作確認。
-- [x] 補齊 Android 缺少的 Web 功能（知識圖譜），驗證資料契約與錯誤狀態。
-- [x] Web 測試／型別／建置與 Android unit tests／debug APK 建置。
-- [x] Pixel 6a 實機驗收：release 簽章原地更新（登入保留），頁面選單、工具選單、知識圖譜（點節點開頁）、圖譜洞察皆正常；實測修正圖譜排版（孤立頁外圈、節點大小隨縮放）。
-- [x] 完成 review、提交並推送目前分支。
-
-### Review
-
-- 配色：Web `packages/ui/src/styles.css` 與 Android `Color.kt` 改為同一組 slate 底色＋青綠 accent；新增 `--surface` / `--surface-secondary` / `--on-accent`。
-- Web：頂列只留側欄、工作區、搜尋、對話、「更多」；來源、圖譜、維護、設定、說明、登出收進「更多」選單（桌面與手機同一份）。
-- Android：抽屜底部 7 顆圖示 → 「工具」選單＋「設定」；頁面頂列只留搜尋＋「⋮」（鎖定、編輯、重新整理）；側欄頁面列表不再有鎖頭按鈕，只顯示已鎖定標記；對話 FAB 加上文字。
-- 對齊：Android 新增知識圖譜（`GraphView.kt`，讀 `page_links`、alias 解析、kind 配色、孤兒空心、縮放拖曳、點節點開頁），圖譜洞察移到圖譜內，與 Web 相同。
-- 修 Codex 中斷遺留：`workspace-shell.probe.mjs` 的 lucide mock 缺新圖示導致 3 個測試失敗。
-- `bun run test` 149/149、`bun run typecheck --force` 5/5、`bun run build` 成功；`:app:testDebugUnitTest`、`:app:assembleDebug` 成功。
-
-# 匯入持久化（2026-11-07）
-
-- [x] 重現：POST 21.4 秒、錯誤只顯示 Ingest failed、有額度仍 0 頁
-- [x] 伺服器：先存檔再回應、背景 intake、pg_cron worker、失敗分類與自動重試、ChatGPT 工具 `strict:false`
-- [x] Web／Android：全帳號佇列、等待原因與時間、立即重試；Android WorkManager 上傳（0.8.1）
-- [x] production 實測背景流程（瀏覽器＋Pixel 6a），測試資料已清除
-- [ ] 額度重置後確認 job `a45d5c4f-…` 真的寫入頁面（使用者決定 ChatGPT 暫緩）
-- [x] 手機在請求送出前被殺的重送（0.8.4 實測）
-- [x] Android 傳檔、大檔競態、等待中蓋掉失敗橫幅三個 bug
-- [x] 手機匯入真實 PDF 並寫出頁面（修掉 production 所有 PDF 都失敗的 bug）
-- [x] DOCX／PPTX／EPUB／圖片／掃描 PDF／網頁 PDF 的 production 實測
-- [x] 批次匯入開出多個近似工作區
-- [x] 離線時的重送（使用者切飛航模式實測：App 沒開也自動補送，只有 1 筆）
-- [x] 離線送出後看不出已排入的橫幅（0.8.6）
-- [ ] 手機接電腦一直響：已排除每小時固定斷線，根因未完全查明（見 `CONTEXT.md`）
-
-### Review
-
-- `bun test` 174 pass、`tsc` 無錯誤、`assembleRelease`／`assembleDebug` 成功；release APK 原地安裝，登入保留。
-- 細節與未驗證項目見 `CONTEXT.md`。
-
-# 手機抽屜、選單與自動同步（2026-11-07）
-
-- [x] 頂列移除同步，「⋮」只剩編輯 → 改成鉛筆
-- [x] 自動同步：前景每 30 秒、回前景、對話結束；不顯示轉圈與錯誤
-- [x] 抽屜按鈕與功能對齊網頁版（更多選單、工作區切換、可收合知識頁），匯入佇列移到「＋」
-- [x] 抽屜可左右滑開、不與上下捲動衝突（自寫 `SwipeDrawer`）
-- [x] 返回鍵／點遮罩／右邊緣返回手勢的實機測試（2026-11-08 補測，15/15）
-
-### Review
-
-- `assembleDebug`／`assembleRelease`／`testDebugUnitTest` 成功；Pixel 6a 滑動與同步實測見 `CONTEXT.md`。
+## 驗證指令
+```bash
+bun run typecheck && bun run test && bun run build
+cd apps/android && ./gradlew.bat :app:assembleDebug :app:testDebugUnitTest
+```

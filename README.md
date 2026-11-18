@@ -155,7 +155,7 @@ bun run build        # 正式建置
 | 文件 | 內容 |
 |---|---|
 | [CLAUDE.md](CLAUDE.md)／[AGENTS.md](AGENTS.md) | 開發規範、架構決策與「不要回退」的實測紀錄 |
-| [CONTEXT.md](CONTEXT.md) | 最近做了什麼、還缺什麼 |
+| [tasks/todo.md](tasks/todo.md) | 交接現況、待辦與已知問題 |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | 開發環境與 PR 規範 |
 
 ## 授權
