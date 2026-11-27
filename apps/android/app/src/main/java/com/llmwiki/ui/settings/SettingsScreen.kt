@@ -158,21 +158,15 @@ fun SettingsScreen(
                             }
                         }
 
-                        ChatGPTLoginCard(
-                            userCode = uiState.chatgptUserCode,
-                            url = uiState.chatgptUrl,
-                            busy = uiState.chatgptBusy,
-                            connected = uiState.chatgptConnected,
-                            email = uiState.chatgptEmail,
-                            plan = uiState.chatgptPlan,
-                            model = uiState.chatgptModel,
-                            models = uiState.chatgptModels,
-                            expired = uiState.chatgptExpired,
-                            modelSaving = uiState.chatgptModelSaving,
-                            onStart = { settingsViewModel.startChatGPTLogin { uriHandler.openUri(it) } },
-                            onCancel = settingsViewModel::cancelChatGPTLogin,
-                            onSelectModel = settingsViewModel::setChatGPTModel,
-                        )
+                        OAuthProvider.entries.forEach { provider ->
+                            OAuthLoginCard(
+                                provider = provider,
+                                state = uiState.oauth[provider] ?: OAuthLoginUi(),
+                                onStart = { settingsViewModel.startOAuthLogin(provider) { uriHandler.openUri(it) } },
+                                onCancel = { settingsViewModel.cancelOAuthLogin(provider) },
+                                onSelectModel = { settingsViewModel.setOAuthModel(provider, it) },
+                            )
+                        }
 
                         when {
                             uiState.loading -> Box(
@@ -416,21 +410,24 @@ private fun RuleEditorCard(
 }
 
 @Composable
-private fun ChatGPTLoginCard(
-    userCode: String?,
-    url: String?,
-    busy: Boolean,
-    connected: Boolean,
-    email: String?,
-    plan: String?,
-    model: String?,
-    models: List<String>,
-    expired: Boolean,
-    modelSaving: Boolean,
+private fun OAuthLoginCard(
+    provider: OAuthProvider,
+    state: OAuthLoginUi,
     onStart: () -> Unit,
     onCancel: () -> Unit,
     onSelectModel: (String) -> Unit,
 ) {
+    val userCode = state.userCode
+    val url = state.url
+    val busy = state.busy
+    val connected = state.connected
+    val email = state.email
+    val plan = state.plan
+    val model = state.model
+    val models = state.models
+    val expired = state.expired
+    val modelSaving = state.modelSaving
+    val grok = provider == OAuthProvider.GROK
     val uriHandler = LocalUriHandler.current
     var modelMenuOpen by remember { mutableStateOf(false) }
     Card(modifier = Modifier.fillMaxWidth()) {
@@ -439,7 +436,7 @@ private fun ChatGPTLoginCard(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             if (userCode != null && url != null) {
-                Text(stringResource(R.string.settings_chatgpt_enter_code), style = MaterialTheme.typography.bodyMedium)
+                Text(stringResource(if (grok) R.string.settings_grok_enter_code else R.string.settings_chatgpt_enter_code), style = MaterialTheme.typography.bodyMedium)
                 Text(
                     userCode,
                     style = MaterialTheme.typography.headlineSmall,
@@ -458,7 +455,7 @@ private fun ChatGPTLoginCard(
                 )
             } else if (connected) {
                 Text(
-                    stringResource(R.string.settings_chatgpt_signed_in_as, email ?: "ChatGPT") +
+                    stringResource(if (grok) R.string.settings_grok_signed_in_as else R.string.settings_chatgpt_signed_in_as, email ?: provider.brand) +
                         (plan?.let { " · ${it.uppercase()}" } ?: ""),
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.Medium,
@@ -493,12 +490,19 @@ private fun ChatGPTLoginCard(
                 }
             } else {
                 Text(
-                    stringResource(if (expired) R.string.settings_chatgpt_expired else R.string.settings_chatgpt_body),
+                    stringResource(
+                        when {
+                            expired && grok -> R.string.settings_grok_expired
+                            expired -> R.string.settings_chatgpt_expired
+                            grok -> R.string.settings_grok_body
+                            else -> R.string.settings_chatgpt_body
+                        },
+                    ),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Button(onClick = onStart, enabled = !busy) {
-                    Text(stringResource(R.string.settings_chatgpt_sign_in))
+                    Text(stringResource(if (grok) R.string.settings_grok_sign_in else R.string.settings_chatgpt_sign_in))
                 }
             }
         }

@@ -21,8 +21,10 @@ interface Status {
   error?: string;
 }
 
-async function post(body: unknown): Promise<{ ok: boolean; data: Record<string, unknown> }> {
-  const res = await fetch('/api/settings/chatgpt', {
+export type OAuthProvider = 'chatgpt' | 'grok';
+
+async function post(provider: OAuthProvider, body: unknown): Promise<{ ok: boolean; data: Record<string, unknown> }> {
+  const res = await fetch(`/api/settings/${provider}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -32,11 +34,14 @@ async function post(body: unknown): Promise<{ ok: boolean; data: Record<string, 
 }
 
 /**
- * "Sign in with ChatGPT". Signed out: device-code flow (show the code, poll until
- * approved). Signed in: the account, its plan and a model picker.
+ * "Sign in with ChatGPT / Grok". Signed out: device-code flow (show the code, poll until
+ * approved). Signed in: the account, its plan and a model picker. Both providers share
+ * the same API contract (/api/settings/{provider}) and message keys (`{provider}Body`…).
  */
-export function ChatGPTLogin() {
-  const t = useTranslations('settings');
+export function ChatGPTLogin({ provider = 'chatgpt' }: { provider?: OAuthProvider }) {
+  const tSettings = useTranslations('settings');
+  const t = useCallback((key: string) => tSettings(key.startsWith('chatgpt') ? `${provider}${key.slice(7)}` : key), [tSettings, provider]);
+  const brand = provider === 'grok' ? 'Grok' : 'ChatGPT';
   const router = useRouter();
   const [status, setStatus] = useState<Status | null>(null);
   const [pending, setPending] = useState<Pending | null>(null);
@@ -46,10 +51,10 @@ export function ChatGPTLogin() {
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const loadStatus = useCallback(async () => {
-    const res = await fetch('/api/settings/chatgpt').catch(() => null);
+    const res = await fetch(`/api/settings/${provider}`).catch(() => null);
     const data = (await res?.json().catch(() => null)) as Status | null;
     setStatus(data && typeof data.connected === 'boolean' ? data : { connected: false });
-  }, []);
+  }, [provider]);
 
   useEffect(() => {
     void loadStatus();
@@ -59,7 +64,7 @@ export function ChatGPTLogin() {
     if (!pending) return;
     let cancelled = false;
     const tick = async () => {
-      const { ok, data }: Awaited<ReturnType<typeof post>> = await post({ action: 'poll', handle: pending.handle }).catch(() => ({
+      const { ok, data }: Awaited<ReturnType<typeof post>> = await post(provider, { action: 'poll', handle: pending.handle }).catch(() => ({
         ok: false,
         data: { error: t('chatgptFailed') },
       }));
@@ -82,13 +87,13 @@ export function ChatGPTLogin() {
       cancelled = true;
       clearTimeout(timer.current);
     };
-  }, [pending, router, t, loadStatus]);
+  }, [pending, router, t, loadStatus, provider]);
 
   const start = async () => {
     setStarting(true);
     setError(null);
     try {
-      const { ok, data } = await post({ action: 'start' });
+      const { ok, data } = await post(provider, { action: 'start' });
       if (!ok) {
         setError(typeof data.error === 'string' ? data.error : t('chatgptFailed'));
         return;
@@ -148,7 +153,7 @@ export function ChatGPTLogin() {
           <p className="flex flex-wrap items-center gap-2 text-sm" style={{ color: 'var(--fg)' }}>
             <span className="inline-block size-2 rounded-full" style={{ background: 'var(--color-accent)' }} aria-hidden />
             {t('chatgptSignedInAs')}
-            <span className="font-medium">{status.email ?? 'ChatGPT'}</span>
+            <span className="font-medium">{status.email ?? brand}</span>
             {status.plan && (
               <span className="rounded px-1.5 py-0.5 text-xs uppercase" style={{ background: 'var(--bg-2)', color: 'var(--fg-muted)' }}>
                 {status.plan}

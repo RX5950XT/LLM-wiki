@@ -59,7 +59,8 @@ apps/web/
 │       ├── sources/[id]/reingest/ 來源重新整合
 │       ├── search/                全文搜尋（RPC search_pages + ilike fallback）
 │       ├── graph/insights/        圖譜洞察
-│       └── settings/              profiles（CRUD）、chatgpt（device code 登入）
+│       ├── mcp/                   MCP 伺服器（唯讀工具，Bearer 權杖）
+│       └── settings/              profiles（CRUD）、chatgpt／grok（device code 登入）、mcp-tokens
 ├── components/
 │   ├── wiki/
 │   │   ├── conversation-panel.tsx 對話：citations、確認卡片、@ 工作區、「＋」導入選單、模型晶片
@@ -76,6 +77,7 @@ apps/web/
 │   ├── ai/
 │   │   ├── client.ts              LLM client（首筆資料／中途沉默逾時、OpenRouter 預設推理強度）
 │   │   ├── chatgpt.ts             ChatGPT profile（Codex Responses API）
+│   │   ├── grok.ts                Grok profile（cli-chat-proxy chat completions）
 │   │   ├── tools.ts               跨工作區 AI 工具與硬性 guard
 │   │   ├── ingest-intake.ts       匯入第一段：讀來源、路由、去重、寫 Drive
 │   │   ├── ingest-plan.ts         計畫與複查的 JSON 產生
@@ -95,6 +97,7 @@ apps/web/
 │   ├── google/                    access token 快取、OAuth token、重授權
 │   ├── ingest/document-parser.ts  PDF／DOCX／PPTX／EPUB／文字／圖片解析
 │   ├── fetch/url-to-markdown.ts   抓網頁（SSRF 防護）
+│   ├── mcp/                       MCP 協定、唯讀工具、權杖
 │   ├── wiki/slug.ts、resolve.ts   wikilink 解析與 alias fallback
 │   ├── graph/insights.ts          圖譜洞察計算
 │   ├── workspaces/                manage.ts（建立／改名／刪除共用）、queries.ts（排序與 fallback）
@@ -613,6 +616,23 @@ production 預設 profile 已從 `google/gemini-3.8-flash` 換成 `anthropic/cla
 - `createLLMClient` 遇到 ChatGPT profile 改走 `lib/ai/chatgpt.ts`：`@ai-sdk/openai` Responses API ＋ 自訂 fetch。Codex 後端只收**無狀態串流**請求，所以 fetch 會把 system/developer 訊息搬到 `instructions`、強制 `store:false` / `stream:true`、拿掉 `max_output_tokens`；非串流呼叫（plan/review/路由的 `generateText`）由 `response.completed` 事件組回 JSON。middleware 設 `providerOptions.openai.store=false`，否則多步工具迴圈會送後端沒存過的 `item_reference`（**勿移除**）。
 - access token 到期前 5 分鐘自動 refresh，refresh 前先重讀 DB（別的 instance 可能已輪替 refresh token），新 token 用 admin client 寫回。refresh 失敗＝請使用者重新登入。
 - 模型：登入時讀 `/models` 取第一個可見模型，讀不到用 `gpt-6-luna`；可在設定檔編輯改名稱/模型（ChatGPT profile 不顯示 base URL / 金鑰欄位）。
+
+## Grok 登入（用 SuperGrok／X Premium 方案額度，2026-11-27）
+
+- 與 ChatGPT 登入同一套契約：Web `ChatGPTLogin provider="grok"`（`chatgpt-login.tsx` 依 provider 換 API 路徑與 `grok*` 文案）、Android `OAuthLoginCard`（`OAuthProvider.GROK`）→ `POST /api/settings/grok`（`start` / `poll`）。
+- OAuth 用 Grok CLI 的 client（`b1a00492-…`，issuer `https://auth.x.ai`，標準 OIDC＋RFC 8628 device code；`authorization_pending`/`slow_down` 代表還在等）。scope：`openid profile email offline_access grok-cli:access api:access`。handle 內只放加密的 device_code，30 分鐘失效。
+- profile 判斷依據：`base_url = https://cli-chat-proxy.grok.com/v1`（`isGrokProfile`）。`api_key_encrypted` 存加密的 `{access_token, refresh_token, expires_at, email}`；到期前 5 分鐘 refresh（先重讀 DB，同 ChatGPT）。
+- 推論走 **cli-chat-proxy 的 OpenAI chat completions**（工具呼叫與串流已用真 token 實測），不是 `api.x.ai`（那會扣 API 額度）。**proxy 沒帶 `x-grok-client-version` 會回 426 要求升級**：`GROK_CLIENT_VERSION`（`lib/ai/grok.ts`）若被嫌太舊就調高。
+- 模型清單來自 proxy 的 `/models`（目前 `grok-4.7`、`grok-4.7-build-fast`、`grok-4.6`、`grok-4.5`）。
+- `GrokAuthError` 與 `ChatGPTAuthError` 一樣在 `ingest-retry.ts` 判為 permanent 並原話顯示。
+
+## MCP 伺服器（讓其他代理讀取 wiki，2026-11-27）
+
+- 端點 `POST /api/mcp`（Streamable HTTP、**無狀態、只回 JSON**，GET/DELETE 405）。協定自己實作在 `lib/mcp/protocol.ts`（initialize／ping／tools/list／tools/call，支援 2024-11-05～2025-11-25），不引入 SDK（它會帶進 express/hono）。
+- 工具全部**唯讀**（`lib/mcp/wiki-tools.ts`）：`list_workspaces`、`list_pages`、`search_pages`（省略 workspace 時搜全部）、`read_page`（接受 slug、`[[連結]]`、標題，alias 唯一匹配）。只看 `zone='wiki'`。
+- 驗證：`Authorization: Bearer llmw_…`。權杖在 Web 設定頁「MCP 連線」建立（`/api/settings/mcp-tokens`，GET/POST/DELETE），**只顯示一次**，DB 只存 SHA-256（`mcp_tokens`，migration `20261127090000`，已套用 production）。表只授權 service_role（同 0012 的 google_oauth_tokens），所以 route 用 admin client——**每個工具都必須先過 `ownedWorkspace`/`ownedWorkspaces` 的 owner 檢查，這是唯一一道牆**。
+- 設定頁提供 Claude Code／Codex／Grok CLI／`.mcp.json` 的現成設定（`mcpSnippet`）。網址取 `NEXT_PUBLIC_SITE_URL`。
+- **Web-only**：權杖是給電腦上的代理用的，Android 不做管理介面。
 
 ## 開一頁的成本（2026-09-03 實測與修法）
 

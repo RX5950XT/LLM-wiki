@@ -1,5 +1,5 @@
 # LLM-wiki todo
-最後更新：2026-11-19
+最後更新：2026-11-27
 
 ## 現況（交接）
 - Web（Next.js on Vercel）＋ Android 的對話驅動知識庫；功能、架構、建置見 `README.md`，規範、協定與「勿回退」紀錄見 `CLAUDE.md`／`AGENTS.md`。
@@ -8,6 +8,7 @@
 - 匯入持久化（Phase 18）：POST 只存檔回 202，pg_cron `ingest-worker` 每分鐘喚醒 worker，失敗分類＋自動重試；Android 用 WorkManager 上傳。Vault 的 `ingest_worker_url` 是手動寫入，不在 migration 內。
 - 預設模型為 OpenRouter `google/gemini-3.8-flash`（走 Google Vertex BYOK，實付 $0；OpenRouter「僅限 BYOK」沒開，Vertex 失敗時理論上會改扣 OpenRouter 餘額）。
 - Android 抽屜：工作區名稱下一排「來源／佇列／圖譜／整理」、最底一排「設定／說明／登出」，共用 `DrawerShortcut`；網頁同樣功能放在「更多」選單（刻意不同的只有版面）。
+- Grok 登入（2026-11-27）：與 ChatGPT 同契約，`/api/settings/grok`，推論走 `cli-chat-proxy.grok.com` chat completions（真 token 實測工具呼叫可用）。MCP 伺服器 `/api/mcp`（唯讀、Bearer 權杖、`mcp_tokens` 已套用 production），權杖管理 Web-only。細節見 CLAUDE.md。
 - 同步：沒有手動同步，`syncIfChanged` 在前景每 30 秒、回前景、對話結束時查 revision；開頁用 ETag 條件請求。
 
 ## 關鍵決策
@@ -29,6 +30,7 @@
 - 查 DB 一定要按 `owner_id` 過濾（另外兩個空的「My Wiki」屬於別的帳號，不是 bug）。
 
 ## 待辦
+- [ ] Grok 登入整條 device code 流程（從設定頁按鈕到建立 profile、refresh token 輪替）尚未用真帳號在 production 走過；只驗過 x.ai 端點格式與既有 CLI token 的推論。
 - [ ] （暫緩）ChatGPT 額度重置後確認 `strict:false` 真的解決 0 頁：job `a45d5c4f-b5f5-4ec0-86bc-52066137cf7a` 看 `touched_pages`，仍 0 頁就讀 `checkpoint.diagnostics`。
 - [ ] 手機接電腦一直響（Windows 裝置連線音，手機確實反覆斷線）：已排除「每小時固定斷線」；靜置時不斷線，多數疑似手拿時接頭晃動，「充飽才斷」只有一次反例未證實。`+cellular_high_tx_power` 與斷線重合不是證據，別再走這條。
 - [ ] Drive 留有兩個測試殘檔待刪：`187pJPuE1lxXzPMsQoZH_ynuBIucQJGjI`（沒被任何資料列引用）、`1c9vSDFgDVc5vzR3QY6ZpI9_26GD7OAgB`（離線重送測試留下的 AI/sources 來源檔）。

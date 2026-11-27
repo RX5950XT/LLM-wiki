@@ -3,6 +3,7 @@ import type { LanguageModel } from 'ai';
 import { decryptApiKey } from '@/lib/crypto/api-key';
 import type { LLMProfile } from '@llm-wiki/shared-types';
 import { createChatGPTModel, isChatGPTProfile } from './chatgpt';
+import { createGrokModel, isGrokProfile } from './grok';
 
 /**
  * No single provider request may outlive this. Without it a hung upstream call
@@ -173,6 +174,9 @@ function isOpenRouter(baseUrl: string): boolean {
 export function createLLMClient(profile: LLMProfile, options: LLMClientOptions = {}): LanguageModel {
   if (isChatGPTProfile(profile)) {
     return createChatGPTModel(profile, (input, init) => fetchWithLLMTimeouts(input, init, options.signal));
+  }
+  if (isGrokProfile(profile)) {
+    return createGrokModel(profile, (input, init) => fetchWithLLMTimeouts(input, init, options.signal));
   }
   const apiKey = decryptApiKey(profile.api_key_encrypted);
 

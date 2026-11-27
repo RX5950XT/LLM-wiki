@@ -50,7 +50,8 @@ apps/web/
 │       ├── sources/[id]/reingest/ 來源重新整合
 │       ├── search/                全文搜尋（RPC search_pages + ilike fallback）
 │       ├── graph/insights/        圖譜洞察
-│       └── settings/              profiles（CRUD）、chatgpt（device code 登入）
+│       ├── mcp/                   MCP 伺服器（唯讀工具，Bearer 權杖）
+│       └── settings/              profiles（CRUD）、chatgpt／grok（device code 登入）、mcp-tokens
 ├── components/
 │   ├── wiki/
 │   │   ├── conversation-panel.tsx 對話：citations、確認卡片、@ 工作區、「＋」導入選單、模型晶片
@@ -67,6 +68,7 @@ apps/web/
 │   ├── ai/
 │   │   ├── client.ts              LLM client（首筆資料／中途沉默逾時、OpenRouter 預設推理強度）
 │   │   ├── chatgpt.ts             ChatGPT profile（Codex Responses API）
+│   │   ├── grok.ts                Grok profile（cli-chat-proxy chat completions）
 │   │   ├── tools.ts               跨工作區 AI 工具與硬性 guard
 │   │   ├── ingest-intake.ts       匯入第一段：讀來源、路由、去重、寫 Drive
 │   │   ├── ingest-plan.ts         計畫與複查的 JSON 產生
@@ -302,6 +304,10 @@ Query API 文字串流結尾依序附加 `\x00CITATIONS\x00[...]`、`\x00ACTIONS
 ### Google OAuth 發布狀態
 - GCP 專案 `my-project-1750440589634` 的 OAuth 同意畫面必須維持**正式版**；設為「測試中」時 Google 讓 refresh token 7 天失效，使用者每週被迫重連 Google Drive（`DRIVE_RECONNECT_REQUIRED`），非程式問題
 - 發布必填：應用程式名稱、支援 email、首頁 `https://llm-wiki-seven.vercel.app`、隱私權政策 `https://llm-wiki-seven.vercel.app/privacy`（頁面在 `apps/web/app/privacy/page.tsx`）
+
+### Grok 登入與 MCP 伺服器（2026-11-27）
+- Grok 登入與 ChatGPT 同契約：`/api/settings/grok`（auth.x.ai device code，Grok CLI 的 client），profile `base_url = https://cli-chat-proxy.grok.com/v1`，推論走 proxy 的 chat completions；缺 `x-grok-client-version` 會 426（`GROK_CLIENT_VERSION`）。Web `ChatGPTLogin provider="grok"`、Android `OAuthLoginCard`
+- `POST /api/mcp`：無狀態 Streamable HTTP、自寫協定（`lib/mcp/protocol.ts`），唯讀工具 list_workspaces／list_pages／search_pages／read_page。`Authorization: Bearer llmw_…`，權杖在 Web 設定頁建立、只顯示一次，`mcp_tokens` 只存 SHA-256、只授權 service_role；每個工具先過 owner 檢查（唯一的牆）。Web-only
 
 ### 開一頁的成本
 - `GET /api/pages/...` 改版前 1.6–3.4s；修法：access token 快取（`drive-auth.ts`）、`regions: ['sin1']`（Supabase 在 ap-southeast-1）、ETag `"<slug>:<version>"` 讓最新版 client 拿 304 而完全不碰 Drive、PageViewer 快取最近 40 頁、`Server-Timing` 標出 auth/page/token/drive 各段

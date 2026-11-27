@@ -183,6 +183,12 @@
     <string name="settings_chatgpt_sign_in_again">Switch account or sign in again</string>
     <string name="settings_chatgpt_expired">Your ChatGPT sign-in has expired. Sign in again.</string>
     <string name="settings_chatgpt_model_failed">Could not change the model</string>
+    <string name="settings_grok_body">Sign in with your Grok account (SuperGrok / X Premium) so chat uses your Grok plan instead of an API key.</string>
+    <string name="settings_grok_sign_in">Sign in with Grok</string>
+    <string name="settings_grok_enter_code">Sign in to Grok in the browser and confirm this code:</string>
+    <string name="settings_grok_failed">Grok sign-in failed</string>
+    <string name="settings_grok_signed_in_as">Signed in to Grok as %1$s</string>
+    <string name="settings_grok_expired">Your Grok sign-in has expired. Sign in again.</string>
     <string name="settings_no_profiles">No profiles yet. Add one to use a custom LLM.</string>
     <string name="settings_theme">Appearance</string>
     <string name="settings_theme_light">Light</string>

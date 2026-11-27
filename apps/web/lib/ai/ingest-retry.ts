@@ -62,7 +62,7 @@ function usageLimitResume(error: APICallError, now: number): { resumeAt: number 
 }
 
 function isChatGPTSignInError(error: unknown): boolean {
-  return error instanceof Error && error.name === 'ChatGPTAuthError';
+  return error instanceof Error && (error.name === 'ChatGPTAuthError' || error.name === 'GrokAuthError');
 }
 
 /** Public job-row text: the provider's message only, never its URL/body/keys. */

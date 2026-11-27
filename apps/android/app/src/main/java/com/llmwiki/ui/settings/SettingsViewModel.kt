@@ -57,19 +57,29 @@ data class SettingsUiState(
     /** Whether AI destructive actions need an in-chat confirmation (auth user_metadata) */
     val aiConfirmDestructive: Boolean = true,
     val aiPermissionSaving: Boolean = false,
-    /** Device-code ChatGPT sign-in in progress: the code the user types at [chatgptUrl]. */
-    val chatgptUserCode: String? = null,
-    val chatgptUrl: String? = null,
-    val chatgptBusy: Boolean = false,
-    val chatgptConnected: Boolean = false,
-    /** Signed-in ChatGPT profile (GET /api/settings/chatgpt) */
-    val chatgptProfileId: String? = null,
-    val chatgptEmail: String? = null,
-    val chatgptPlan: String? = null,
-    val chatgptModel: String? = null,
-    val chatgptModels: List<String> = emptyList(),
-    val chatgptExpired: Boolean = false,
-    val chatgptModelSaving: Boolean = false,
+    /** Device-code sign-in state per provider (ChatGPT, Grok): same API contract as Web. */
+    val oauth: Map<OAuthProvider, OAuthLoginUi> = emptyMap(),
+)
+
+/** Sign-in providers with a device-code route at `/api/settings/{path}` (Web: chatgpt-login.tsx). */
+enum class OAuthProvider(val path: String, val brand: String, val failedRes: Int) {
+    CHATGPT("chatgpt", "ChatGPT", R.string.settings_chatgpt_failed),
+    GROK("grok", "Grok", R.string.settings_grok_failed),
+}
+
+data class OAuthLoginUi(
+    /** Device-code sign-in in progress: the code the user types at [url]. */
+    val userCode: String? = null,
+    val url: String? = null,
+    val busy: Boolean = false,
+    val connected: Boolean = false,
+    val profileId: String? = null,
+    val email: String? = null,
+    val plan: String? = null,
+    val model: String? = null,
+    val models: List<String> = emptyList(),
+    val expired: Boolean = false,
+    val modelSaving: Boolean = false,
 )
 
 private val settingsJson = Json { ignoreUnknownKeys = true }
@@ -107,7 +117,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     init {
         loadProfiles()
-        loadChatGPTStatus()
+        OAuthProvider.entries.forEach(::loadOAuthStatus)
     }
 
     fun loadProfiles() {
@@ -425,51 +435,56 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    private var chatgptJob: Job? = null
+    private val oauthJobs = mutableMapOf<OAuthProvider, Job>()
+
+    private fun updateOAuth(provider: OAuthProvider, change: (OAuthLoginUi) -> OAuthLoginUi) {
+        settingsState.update { it.copy(oauth = it.oauth + (provider to change(it.oauth[provider] ?: OAuthLoginUi()))) }
+    }
 
     /** Same device-code flow as Web: `start` → show code → `poll` until the profile exists. */
-    fun startChatGPTLogin(onOpenUrl: (String) -> Unit) {
-        chatgptJob?.cancel()
-        chatgptJob = viewModelScope.launch {
-            settingsState.update { it.copy(chatgptBusy = true, chatgptConnected = false, error = null) }
+    fun startOAuthLogin(provider: OAuthProvider, onOpenUrl: (String) -> Unit) {
+        oauthJobs[provider]?.cancel()
+        oauthJobs[provider] = viewModelScope.launch {
+            updateOAuth(provider) { it.copy(busy = true, connected = false) }
+            settingsState.update { it.copy(error = null) }
             try {
-                val start = postChatGPT(buildJsonObject { put("action", "start") }.toString())
+                val start = postOAuth(provider, buildJsonObject { put("action", "start") }.toString())
                     ?: return@launch
                 val handle = start["handle"]?.jsonPrimitive?.contentOrNull
                 val code = start["user_code"]?.jsonPrimitive?.contentOrNull
                 val url = start["verification_url"]?.jsonPrimitive?.contentOrNull
                 if (handle == null || code == null || url == null) {
-                    settingsState.update { it.copy(error = chatgptFailed()) }
+                    settingsState.update { it.copy(error = oauthFailed(provider)) }
                     return@launch
                 }
                 val interval = (start["interval"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: 5L).coerceAtLeast(2L)
-                settingsState.update { it.copy(chatgptUserCode = code, chatgptUrl = url) }
+                updateOAuth(provider) { it.copy(userCode = code, url = url) }
                 onOpenUrl(url)
                 val pollBody = buildJsonObject { put("action", "poll"); put("handle", handle) }.toString()
                 while (true) {
                     delay(interval * 1000)
-                    val poll = postChatGPT(pollBody) ?: return@launch
+                    val poll = postOAuth(provider, pollBody) ?: return@launch
                     if (poll["status"]?.jsonPrimitive?.contentOrNull == "done") {
                         loadProfiles()
-                        loadChatGPTStatus()
+                        loadOAuthStatus(provider)
                         return@launch
                     }
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
-                settingsState.update { it.copy(error = e.toUserFacingMessage(chatgptFailed())) }
+                settingsState.update { it.copy(error = e.toUserFacingMessage(oauthFailed(provider))) }
             } finally {
-                settingsState.update { it.copy(chatgptBusy = false, chatgptUserCode = null, chatgptUrl = null) }
+                updateOAuth(provider) { it.copy(busy = false, userCode = null, url = null) }
             }
         }
     }
 
-    fun loadChatGPTStatus() {
+    fun loadOAuthStatus(provider: OAuthProvider) {
         viewModelScope.launch {
             val response = runCatching {
                 sendAuthorizedRequest { token ->
-                    AndroidHttpClient.instance.get(webApiUrl("/api/settings/chatgpt")) {
+                    AndroidHttpClient.instance.get(webApiUrl("/api/settings/${provider.path}")) {
                         header("Authorization", "Bearer $token")
                     }
                 }
@@ -481,25 +496,27 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             val models = (json["models"] as? kotlinx.serialization.json.JsonArray)
                 ?.mapNotNull { it.jsonPrimitive.contentOrNull }
                 .orEmpty()
-            settingsState.update {
+            updateOAuth(provider) {
                 it.copy(
-                    chatgptConnected = json["connected"]?.jsonPrimitive?.booleanOrNull == true,
-                    chatgptProfileId = str("profile_id"),
-                    chatgptEmail = str("email"),
-                    chatgptPlan = str("plan"),
-                    chatgptModel = str("model"),
-                    chatgptModels = models,
-                    chatgptExpired = str("error") != null,
+                    connected = json["connected"]?.jsonPrimitive?.booleanOrNull == true,
+                    profileId = str("profile_id"),
+                    email = str("email"),
+                    plan = str("plan"),
+                    model = str("model"),
+                    models = models,
+                    expired = str("error") != null,
                 )
             }
         }
     }
 
-    fun setChatGPTModel(model: String) {
-        val profileId = settingsState.value.chatgptProfileId ?: return
-        if (model == settingsState.value.chatgptModel) return
+    fun setOAuthModel(provider: OAuthProvider, model: String) {
+        val current = settingsState.value.oauth[provider] ?: return
+        val profileId = current.profileId ?: return
+        if (model == current.model) return
         viewModelScope.launch {
-            settingsState.update { it.copy(chatgptModelSaving = true, error = null) }
+            updateOAuth(provider) { it.copy(modelSaving = true) }
+            settingsState.update { it.copy(error = null) }
             val ok = runCatching {
                 val body = buildJsonObject { put("id", profileId); put("model", model) }.toString()
                 sendAuthorizedRequest { token ->
@@ -510,25 +527,25 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                     }
                 }?.let { it.status.value in 200..299 && isJsonObject(it.bodyAsText()) } == true
             }.getOrDefault(false)
-            settingsState.update {
-                it.copy(
-                    chatgptModelSaving = false,
-                    chatgptModel = if (ok) model else it.chatgptModel,
-                    error = if (ok) it.error else getApplication<Application>().getString(R.string.settings_chatgpt_model_failed),
-                )
+            updateOAuth(provider) { it.copy(modelSaving = false, model = if (ok) model else it.model) }
+            if (ok) {
+                loadProfiles()
+            } else {
+                settingsState.update {
+                    it.copy(error = getApplication<Application>().getString(R.string.settings_chatgpt_model_failed))
+                }
             }
-            if (ok) loadProfiles()
         }
     }
 
-    fun cancelChatGPTLogin() {
-        chatgptJob?.cancel()
+    fun cancelOAuthLogin(provider: OAuthProvider) {
+        oauthJobs[provider]?.cancel()
     }
 
     /** JSON object on 2xx; otherwise records the error and returns null. */
-    private suspend fun postChatGPT(bodyJson: String): kotlinx.serialization.json.JsonObject? {
+    private suspend fun postOAuth(provider: OAuthProvider, bodyJson: String): kotlinx.serialization.json.JsonObject? {
         val response = sendAuthorizedRequest { token ->
-            AndroidHttpClient.instance.post(webApiUrl("/api/settings/chatgpt")) {
+            AndroidHttpClient.instance.post(webApiUrl("/api/settings/${provider.path}")) {
                 header("Authorization", "Bearer $token")
                 contentType(ContentType.Application.Json)
                 setBody(bodyJson)
@@ -540,14 +557,14 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         }
         val text = response.bodyAsText()
         if (response.status.value !in 200..299 || !isJsonObject(text)) {
-            settingsState.update { it.copy(error = parseApiError(text, chatgptFailed())) }
+            settingsState.update { it.copy(error = parseApiError(text, oauthFailed(provider))) }
             return null
         }
         return settingsJson.parseToJsonElement(text).jsonObject
     }
 
-    private fun chatgptFailed(): String =
-        getApplication<Application>().getString(R.string.settings_chatgpt_failed)
+    private fun oauthFailed(provider: OAuthProvider): String =
+        getApplication<Application>().getString(provider.failedRes)
 
     private fun parseApiError(raw: String, fallback: String): String {
         if (raw.isBlank()) return fallback

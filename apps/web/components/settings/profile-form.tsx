@@ -21,6 +21,9 @@ export interface EditableProfile {
   is_default: boolean;
 }
 
+/** Base URLs of sign-in profiles (lib/ai/chatgpt.ts, lib/ai/grok.ts). */
+const OAUTH_BASE_URLS = new Set(['https://chatgpt.com/backend-api/codex', 'https://cli-chat-proxy.grok.com/v1']);
+
 export function ProfileForm({
   profile,
   onDone,
@@ -32,8 +35,8 @@ export function ProfileForm({
   const tCommon = useTranslations('common');
   const router = useRouter();
   const isEdit = Boolean(profile);
-  // ChatGPT sign-in profiles hold OAuth tokens, not a key: only name/model are editable.
-  const isChatGPT = profile?.base_url.replace(/\/+$/, '') === 'https://chatgpt.com/backend-api/codex';
+  // ChatGPT / Grok sign-in profiles hold OAuth tokens, not a key: only name/model are editable.
+  const isChatGPT = OAUTH_BASE_URLS.has(profile?.base_url.replace(/\/+$/, '') ?? '');
   const [open, setOpen] = useState(isEdit);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);

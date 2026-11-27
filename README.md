@@ -24,7 +24,8 @@
 
 **資料歸你**
 - 頁面是純 Markdown，放在你 Google Drive 的 `Apps/LLM Wiki/`，用 Obsidian、VS Code 或任何編輯器都能打開。
-- LLM 自備金鑰：任何 OpenAI 相容端點（OpenRouter、OpenAI、Ollama…），或直接用 ChatGPT 帳號登入使用方案額度。
+- LLM 自備金鑰：任何 OpenAI 相容端點（OpenRouter、OpenAI、Ollama…），或直接用 ChatGPT／Grok 帳號登入使用方案額度。
+- MCP 伺服器：在設定頁建立權杖，Claude Code、Codex、Grok CLI 等代理就能唯讀搜尋、讀取你的知識庫（`/api/mcp`）。
 
 **Android**
 - 離線快取、從其他 App 分享網址進來匯入、在前景時自動同步。
@@ -45,7 +46,7 @@
 ```
  Web（Next.js）   Android（Compose）
         │               │
-        └───── Web API（Vercel，sin1）─────┬──── LLM 供應商（自備金鑰／ChatGPT）
+        └───── Web API（Vercel，sin1）─────┬──── LLM 供應商（自備金鑰／ChatGPT／Grok）
                                           ├──── Google Drive（頁面內容）
                                           └──── Supabase（帳號、metadata、Realtime、
                                                  pg_cron 每分鐘喚醒匯入 worker）
@@ -86,7 +87,7 @@ LLM-wiki/
 - Bun 1.x（或 Node.js 22）
 - Supabase 專案（免費方案即可）
 - Google Cloud 專案：建立 Web OAuth client，啟用 Drive API
-- 一把 LLM API 金鑰，或 ChatGPT 帳號
+- 一把 LLM API 金鑰，或 ChatGPT／Grok 帳號
 
 ### 1. 資料庫
 
@@ -138,7 +139,7 @@ Google OAuth 同意畫面要發布為「正式版」，否則 refresh token 7 �
 ## 使用方式
 
 1. 用 Google 帳號登入，App 會在 Drive 建立 `Apps/LLM Wiki/`。
-2. 到設定頁新增 LLM 設定檔，或用 ChatGPT 登入。
+2. 到設定頁新增 LLM 設定檔，或用 ChatGPT／Grok 登入。
 3. 在對話輸入框按「＋」→「導入內容」，貼上網址、文字或選檔案。
 4. 在對話中提問；回答會附上引用的頁面，可存成綜合頁。
 5. 網頁版的「更多」選單、Android 側邊欄上方的捷徑，可以打開來源清單、知識圖譜與整理知識庫；匯入佇列在「＋」裡。

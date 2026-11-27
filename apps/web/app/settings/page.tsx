@@ -7,6 +7,7 @@ import { createClient } from '@/lib/supabase/server';
 import { ProfileList } from '@/components/settings/profile-list';
 import { ProfileForm } from '@/components/settings/profile-form';
 import { ChatGPTLogin } from '@/components/settings/chatgpt-login';
+import { McpConnections } from '@/components/settings/mcp-connections';
 import { LocaleSwitcher } from '@/components/settings/locale-switcher';
 import { AiPermissions } from '@/components/settings/ai-permissions';
 import { RulesPanel } from '@/components/settings/rules-panel';
@@ -132,7 +133,15 @@ export default async function SettingsPage() {
           </h2>
           <ProfileList profiles={profiles ?? []} />
           <ChatGPTLogin />
+          <ChatGPTLogin provider="grok" />
           <ProfileForm />
+        </section>
+
+        <section className="space-y-4">
+          <h2 className="text-sm font-medium uppercase tracking-wider" style={{ color: 'var(--fg-muted)' }}>
+            {t('settings.mcp')}
+          </h2>
+          <McpConnections />
         </section>
 
         <section className="space-y-4">
