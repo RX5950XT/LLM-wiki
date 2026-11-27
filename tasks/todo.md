@@ -3,7 +3,7 @@
 
 ## 現況（交接）
 - Web（Next.js on Vercel）＋ Android 的對話驅動知識庫；功能、架構、建置見 `README.md`，規範、協定與「勿回退」紀錄見 `CLAUDE.md`／`AGENTS.md`。
-- 最新 Android：`0.8.8`（versionCode `20`，GitHub Release `v0.8.8`，tag 指向 `7e33b39`），簽章與 0.8.6 起相同可覆蓋安裝；README 下載連 `releases/latest`。
+- 最新 Android：`0.8.9`（versionCode `21`，GitHub Release `v0.8.9`，新增 Grok 登入），簽章與 0.8.6 起相同可覆蓋安裝；README 下載連 `releases/latest`。
 - 環境：Supabase production `mjuciqffwayydobpxzcz`（ap-southeast-1）；Vercel 跑 `sin1`、Fluid Compute、無 cron（`vercel.json` 與 `CRON_SECRET` 已於 Phase 16 移除）。
 - 匯入持久化（Phase 18）：POST 只存檔回 202，pg_cron `ingest-worker` 每分鐘喚醒 worker，失敗分類＋自動重試；Android 用 WorkManager 上傳。Vault 的 `ingest_worker_url` 是手動寫入，不在 migration 內。
 - 預設模型為 OpenRouter `google/gemini-3.8-flash`（走 Google Vertex BYOK，實付 $0；OpenRouter「僅限 BYOK」沒開，Vertex 失敗時理論上會改扣 OpenRouter 餘額）。
@@ -30,7 +30,7 @@
 - 查 DB 一定要按 `owner_id` 過濾（另外兩個空的「My Wiki」屬於別的帳號，不是 bug）。
 
 ## 待辦
-- [ ] Grok 登入整條 device code 流程（從設定頁按鈕到建立 profile、refresh token 輪替）尚未用真帳號在 production 走過；只驗過 x.ai 端點格式與既有 CLI token 的推論。
+- [ ] Grok token 自動續期（access token 6 小時）尚未實際發生過；2026-11-27 已在 production 用真帳號完成 device code 登入並建立 profile。若續期失敗，設定頁會顯示「Grok 登入已失效」。
 - [ ] （暫緩）ChatGPT 額度重置後確認 `strict:false` 真的解決 0 頁：job `a45d5c4f-b5f5-4ec0-86bc-52066137cf7a` 看 `touched_pages`，仍 0 頁就讀 `checkpoint.diagnostics`。
 - [ ] 手機接電腦一直響（Windows 裝置連線音，手機確實反覆斷線）：已排除「每小時固定斷線」；靜置時不斷線，多數疑似手拿時接頭晃動，「充飽才斷」只有一次反例未證實。`+cellular_high_tx_power` 與斷線重合不是證據，別再走這條。
 - [ ] Drive 留有兩個測試殘檔待刪：`187pJPuE1lxXzPMsQoZH_ynuBIucQJGjI`（沒被任何資料列引用）、`1c9vSDFgDVc5vzR3QY6ZpI9_26GD7OAgB`（離線重送測試留下的 AI/sources 來源檔）。
